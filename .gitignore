@@ -1,0 +1,20 @@
+node_modules
+dist
+dist-ssr
+*.local
+.vite
+
+# Editor
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+
+# Logs
+logs
+*.log
+npm-debug.log*
+
+# Local copyrighted reference (rulebook text); keep the README only
+reference/*
+!reference/README.md

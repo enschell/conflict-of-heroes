@@ -1,0 +1,491 @@
+/**
+ * Zustand store: engine GameState + pure-UI state (selection, hover, LOS, dice,
+ * confirms, turn banner, undo). The store NEVER mutates GameState — it only
+ * calls engine `reduce` (CLAUDE.md §3). Dice are previewed deterministically
+ * from the seeded RNG so the animation lands on the exact committed result.
+ */
+import { create } from 'zustand';
+import {
+  attackContext,
+  closeCombatContext,
+  initGame,
+  legalActionsForUnit,
+  reduce,
+  rollAttack,
+  rollCloseCombat,
+  rollRally,
+  serialize,
+} from '../engine';
+import type { Action, Facing, GameEvent, GameState, HexId, UnitId } from '../engine/types';
+import { FIREFIGHT_1 } from '../data/firefights/firefight1';
+import { playFire, playMove } from '../ui/sound';
+import {
+  clearAuto,
+  deleteSlot,
+  isGameState,
+  loadAuto,
+  loadSlot,
+  saveAuto,
+  saveSlot,
+} from './persistence';
+
+export interface PendingRoll {
+  action: Action;
+  kind: 'fire' | 'rally';
+  dice: [number, number];
+  success: boolean;
+  headline: string;
+  detail: string;
+  label: string;
+}
+
+export interface Hover {
+  id: HexId;
+  x: number;
+  y: number;
+}
+
+interface Picker {
+  hexId: HexId;
+  unitIds: UnitId[];
+  x: number;
+  y: number;
+}
+
+interface PendingConfirm {
+  message: string;
+  proceed: () => void;
+}
+
+interface ClickOpts {
+  ctrl: boolean;
+  x: number;
+  y: number;
+}
+
+interface Store {
+  game: GameState | null;
+  selectedUnitId: UnitId | null;
+  losMode: boolean;
+  losSource: HexId | null;
+  shiftHeld: boolean;
+  hover: Hover | null;
+  picker: Picker | null;
+  /** When a clicked hex affords several actions (move-in vs attack), pick one. */
+  chooser: { hexId: HexId; x: number; y: number } | null;
+  pendingRoll: PendingRoll | null;
+  pendingConfirm: PendingConfirm | null;
+  turnBanner: { round: number } | null;
+  history: GameState[];
+  /** Redo stack (states undone, newest first). */
+  future: GameState[];
+  lastEvents: GameEvent[];
+  muted: boolean;
+
+  newGame: () => void;
+  resume: () => void;
+  quitToMenu: () => void;
+
+  select: (unitId: UnitId | null) => void;
+  setHover: (h: Hover | null) => void;
+  setShift: (down: boolean) => void;
+  hexClick: (hexId: HexId, opts: ClickOpts) => void;
+
+  dispatch: (action: Action) => void;
+  move: (unitId: UnitId, toHexId: HexId) => void;
+  fire: (attackerId: UnitId, targetId: UnitId) => void;
+  closeCombat: (attackerId: UnitId, targetId: UnitId) => void;
+  rally: (unitId: UnitId) => void;
+  pivot: (unitId: UnitId, facing: Facing) => void;
+
+  commitRoll: () => void;
+  cancelRoll: () => void;
+  confirmProceed: () => void;
+  confirmCancel: () => void;
+
+  openPicker: (hexId: HexId, unitIds: UnitId[], x: number, y: number) => void;
+  closePicker: () => void;
+  closeChooser: () => void;
+  dismissTurnBanner: () => void;
+
+  toggleLosMode: () => void;
+  setLosSource: (hexId: HexId) => void;
+  undo: () => void;
+  redo: () => void;
+  saveToSlot: (name: string) => boolean;
+  loadFromSlot: (name: string) => void;
+  deleteSlotByName: (name: string) => void;
+  exportCurrent: () => string;
+  importFromText: (text: string) => boolean;
+  toggleMute: () => void;
+}
+
+const HISTORY_LIMIT = 100;
+
+export const useGame = create<Store>((set, get) => {
+  /** Is acting with this unit an opportunity action (fresh + not activated)? */
+  const isOpportunity = (unitId: UnitId): boolean => {
+    const g = get().game;
+    if (!g) return false;
+    const u = g.units[unitId];
+    if (!u || u.side !== g.currentSide) return false;
+    return u.status === 'fresh' && g.players[u.side].activatedUnitId !== unitId;
+  };
+
+  const oppMessage = (unitId: UnitId): string =>
+    `${unitId} is not activated. This is an OPPORTUNITY action — the unit will be ` +
+    `marked spent immediately afterward (no further actions this round). ` +
+    `Tip: Activate it first to spend all 7 AP. Continue?`;
+
+  const guard = (unitId: UnitId, proceed: () => void) => {
+    if (isOpportunity(unitId)) set({ pendingConfirm: { message: oppMessage(unitId), proceed } });
+    else proceed();
+  };
+
+  /** Common UI reset when a whole new GameState is loaded/imported. */
+  const resetForLoad = () => ({
+    selectedUnitId: null,
+    history: [] as GameState[],
+    future: [] as GameState[],
+    picker: null,
+    chooser: null,
+    pendingRoll: null,
+    pendingConfirm: null,
+    turnBanner: null,
+    losMode: false,
+    losSource: null,
+    hover: null,
+  });
+
+  const requestFireRoll = (attackerId: UnitId, targetId: UnitId) => {
+    const g = get().game;
+    if (!g) return;
+    const attacker = g.units[attackerId];
+    const target = g.units[targetId];
+    if (!attacker || !target) return;
+    const ctx = attackContext(g, attacker, target);
+    if (!ctx.legal) {
+      set({ lastEvents: [{ type: 'illegal', round: g.round, text: ctx.reason ?? 'illegal' }] });
+      return;
+    }
+    const roll = rollAttack(g, attacker, target);
+    set({
+      pendingRoll: {
+        action: { type: 'FIRE', attackerId, targetId },
+        kind: 'fire',
+        dice: roll.dice,
+        success: roll.hit,
+        headline: roll.critical ? 'CRITICAL HIT' : roll.hit ? 'HIT' : 'MISS',
+        detail: `rolled ${roll.dice[0]}+${roll.dice[1]}=${roll.dice[0] + roll.dice[1]} · AV ${roll.av} vs DV ${roll.dv}${ctx.isFlank ? ' (flank)' : ''}`,
+        label: `${attackerId} → ${targetId}`,
+      },
+    });
+  };
+
+  const requestCcRoll = (attackerId: UnitId, targetId: UnitId) => {
+    const g = get().game;
+    if (!g) return;
+    const attacker = g.units[attackerId];
+    const target = g.units[targetId];
+    if (!attacker || !target) return;
+    const ctx = closeCombatContext(g, attacker, target);
+    if (!ctx.legal) {
+      set({ lastEvents: [{ type: 'illegal', round: g.round, text: ctx.reason ?? 'illegal' }] });
+      return;
+    }
+    const roll = rollCloseCombat(g, attacker, target);
+    set({
+      pendingRoll: {
+        action: { type: 'CLOSE_COMBAT', attackerId, targetId },
+        kind: 'fire',
+        dice: roll.dice,
+        success: roll.hit,
+        headline: roll.critical ? 'CRITICAL HIT' : roll.hit ? 'HIT' : 'MISS',
+        detail: `close combat · rolled ${roll.dice[0]}+${roll.dice[1]}=${roll.dice[0] + roll.dice[1]} · AV ${roll.av} vs flank DV ${roll.dv}`,
+        label: `${attackerId} ⚔ ${targetId}`,
+      },
+    });
+  };
+
+  const requestRallyRoll = (unitId: UnitId) => {
+    const g = get().game;
+    if (!g) return;
+    const unit = g.units[unitId];
+    if (!unit) return;
+    const rr = rollRally(g, unit);
+    if (!rr.legal) {
+      set({ lastEvents: [{ type: 'illegal', round: g.round, text: rr.reason ?? 'illegal' }] });
+      return;
+    }
+    set({
+      pendingRoll: {
+        action: { type: 'RALLY', unitId },
+        kind: 'rally',
+        dice: rr.dice,
+        success: rr.success,
+        headline: rr.success ? 'RALLIED' : 'NO RALLY',
+        detail: `rolled ${rr.dice[0]}+${rr.dice[1]}=${rr.roll} · total ${rr.total} vs ${rr.target} needed`,
+        label: `${unitId} rallies`,
+      },
+    });
+  };
+
+  return {
+    game: null,
+    selectedUnitId: null,
+    losMode: false,
+    losSource: null,
+    shiftHeld: false,
+    hover: null,
+    picker: null,
+    chooser: null,
+    pendingRoll: null,
+    pendingConfirm: null,
+    turnBanner: null,
+    history: [],
+    future: [],
+    lastEvents: [],
+    muted: false,
+
+    newGame: () => {
+      const game = initGame(FIREFIGHT_1);
+      saveAuto(game);
+      set({
+        game,
+        selectedUnitId: null,
+        losMode: false,
+        losSource: null,
+        hover: null,
+        picker: null,
+        chooser: null,
+        pendingRoll: null,
+        pendingConfirm: null,
+        turnBanner: null,
+        history: [],
+        future: [],
+        lastEvents: [],
+      });
+    },
+
+    resume: () => {
+      const game = loadAuto();
+      if (game) set({ game, ...resetForLoad(), lastEvents: [] });
+    },
+
+    quitToMenu: () => {
+      clearAuto();
+      set({ game: null, ...resetForLoad(), losMode: false });
+    },
+
+    select: (unitId) => set({ selectedUnitId: unitId }),
+    setHover: (h) => set({ hover: h }),
+    setShift: (down) => set({ shiftHeld: down }),
+
+    hexClick: (hexId, opts) => {
+      const { game, losMode, selectedUnitId, pendingRoll, pendingConfirm, turnBanner } = get();
+      if (!game || pendingRoll || pendingConfirm || turnBanner) return;
+
+      // A board click anywhere dismisses an open action chooser.
+      if (get().chooser) {
+        set({ chooser: null });
+        return;
+      }
+
+      if (losMode) {
+        set({ losSource: hexId });
+        return;
+      }
+
+      const here = Object.values(game.units).filter((u) => u.hexId === hexId);
+
+      // Ctrl+click on a stacked hex → manual picker.
+      if (opts.ctrl && here.length > 1) {
+        get().openPicker(hexId, here.map((u) => u.id), opts.x, opts.y);
+        return;
+      }
+
+      // If a unit is selected, resolve what the click on this hex means.
+      const sel = selectedUnitId ? game.units[selectedUnitId] : null;
+      if (sel && sel.side === game.currentSide) {
+        const acts = legalActionsForUnit(game, sel.id);
+        const enemy = here.find((u) => u.side !== game.currentSide);
+        const canMoveHere = acts.some((a) => a.type === 'MOVE' && a.toHexId === hexId);
+        const canFire = !!enemy && acts.some((a) => a.type === 'FIRE' && a.targetId === enemy.id);
+        const canCC = !!enemy && acts.some((a) => a.type === 'CLOSE_COMBAT' && a.targetId === enemy.id);
+        const optionCount = Number(canMoveHere) + Number(canFire) + Number(canCC);
+
+        // Several things are possible here (e.g. move INTO an enemy hex vs attack
+        // it) → let the player choose (§5.4). Otherwise do the single option.
+        if (optionCount > 1) {
+          set({ chooser: { hexId, x: opts.x, y: opts.y } });
+          return;
+        }
+        if (canMoveHere) {
+          get().move(sel.id, hexId);
+          return;
+        }
+        if (canFire && enemy) {
+          get().fire(sel.id, enemy.id);
+          return;
+        }
+        if (canCC && enemy) {
+          get().closeCombat(sel.id, enemy.id);
+          return;
+        }
+        // Click the already-selected unit → deselect.
+        if (here.some((u) => u.id === sel.id)) {
+          set({ selectedUnitId: null });
+          return;
+        }
+      }
+
+      // Selection: prefer this side's unspent unit; popup if more than one.
+      const own = here.filter((u) => u.side === game.currentSide);
+      if (own.length === 0) {
+        set({ selectedUnitId: null });
+        return;
+      }
+      const unspent = own.filter((u) => u.status !== 'spent');
+      if (unspent.length === 1) {
+        set({ selectedUnitId: unspent[0]!.id });
+      } else if (unspent.length > 1) {
+        get().openPicker(hexId, unspent.map((u) => u.id), opts.x, opts.y);
+      } else {
+        set({ selectedUnitId: own[0]!.id }); // all spent — select for inspection
+      }
+    },
+
+    dispatch: (action) => {
+      const { game, history } = get();
+      if (!game) return;
+      const res = reduce(game, action);
+      const illegal = res.events.length === 1 && res.events[0]?.type === 'illegal';
+      if (illegal) {
+        set({ lastEvents: res.events });
+        return;
+      }
+      // Pure-presentation SFX based on the action just committed.
+      if (action.type === 'MOVE') {
+        const u = game.units[action.unitId];
+        const kind = u ? game.templates[u.templateId]?.kind : undefined;
+        if (kind) playMove(kind, get().muted);
+      } else if (action.type === 'FIRE' || action.type === 'CLOSE_COMBAT') {
+        const u = game.units[action.attackerId];
+        const kind = u ? game.templates[u.templateId]?.kind : undefined;
+        if (kind) playFire(kind, get().muted);
+      }
+      const selectedUnitId =
+        get().selectedUnitId && res.state.units[get().selectedUnitId!] ? get().selectedUnitId : null;
+      const advancedRound = res.state.round > game.round && res.state.phase === 'playing';
+      saveAuto(res.state);
+      set({
+        game: res.state,
+        history: [...history, game].slice(-HISTORY_LIMIT),
+        future: [], // a fresh action invalidates the redo stack
+        lastEvents: res.events,
+        selectedUnitId,
+        turnBanner: advancedRound ? { round: res.state.round } : get().turnBanner,
+      });
+    },
+
+    move: (unitId, toHexId) => guard(unitId, () => get().dispatch({ type: 'MOVE', unitId, toHexId })),
+    fire: (attackerId, targetId) => guard(attackerId, () => requestFireRoll(attackerId, targetId)),
+    closeCombat: (attackerId, targetId) => guard(attackerId, () => requestCcRoll(attackerId, targetId)),
+    rally: (unitId) => guard(unitId, () => requestRallyRoll(unitId)),
+    pivot: (unitId, facing) => guard(unitId, () => get().dispatch({ type: 'PIVOT', unitId, facing })),
+
+    commitRoll: () => {
+      const { pendingRoll } = get();
+      if (!pendingRoll) return;
+      const action = pendingRoll.action;
+      set({ pendingRoll: null });
+      get().dispatch(action);
+    },
+    cancelRoll: () => set({ pendingRoll: null }),
+
+    confirmProceed: () => {
+      const c = get().pendingConfirm;
+      set({ pendingConfirm: null });
+      c?.proceed();
+    },
+    confirmCancel: () => set({ pendingConfirm: null }),
+
+    openPicker: (hexId, unitIds, x, y) => set({ picker: { hexId, unitIds, x, y } }),
+    closePicker: () => set({ picker: null }),
+    closeChooser: () => set({ chooser: null }),
+    dismissTurnBanner: () => set({ turnBanner: null }),
+
+    toggleLosMode: () => set((s) => ({ losMode: !s.losMode, losSource: null, selectedUnitId: null })),
+    setLosSource: (hexId) => set({ losSource: hexId }),
+
+    undo: () => {
+      const { history, game } = get();
+      if (history.length === 0 || !game) return;
+      const prev = history[history.length - 1]!;
+      saveAuto(prev);
+      set({
+        game: prev,
+        history: history.slice(0, -1),
+        future: [game, ...get().future],
+        selectedUnitId: null,
+        pendingRoll: null,
+        pendingConfirm: null,
+        chooser: null,
+        turnBanner: null,
+        lastEvents: [{ type: 'undo', round: prev.round, text: 'Undid last action' }],
+      });
+    },
+
+    redo: () => {
+      const { future, game } = get();
+      if (future.length === 0 || !game) return;
+      const next = future[0]!;
+      saveAuto(next);
+      set({
+        game: next,
+        future: future.slice(1),
+        history: [...get().history, game].slice(-HISTORY_LIMIT),
+        selectedUnitId: null,
+        pendingRoll: null,
+        pendingConfirm: null,
+        chooser: null,
+        turnBanner: null,
+        lastEvents: [{ type: 'redo', round: next.round, text: 'Redid action' }],
+      });
+    },
+
+    saveToSlot: (name) => {
+      const { game } = get();
+      if (!game) return false;
+      return saveSlot(name, game) != null;
+    },
+
+    loadFromSlot: (name) => {
+      const g = loadSlot(name);
+      if (!g) return;
+      saveAuto(g);
+      set({ ...resetForLoad(), game: g, lastEvents: [{ type: 'load', round: g.round, text: `Loaded "${name}"` }] });
+    },
+
+    deleteSlotByName: (name) => deleteSlot(name),
+
+    exportCurrent: () => {
+      const { game } = get();
+      return game ? serialize(game) : '';
+    },
+
+    importFromText: (text) => {
+      try {
+        const parsed: unknown = JSON.parse(text);
+        if (!isGameState(parsed)) return false;
+        saveAuto(parsed);
+        set({ ...resetForLoad(), game: parsed, lastEvents: [{ type: 'load', round: parsed.round, text: 'Imported a save' }] });
+        return true;
+      } catch {
+        return false;
+      }
+    },
+
+    toggleMute: () => set((s) => ({ muted: !s.muted })),
+  };
+});

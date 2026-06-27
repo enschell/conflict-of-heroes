@@ -1,0 +1,9 @@
+Your new‑session checklist (do this to be safe)
+Launch Claude Code from the project folder: cd "C:\Users\ensch\Claude Code\conflict-of-heroes" then claude (or open that folder in the app). 
+This makes CLAUDE.md auto‑load and makes the preview tool work.
+
+First message: something like "Read CLAUDE.md and RULES‑ASSUMPTIONS.md, then continue with M5." 
+It'll have full context within a minute.
+
+One gap to close: the project is not yet a git repo, so there's no restore point. 
+I'd strongly suggest git init + an initial commit — that snapshots all the code+docs so a new session (or you) can always get back to a known‑good state.
