@@ -9,6 +9,28 @@ Guidance for Claude Code when building this project. Read this first, every sess
 
 ---
 
+## 0. Continuing in a new session (handoff)
+
+This repo is self‑describing: a fresh session needs only the code + these docs, not any prior
+chat or Claude "memory". To continue cleanly:
+
+- **Canonical location:** `C:\Users\ensch\Git Repos\conflict-of-heroes` (a git repo;
+  remote `origin` = https://github.com/enschell/conflict-of-heroes.git). **Launch Claude Code from
+  this folder** so this CLAUDE.md auto‑loads and the browser‑preview tool works.
+- **Orient by reading, in order:** this file (architecture, golden rules §3, directory map §4,
+  rulebook index §6, roadmap §8), then `README.md`, `RULES-ASSUMPTIONS.md` (open rule rulings),
+  and `reference/rulebook.txt` (local rulebook text — grep it, don't re‑parse the PDF).
+- **Verify before changing:** `npm install` (first time), then `npm test` (Vitest),
+  `npm run typecheck`, `npm run build`, and `npm run conformance` (self‑plays games, checks moves
+  vs rules). All green = known‑good baseline.
+- **Run it:** `npm run dev` → http://localhost:5173. Windows: if `npm` isn't found, Node is at
+  `C:\Program Files\nodejs` (Git Bash lacks it on PATH; in PowerShell prepend it).
+- **Current status / next:** see §8 — M0–M4 done; **M5 (slice polish) is next**.
+- Claude's auto‑"memory" is keyed to the working directory and is a convenience only; **this file
+  is the authoritative handoff.**
+
+---
+
 ## 1. What this is
 
 A browser implementation of the tactical hex-and-counter wargame *Conflict of Heroes:
