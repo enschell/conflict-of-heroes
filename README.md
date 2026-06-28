@@ -24,7 +24,7 @@ We do **not** copy Academy Games' artwork, maps, or counters. Personal use only.
 ```bash
 npm install
 npm run dev          # Vite dev server — the actual game (http://localhost:5173)
-npm test             # unit tests (Vitest) — 75 passing
+npm test             # unit tests (Vitest) — 78 passing
 npm run build        # typecheck + production build
 npm run conformance  # self-play games and audit every move against the rules
 npm run demo         # optional: auto-play a full game in the terminal (text board)
@@ -55,8 +55,9 @@ Run `npm run dev` and open http://localhost:5173. Select one of the current side
 M0 scaffold ✅ · M1 engine core (infantry) ✅ · M2 Firefight 1 content ✅ · M3 UI ✅
 (SVG board + counters, track sheets, action menu, **LOS overlay**, **animated dice + sound**,
 per-hex art, hover info, close combat) · M4 persistence ✅ (named save slots, JSON export/import,
-undo/redo) · **M5 polish (next)** — stacking/firegroups/shared activations (done = FF1 winnable) ·
+undo/redo) · **M5 polish (in progress)** — stacking/firegroups/shared activations (done = FF1
+winnable); **M5.1 stacked fire** ✅ (one shot resolves every enemy in a hex, §7.5.1) ·
 then vehicles → artillery/smoke → hidden units → fortifications → online multiplayer.
 A **rules-conformance audit** (`npm run conformance`) self-plays games and checks every move
 against the rules (0 violations); open rulings are in `RULES-ASSUMPTIONS.md`.
-**75 tests passing; typecheck + build clean.**
+**78 tests passing; typecheck + build clean.**

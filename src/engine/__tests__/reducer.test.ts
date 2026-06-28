@@ -47,6 +47,25 @@ describe('reducer', () => {
     expect(a2.state.currentSide).toBe('B');
   });
 
+  it('one FIRE resolves every enemy in the target hex for a single fire cost (§7.5.1)', () => {
+    const s = baseState();
+    addTemplate(s, rifleTemplate({ id: 'big', fp: { red: 50, blue: 0 } }));
+    addTemplate(s, rifleTemplate({ id: 'rifle', vp: 1 }));
+    addHex(s, 0, 0, 'open');
+    addHex(s, 1, 0, 'open');
+    addUnit(s, 'A1', 'A', 0, 0, 0, 'big'); // faces East toward (1,0)
+    addUnit(s, 'B1', 'B', 1, 0, 0, 'rifle');
+    addUnit(s, 'B2', 'B', 1, 0, 0, 'rifle');
+
+    const act = reduce(s, { type: 'ACTIVATE_UNIT', unitId: 'A1' });
+    const res = reduce(act.state, { type: 'FIRE', attackerId: 'A1', targetId: 'B1' });
+    expect(res.state.units['B1']).toBeUndefined(); // both in the hex are hit
+    expect(res.state.units['B2']).toBeUndefined();
+    expect(res.state.players.A.vp).toBe(2); // VP for both kills
+    expect(res.state.players.A.ap).toBe(7 - 4); // a single fire cost, not one per target
+    expect(res.state.currentSide).toBe('B'); // turn handed over once
+  });
+
   it('a hit on an already-hit unit destroys it', () => {
     const s = baseState();
     addTemplate(s, rifleTemplate({ id: 'big', fp: { red: 50, blue: 0 } }));

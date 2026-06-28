@@ -164,7 +164,7 @@ conflict-of-heroes/
 ```
 
 > **Current state:** `engine/`, all of `data/`, `state/`, `ui/`, `public/assets/`, and `scripts/`
-> work (**75 tests pass, typecheck + `vite build` clean**). `npm run dev` → SVG board with per-hex
+> work (**78 tests pass, typecheck + `vite build` clean**). `npm run dev` → SVG board with per-hex
 > artwork. Interactions: click a friendly unit to select (auto-picks the unspent one; popup if
 > several); click the selected unit again to deselect; move/fire by clicking highlighted hexes;
 > **hold Shift** to preview LOS from the hovered hex (release to hide); **Ctrl+click** a stacked
@@ -241,7 +241,8 @@ data; show labels in the UI, compute on axial.
 | Arc of fire (front 3 hexes) | `los.ts`, `hex.ts` | 6.1 |
 | Combat resolution: AV/DV, hit, critical (+4) | `combat.ts` | 7.0 |
 | Firepower/Defense colors (red soft / blue armor) | `combat.ts` | 7.1–7.3 |
-| Hits, hit markers, reveal rules, stacking | `hits.ts` | 7.5, 7.5.1 |
+| Hits, hit markers, reveal rules | `hits.ts` | 7.5 |
+| Stacked fire — one shot resolves every enemy in the hex | `combat.ts` (`rollStackFire`) | 7.5.1 |
 | Rally (5AP, rally #, cover/stacking/CAP mods) | `rally.ts` | 7.6 |
 | Range: short +3FP, long −2FP, close combat | `range.ts`, `combat.ts` | 7.7 |
 | Cards (action/bonus/event/weapon), icons | `cards.ts`, `data/cards` | 8.0–8.5 |
@@ -308,8 +309,10 @@ data; show labels in the UI, compute on axial.
 - **LOS visibility mode** ✅ **hold Shift** → `los.visibleHexesFrom` shades the hexes the *hovered*
   hex can see (green) and dims the rest; it updates as the cursor moves and disappears on release.
   The LOS topbar button is a click-to-pin alternative. Same engine fn backs fire-target highlighting.
-- **Fire-odds popup** ✅ with a unit selected, hovering an enemy it can hit shows a popup with the
-  hit % (and critical %) plus FP/DV detail (`ui/odds.ts` 2d6 math + `attackContext`).
+- **Fire-odds popup** ✅ with a unit selected, hovering a hex you can hit shows a popup with the
+  hit % (and critical %) plus FP/DV detail (`ui/odds.ts` 2d6 math + `attackContext`). Because a
+  shot resolves the whole hex (§7.5.1), the popup lists **one row per targetable enemy** in the
+  hovered hex (deterministic id order), headed "Fire at hex — N units (one shot)" when stacked.
 - **Stacked units / selection** ✅ multiple units in a hex are fanned out with a `×N` badge.
   Clicking a friendly hex auto-selects the **unspent** unit; if several are unspent, `UnitPicker.tsx`
   asks which. **Ctrl+click** always opens the picker. Clicking the selected unit deselects it.
@@ -324,9 +327,12 @@ data; show labels in the UI, compute on axial.
   click, set `TURN_BANNER_AUTOFADE = true` to fade after 3s instead.
 - **Clear AP + dice in log** ✅ the activated unit's remaining AP shows large in the track sheet and
   inspector; the log prints the actual 2d6 values for fires, rallies, and round initiative.
-- **Animated clickable dice with sound** ✅ `DiceRoller.tsx` — click the dice; they tumble and
-  settle on the **engine-provided** result (previewed from the seeded RNG, then committed). The
-  animation never influences the result (§3.6).
+- **Animated clickable dice with sound** ✅ `DiceRoller.tsx` — the dice show **`?`** until you
+  click to roll, then tumble and settle on the **engine-provided** result (previewed from the
+  seeded RNG, then committed); the detail line is static so it never spoils the outcome. The
+  animation never influences the result (§3.6). A pending action is a **sequence of `RollStep`s**:
+  a stacked-fire shot (§7.5.1) is rolled one enemy at a time ("target i of N", *Next target ▸*)
+  and only the final step commits the single FIRE action — no roll is resolved silently.
 - **Movement & fire SFX** ✅ `sound.ts` synthesizes audio (no asset files): `playMove` (infantry
   march vs vehicle rumble) and `playFire` (rifle / MG burst / cannon) chosen by `template.kind`;
   fired from the store on MOVE/FIRE. Mute toggle (🔊) in the topbar.
@@ -389,8 +395,20 @@ data; show labels in the UI, compute on axial.
   `saveToSlot`/`loadFromSlot`/`deleteSlotByName`/`exportCurrent`/`importFromText`; `SavesDialog.tsx`
   (topbar **Saves**) does slot management + **JSON file export/import**; topbar **Undo/Redo**.
   Saves round-trip bit-for-bit (RNG travels with the state). **75 tests pass, build clean.**
-- **M5 — Slice polish (NEXT):** stacking, firegroups, shared activations, group moves, edge cases,
-  keyboard/a11y, layout. **Done = a full game of Firefight 1 is winnable.**
+- **M5 — Slice polish (IN PROGRESS):** stacking, firegroups, shared activations, group moves,
+  edge cases, keyboard/a11y, layout. **Done = a full game of Firefight 1 is winnable.**
+  - **M5.1 — Stacked fire (§7.5.1)** ✅ a FIRE action resolves against **every** enemy unit
+    stacked in the target's hex (one 2D6 roll each, deterministic id order, RNG threaded so the
+    dice preview matches the committed result) for a single fire cost. Engine `rollStackFire` /
+    `enemiesInHex` (`combat.ts`), applied in `reducer.ts doFire`; store preview + log updated;
+    conformance re-derives every sub-roll. **UI:** the fire-odds hover popup lists **one row per
+    targetable enemy** in the hovered hex; the dice modal is a **multi-step sequence** — the player
+    rolls each enemy in turn ("target i of N", *Next target ▸*) and only the last step commits the
+    single FIRE action (nothing resolved silently). Dice render **`?`** until rolled and the detail
+    line is static (no result spoiler) — `PendingRoll` became `{ action, kind, steps: RollStep[] }`.
+    **78 tests, typecheck + build clean, 0 violations.**
+  - **Next:** shared activations (§9.0) → firegroups + group move/rally (§9.1–9.2) → edge
+    cases / keyboard-a11y / layout.
 - **Later (additive):** M6 vehicles → M7 mortars/OBA/smoke → M8 hidden units → M9 fortifications
   /obstacles/mines/hills → **M10 online multiplayer** (host the existing pure engine
   authoritatively + WebSocket rooms; the client already speaks in action objects).

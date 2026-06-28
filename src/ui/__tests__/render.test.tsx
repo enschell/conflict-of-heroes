@@ -69,11 +69,15 @@ describe('UI renders', () => {
       pendingRoll: {
         action: { type: 'PASS' },
         kind: 'fire',
-        dice: [3, 4],
-        success: true,
-        headline: 'HIT',
-        detail: 'AV 12 vs DV 11',
-        label: 'test roll',
+        steps: [
+          {
+            dice: [3, 4],
+            success: true,
+            headline: 'HIT',
+            detail: 'AV 12 vs DV 11',
+            label: 'test roll',
+          },
+        ],
       },
     });
     const html = render();

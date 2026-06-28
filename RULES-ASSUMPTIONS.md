@@ -3,8 +3,9 @@
 The M3.4 conformance harness (`npm run conformance`) auto-plays full games and
 checks every action's result against an independent re-derivation of the rules.
 As of the last run: **4 audits (3 full games + a pivot/stall probe), 0 violations**,
-covering activate / move / fire / close-combat / rally / pivot / stall / mark-spent /
-pass, including moving *into* an enemy hex and the "can't fire out of an enemy hex" rule.
+covering activate / move / fire (incl. multi-target stacked fire, §7.5.1) / close-combat /
+rally / pivot / stall / mark-spent / pass, including moving *into* an enemy hex and the
+"can't fire out of an enemy hex" rule.
 
 The harness verifies the **engine's arithmetic and flow** against *our reading* of
 the rules. It does **not** prove designer intent on ambiguous points, and it does
@@ -41,9 +42,11 @@ human ruling is wanted. **All four §A items were ruled on 2026-06-27 (kept; #4 
 
 ## B. Known simplifications (deferred features — flag if any should come sooner)
 
-5. **Single-target fire.** (§7.5.1) Firing currently targets one unit. The rule says a
-   shot at a hex resolves against **all** units stacked there with separate dice rolls
-   (one action). Deferred to M5 (stacking).
+5. ~~**Single-target fire.**~~ **✅ Done (M5).** (§7.5.1) A FIRE action now resolves against
+   **all** enemy units stacked in the target's hex — one roll each (deterministic id order,
+   RNG threaded so the UI dice preview matches the committed result), for a single fire cost.
+   Engine: `rollStackFire`/`enemiesInHex` in `combat.ts`, applied in `reducer.ts doFire`;
+   the conformance harness re-derives every sub-roll. (See `combat.test.ts` / `reducer.test.ts`.)
 
 6. **Close-combat reactions / retreat restriction not modeled.** (§7.7.3) A surviving CC
    defender can act on its own turn normally, but we don't enforce the "may not retreat
@@ -51,8 +54,9 @@ human ruling is wanted. **All four §A items were ruled on 2026-06-27 (kept; #4 
    react prompt. Also the "a unit may CC only one enemy per turn" limit isn't enforced
    (a unit may CC repeatedly across its own AP actions). Deferred.
 
-7. **Outside fire into a CC hex hitting friend & foe alike** (§7.7.3) — not modeled
-   (consequence of single-target fire). Deferred with #5.
+7. **Outside fire into a CC hex hitting friend & foe alike** (§7.7.3) — not modeled.
+   Stacked fire (#5) resolves against every *enemy* in the target hex; it does not also
+   hit *friendly* units locked in close combat there. Deferred.
 
 8. **Optional rules off:** Cautious Movement (§5.0.3) and Variable AP Allocation (§3.0.1)
    are optional and not implemented. Backward movement costs +1 AP (§5.2) but we don't

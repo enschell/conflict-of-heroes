@@ -18,7 +18,7 @@ import {
   reduce,
   legalActions,
   initGame,
-  rollAttack,
+  rollStackFire,
   rollCloseCombat,
   rollRally,
   distance,
@@ -314,7 +314,10 @@ function playGame(seed: number, style: Style): GameResult {
       : 'invalid';
 
     // Pre-roll peeks (deterministic from pre.rng) for dice actions ----------
-    const firePeek = action.type === 'FIRE' ? rollAttack(pre, pre.units[action.attackerId]!, pre.units[action.targetId]!) : null;
+    const firePeek =
+      action.type === 'FIRE'
+        ? rollStackFire(pre, pre.units[action.attackerId]!, pre.units[action.targetId]!.hexId)
+        : null;
     const ccPeek = action.type === 'CLOSE_COMBAT' ? rollCloseCombat(pre, pre.units[action.attackerId]!, pre.units[action.targetId]!) : null;
     const rallyPeek = action.type === 'RALLY' ? rollRally(pre, pre.units[action.unitId]!) : null;
 
@@ -375,18 +378,34 @@ function playGame(seed: number, style: Style): GameResult {
         break;
       }
       case 'FIRE': {
-        const exp = expectFire(pre, pre.units[action.attackerId]!, pre.units[action.targetId]!)!;
-        const peek = firePeek!;
-        check(peek.dv === exp.dv, '7.3', `DV: engine ${peek.dv} != expected ${exp.dv}`);
-        const myAV = exp.baseFP + peek.dice[0] + peek.dice[1];
-        check(peek.av === myAV, '7.2', `AV: engine ${peek.av} != expected ${myAV} (FP ${exp.baseFP}+${peek.dice[0]}+${peek.dice[1]})`);
-        check(peek.hit === myAV >= exp.dv, '7.0', `hit: engine ${peek.hit} != ${myAV >= exp.dv}`);
-        check(peek.critical === myAV >= exp.dv + 4, '7.0', `crit: engine ${peek.critical} != ${myAV >= exp.dv + 4}`);
-        check(peek.isFlank === exp.isFlank, '7.3', `flank flag mismatch`);
-        const paid = apPaid(pre, post, pre.units[action.attackerId]!.side);
-        if (mode === 'ap') check(paid === exp.apToFire, '7.0', `fire AP cost ${paid} != ${exp.apToFire}`);
+        const attacker = pre.units[action.attackerId]!;
+        const stack = firePeek!;
+        // §7.5.1: one shot at a hex hits every enemy stacked there.
+        check(stack.rolls.length >= 1, '7.5.1', 'fire should resolve at least one target');
+        check(
+          stack.rolls.some((r) => r.targetId === action.targetId),
+          '7.5.1',
+          'clicked target must be among the resolved stack',
+        );
+        for (const { targetId, roll } of stack.rolls) {
+          const exp = expectFire(pre, attacker, pre.units[targetId]!);
+          if (!exp) {
+            check(false, '7.7', `${targetId} in fired hex should be a legal target`);
+            continue;
+          }
+          check(roll.dv === exp.dv, '7.3', `DV: engine ${roll.dv} != expected ${exp.dv}`);
+          const myAV = exp.baseFP + roll.dice[0] + roll.dice[1];
+          check(roll.av === myAV, '7.2', `AV: engine ${roll.av} != expected ${myAV} (FP ${exp.baseFP}+${roll.dice[0]}+${roll.dice[1]})`);
+          check(roll.hit === myAV >= exp.dv, '7.0', `hit: engine ${roll.hit} != ${myAV >= exp.dv}`);
+          check(roll.critical === myAV >= exp.dv + 4, '7.0', `crit: engine ${roll.critical} != ${myAV >= exp.dv + 4}`);
+          check(roll.isFlank === exp.isFlank, '7.3', `flank flag mismatch`);
+          verifyHit(pre, post, targetId, roll.hit, roll.critical, check);
+        }
+        // The whole shot costs a single fire action (§7.5.1).
+        const paid = apPaid(pre, post, attacker.side);
+        const apToFire = myEff(pre, attacker).apToFire;
+        if (mode === 'ap') check(paid === apToFire, '7.0', `fire AP cost ${paid} != ${apToFire}`);
         else check(paid === 0, '3.1', `opportunity fire should be free, paid ${paid}`);
-        verifyHit(pre, post, action.targetId, peek.hit, peek.critical, check);
         oppSpent(action.attackerId);
         handover(true);
         bump('FIRE');

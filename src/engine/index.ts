@@ -9,7 +9,14 @@ export { initGame, serialize, deserialize } from './state';
 export { legalActions, legalActionsForUnit } from './actions';
 
 // Selected pure helpers useful to the UI (e.g. previews, LOS overlay):
-export { attackContext, rollAttack, closeCombatContext, rollCloseCombat } from './combat';
+export {
+  attackContext,
+  rollAttack,
+  closeCombatContext,
+  rollCloseCombat,
+  enemiesInHex,
+  rollStackFire,
+} from './combat';
 export { rollRally } from './rally';
 export { effectiveStats, templateOf } from './hits';
 export { hasLOS, inArc, canSightTarget, visibleHexesFrom } from './los';
