@@ -11,9 +11,9 @@ import {
   initGame,
   legalActionsForUnit,
   reduce,
-  rollAttack,
   rollCloseCombat,
   rollRally,
+  rollStackFire,
   serialize,
 } from '../engine';
 import type { Action, Facing, GameEvent, GameState, HexId, UnitId } from '../engine/types';
@@ -29,14 +29,22 @@ import {
   saveSlot,
 } from './persistence';
 
-export interface PendingRoll {
-  action: Action;
-  kind: 'fire' | 'rally';
+/** One die-roll the player makes inside a pending action (e.g. one per enemy in
+ *  a stacked-fire shot). `detail` is static (no dice values) so it can show
+ *  before the roll; `headline`/`success` are revealed once the dice settle. */
+export interface RollStep {
   dice: [number, number];
   success: boolean;
   headline: string;
   detail: string;
   label: string;
+}
+
+export interface PendingRoll {
+  /** The single engine action committed after every step is rolled. */
+  action: Action;
+  kind: 'fire' | 'rally';
+  steps: RollStep[];
 }
 
 export interface Hover {
@@ -168,18 +176,21 @@ export const useGame = create<Store>((set, get) => {
       set({ lastEvents: [{ type: 'illegal', round: g.round, text: ctx.reason ?? 'illegal' }] });
       return;
     }
-    const roll = rollAttack(g, attacker, target);
-    set({
-      pendingRoll: {
-        action: { type: 'FIRE', attackerId, targetId },
-        kind: 'fire',
+    // §7.5.1: a shot at the target's hex resolves against every enemy stacked
+    // there — the player rolls each one in turn (one step per enemy).
+    const stack = rollStackFire(g, attacker, target.hexId);
+    if (!stack.rolls.length) return;
+    const steps: RollStep[] = stack.rolls.map(({ targetId: tid, roll }) => {
+      const fp = roll.av - roll.dice[0] - roll.dice[1]; // static FP (no dice)
+      return {
         dice: roll.dice,
         success: roll.hit,
         headline: roll.critical ? 'CRITICAL HIT' : roll.hit ? 'HIT' : 'MISS',
-        detail: `rolled ${roll.dice[0]}+${roll.dice[1]}=${roll.dice[0] + roll.dice[1]} · AV ${roll.av} vs DV ${roll.dv}${ctx.isFlank ? ' (flank)' : ''}`,
-        label: `${attackerId} → ${targetId}`,
-      },
+        detail: `FP ${fp} + 2d6 vs DV ${roll.dv}${roll.isFlank ? ' (flank)' : ''}`,
+        label: `${attackerId} → ${tid}`,
+      };
     });
+    set({ pendingRoll: { action: { type: 'FIRE', attackerId, targetId }, kind: 'fire', steps } });
   };
 
   const requestCcRoll = (attackerId: UnitId, targetId: UnitId) => {
@@ -194,15 +205,20 @@ export const useGame = create<Store>((set, get) => {
       return;
     }
     const roll = rollCloseCombat(g, attacker, target);
+    const fp = roll.av - roll.dice[0] - roll.dice[1]; // static FP (no dice)
     set({
       pendingRoll: {
         action: { type: 'CLOSE_COMBAT', attackerId, targetId },
         kind: 'fire',
-        dice: roll.dice,
-        success: roll.hit,
-        headline: roll.critical ? 'CRITICAL HIT' : roll.hit ? 'HIT' : 'MISS',
-        detail: `close combat · rolled ${roll.dice[0]}+${roll.dice[1]}=${roll.dice[0] + roll.dice[1]} · AV ${roll.av} vs flank DV ${roll.dv}`,
-        label: `${attackerId} ⚔ ${targetId}`,
+        steps: [
+          {
+            dice: roll.dice,
+            success: roll.hit,
+            headline: roll.critical ? 'CRITICAL HIT' : roll.hit ? 'HIT' : 'MISS',
+            detail: `close combat · FP ${fp} + 2d6 vs flank DV ${roll.dv}`,
+            label: `${attackerId} ⚔ ${targetId}`,
+          },
+        ],
       },
     });
   };
@@ -217,15 +233,20 @@ export const useGame = create<Store>((set, get) => {
       set({ lastEvents: [{ type: 'illegal', round: g.round, text: rr.reason ?? 'illegal' }] });
       return;
     }
+    const mod = rr.total - rr.roll; // cover/stacking/CAP modifiers (no dice)
     set({
       pendingRoll: {
         action: { type: 'RALLY', unitId },
         kind: 'rally',
-        dice: rr.dice,
-        success: rr.success,
-        headline: rr.success ? 'RALLIED' : 'NO RALLY',
-        detail: `rolled ${rr.dice[0]}+${rr.dice[1]}=${rr.roll} · total ${rr.total} vs ${rr.target} needed`,
-        label: `${unitId} rallies`,
+        steps: [
+          {
+            dice: rr.dice,
+            success: rr.success,
+            headline: rr.success ? 'RALLIED' : 'NO RALLY',
+            detail: `needs ${rr.target}+ on 2d6${mod ? ` (${mod > 0 ? '+' : ''}${mod} mods)` : ''}`,
+            label: `${unitId} rallies`,
+          },
+        ],
       },
     });
   };

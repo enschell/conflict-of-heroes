@@ -70,21 +70,26 @@ export function Board() {
     unitsByHex.set(u.hexId, arr);
   }
 
-  // Fire-odds popup when hovering a targetable enemy with a selected attacker.
-  let odds: { x: number; y: number; targetId: string; fp: number; dv: number; flank: boolean; hit: number; crit: number } | null = null;
-  if (hover && selectedUnitId && game.units[selectedUnitId]) {
+  // Fire-odds popup when hovering a hex with a selected attacker. A shot resolves
+  // the whole hex (§7.5.1), so show one row per targetable enemy (in the same
+  // deterministic id order the engine rolls them).
+  type OddsRow = { targetId: string; fp: number; dv: number; flank: boolean; hit: number; crit: number };
+  const odds: { x: number; y: number; targets: OddsRow[] } | null = (() => {
+    if (!hover || !selectedUnitId || !game.units[selectedUnitId]) return null;
     const sel = game.units[selectedUnitId]!;
-    if (sel.side === game.currentSide) {
-      const enemy = (unitsByHex.get(hover.id) ?? []).find((u) => u.side !== game.currentSide);
-      if (enemy) {
-        const ctx = attackContext(game, sel, enemy);
-        if (ctx.legal) {
-          const o = fireOdds(ctx.baseFP, ctx.defenseValue);
-          odds = { x: hover.x, y: hover.y, targetId: enemy.id, fp: ctx.baseFP, dv: ctx.defenseValue, flank: ctx.isFlank, hit: o.hit, crit: o.crit };
-        }
-      }
+    if (sel.side !== game.currentSide) return null;
+    const enemies = (unitsByHex.get(hover.id) ?? [])
+      .filter((u) => u.side !== game.currentSide)
+      .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+    const rows: OddsRow[] = [];
+    for (const enemy of enemies) {
+      const ctx = attackContext(game, sel, enemy);
+      if (!ctx.legal) continue;
+      const o = fireOdds(ctx.baseFP, ctx.defenseValue);
+      rows.push({ targetId: enemy.id, fp: ctx.baseFP, dv: ctx.defenseValue, flank: ctx.isFlank, hit: o.hit, crit: o.crit });
     }
-  }
+    return rows.length ? { x: hover.x, y: hover.y, targets: rows } : null;
+  })();
 
   return (
     <>
@@ -205,13 +210,22 @@ export function Board() {
 
       {odds && (
         <div className="fire-odds" style={{ left: odds.x + 16, top: odds.y + 16 }}>
-          <div className="fire-odds__head">Fire at {odds.targetId}</div>
-          <div className="fire-odds__big">{pct(odds.hit)}% to hit</div>
-          <div className="dim">incl. {pct(odds.crit)}% critical (instant kill)</div>
-          <div className="fire-odds__detail">
-            FP {odds.fp} + 2d6 vs DV {odds.dv}
-            {odds.flank ? ' (flank)' : ''}
+          <div className="fire-odds__head">
+            {odds.targets.length > 1
+              ? `Fire at hex — ${odds.targets.length} units (one shot)`
+              : `Fire at ${odds.targets[0]!.targetId}`}
           </div>
+          {odds.targets.map((t) => (
+            <div key={t.targetId} className="fire-odds__row">
+              {odds.targets.length > 1 && <div className="fire-odds__who">{t.targetId}</div>}
+              <div className="fire-odds__big">{pct(t.hit)}% to hit</div>
+              <div className="dim">incl. {pct(t.crit)}% critical (instant kill)</div>
+              <div className="fire-odds__detail">
+                FP {t.fp} + 2d6 vs DV {t.dv}
+                {t.flank ? ' (flank)' : ''}
+              </div>
+            </div>
+          ))}
         </div>
       )}
 

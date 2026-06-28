@@ -12,7 +12,7 @@ import { fpRangeModifier, rangeBand, type RangeBand } from './range';
 import { roll2d6 } from './rng';
 import { terrainDM } from './terrain';
 import { directionTo } from './movement';
-import type { DRColor, GameState, RngState, Unit } from './types';
+import type { DRColor, GameState, RngState, SideId, Unit, UnitId } from './types';
 
 /** +1 DM if the shot crosses a wall in/bordering the target hex (§5.0.2). */
 function wallDMForFire(state: GameState, attackerHexId: string, targetHexId: string): number {
@@ -199,4 +199,51 @@ export function rollCloseCombat(
     band: ctx.band,
     rng,
   };
+}
+
+// ---------------------------------------------------------------------------
+// Stacked fire (§7.5.1): a single shot at a hex resolves against EVERY enemy
+// unit stacked there, each with its own dice roll, for one AP cost. Targets are
+// resolved in a deterministic id order so a UI preview and the reducer (which
+// roll from the same seeded RNG) produce identical dice.
+// ---------------------------------------------------------------------------
+
+/** Enemy units sharing `hexId`, sorted by id for deterministic resolution. */
+export function enemiesInHex(state: GameState, side: SideId, hexId: string): Unit[] {
+  return Object.values(state.units)
+    .filter((u) => u.side !== side && u.hexId === hexId)
+    .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+}
+
+export interface StackFireRoll {
+  targetId: UnitId;
+  roll: AttackRoll;
+}
+
+export interface StackFireResult {
+  rolls: StackFireRoll[];
+  /** RNG after rolling every target in the stack. */
+  rng: RngState;
+}
+
+/**
+ * Resolve a shot at the whole of `targetHexId` (§7.5.1). Pure: threads the RNG
+ * through one roll per stacked enemy and returns the advanced RNG; the reducer
+ * applies the consequences and charges the (single) AP cost.
+ */
+export function rollStackFire(
+  state: GameState,
+  attacker: Unit,
+  targetHexId: string,
+  capMod = 0,
+): StackFireResult {
+  const targets = enemiesInHex(state, attacker.side, targetHexId);
+  const rolls: StackFireRoll[] = [];
+  let rng = state.rng;
+  for (const t of targets) {
+    const roll = rollAttack({ ...state, rng }, attacker, t, capMod);
+    rolls.push({ targetId: t.id, roll });
+    rng = roll.rng;
+  }
+  return { rolls, rng };
 }

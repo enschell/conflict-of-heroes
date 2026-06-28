@@ -427,6 +427,16 @@ button.link {
   color: var(--dim);
   margin-top: 0.2rem;
 }
+.fire-odds__row + .fire-odds__row {
+  margin-top: 0.45rem;
+  padding-top: 0.45rem;
+  border-top: 1px solid #ffffff1f;
+}
+.fire-odds__who {
+  font-weight: 700;
+  font-size: 0.85rem;
+  color: #e7c46a;
+}
 
 /* ---- confirm + turn banner ---- */
 .confirm {

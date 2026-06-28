@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { attackContext, rollAttack } from '../combat';
+import { attackContext, enemiesInHex, rollAttack, rollStackFire } from '../combat';
 import type { Facing } from '../types';
 import { addHex, addTemplate, addUnit, baseState, rifleTemplate } from './helpers';
 
@@ -72,5 +72,38 @@ describe('combat resolution (rulebook §7)', () => {
     const r = rollAttack(s, a, t);
     expect(r.hit).toBe(true);
     expect(r.critical).toBe(true);
+  });
+});
+
+describe('stacked fire (rulebook §7.5.1)', () => {
+  function stackScene() {
+    const s = baseState();
+    addTemplate(s, rifleTemplate());
+    addHex(s, 0, 0, 'open');
+    addHex(s, 1, 0, 'open');
+    const a = addUnit(s, 'A1', 'A', 0, 0, 0); // faces East toward (1,0)
+    addUnit(s, 'B1', 'B', 1, 0, 0);
+    addUnit(s, 'B2', 'B', 1, 0, 0);
+    return { s, a };
+  }
+
+  it('enemiesInHex returns the stacked enemies in deterministic id order', () => {
+    const { s } = stackScene();
+    expect(enemiesInHex(s, 'A', '1,0').map((u) => u.id)).toEqual(['B1', 'B2']);
+    expect(enemiesInHex(s, 'B', '1,0')).toEqual([]); // none of B's enemies are there
+  });
+
+  it('rolls one attack per stacked enemy, threading the RNG', () => {
+    const { s, a } = stackScene();
+    const res = rollStackFire(s, a, '1,0');
+    expect(res.rolls.map((r) => r.targetId)).toEqual(['B1', 'B2']);
+    expect(res.rolls.every((r) => r.roll.legal)).toBe(true);
+
+    // The sequence must equal rolling each target in turn off the shared RNG.
+    const r1 = rollAttack(s, a, s.units['B1']!);
+    const r2 = rollAttack({ ...s, rng: r1.rng }, a, s.units['B2']!);
+    expect(res.rolls[0]!.roll.dice).toEqual(r1.dice);
+    expect(res.rolls[1]!.roll.dice).toEqual(r2.dice);
+    expect(res.rng).toEqual(r2.rng);
   });
 });

@@ -8,7 +8,7 @@
  */
 import { FOOT_HIT_MARKERS } from '../data/hitMarkers';
 import { applyUnitLoss, clampCapMod } from './cap';
-import { attackContext, closeCombatContext, rollAttack, rollCloseCombat } from './combat';
+import { attackContext, closeCombatContext, rollCloseCombat, rollStackFire } from './combat';
 import { isInFrontArc, parseHexId } from './hex';
 import { drawHit, effectiveStats, returnHitToPile, templateOf } from './hits';
 import { directionTo, moveCost, pivotCost } from './movement';
@@ -201,17 +201,24 @@ export function reduce(state: GameState, action: Action): ReduceResult {
     if (player.capCurrent < capModCost) return deny('not enough CAP for dice modifier');
     player.capCurrent -= capModCost;
 
-    const roll = rollAttack(next, attacker, target, capMod);
-    next.rng = roll.rng;
-    log(
-      'fire',
-      `${attacker.id} fires at ${target.id}: rolled ${roll.dice[0]}+${roll.dice[1]}=` +
-        `${roll.dice[0] + roll.dice[1]} · AV ${roll.av} vs DV ${roll.dv}` +
-        `${roll.isFlank ? ' (flank)' : ''} -> ` +
-        `${roll.critical ? 'CRITICAL' : roll.hit ? 'hit' : 'miss'}`,
-      attacker.side,
-    );
-    if (roll.hit) applyHit(target, roll.critical);
+    // §7.5.1: one shot at a hex resolves against every enemy stacked there, each
+    // with its own roll, for the single fire cost already paid above.
+    const stack = rollStackFire(next, attacker, target.hexId, capMod);
+    next.rng = stack.rng;
+    for (const { targetId, roll } of stack.rolls) {
+      log(
+        'fire',
+        `${attacker.id} fires at ${targetId}: rolled ${roll.dice[0]}+${roll.dice[1]}=` +
+          `${roll.dice[0] + roll.dice[1]} · AV ${roll.av} vs DV ${roll.dv}` +
+          `${roll.isFlank ? ' (flank)' : ''} -> ` +
+          `${roll.critical ? 'CRITICAL' : roll.hit ? 'hit' : 'miss'}`,
+        attacker.side,
+      );
+      if (roll.hit) {
+        const t = next.units[targetId];
+        if (t) applyHit(t, roll.critical);
+      }
+    }
     completeAction(attacker, mode, player);
     return finish();
   };
