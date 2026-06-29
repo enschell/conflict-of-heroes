@@ -61,6 +61,7 @@ export function initGame(def: FirefightDef): GameState {
       hexId: p.hexId,
       facing: p.facing,
       status: 'fresh',
+      stressed: false,
       hitMarkers: [],
       assignedWeaponCards: [],
     };

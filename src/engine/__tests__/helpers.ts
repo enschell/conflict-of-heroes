@@ -109,6 +109,7 @@ export function addUnit(
     hexId: `${q},${r}`,
     facing,
     status: 'fresh',
+    stressed: false,
     hitMarkers,
     assignedWeaponCards: [],
   };

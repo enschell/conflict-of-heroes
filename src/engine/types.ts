@@ -111,7 +111,16 @@ export interface Unit {
   templateId: string;
   hexId: HexId;
   facing: Facing;
+  // v3 cutover note (§A): 'active' is legacy 2nd-ed (7AP activation) and is
+  // removed in the step-3 reducer rewrite, when the action economy becomes
+  // act → Spent Check → Stress. The Fresh/Spent pair is the v3 model (§2.2).
   status: 'fresh' | 'active' | 'spent';
+  /**
+   * v3 Stress (§2.6): true once this Unit took an Action; adds +1AP to its next
+   * Action Cost if it acts again on this side's very next Turn. Not cumulative;
+   * cleared by Passing (§2.7). The step-3 turn loop reads/sets this.
+   */
+  stressed: boolean;
   /** At most one hit marker (a second hit destroys the unit). */
   hitMarkers: HitType[];
   assignedWeaponCards: CardId[];
