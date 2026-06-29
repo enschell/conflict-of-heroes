@@ -124,7 +124,7 @@ describe('CAPs and 0AP (§3.3 / §3.4)', () => {
     expect(res.state.players.A.capCurrent).toBe(capBefore - 1); // 1 CAP spent for the 1AP move
   });
 
-  it('a Spent unit may act only by buying the cost down to 0AP with CAPs (§3.4)', () => {
+  it('a Spent unit needs an EXPLICIT CAP spend to reach 0AP — no silent reduction (§3.4)', () => {
     const s = baseState();
     addTemplate(s, rifleTemplate());
     addHex(s, 0, 0);
@@ -135,11 +135,31 @@ describe('CAPs and 0AP (§3.3 / §3.4)', () => {
     // A 1AP move needs 1 CAP to reach 0AP — legalActions offers it (capCurrent 5 ≥ 1).
     expect(legalActionsForUnit(s, 'A1').some((a) => a.type === 'MOVE')).toBe(true);
 
-    const res = reduce(s, { type: 'MOVE', unitId: 'A1', toHexId: '1,0' });
-    expect(res.events.some((e) => e.type !== 'illegal')).toBe(true);
+    // Without an explicit capCostReduce the engine does NOT auto-spend CAP: denied.
+    const denied = reduce(s, { type: 'MOVE', unitId: 'A1', toHexId: '1,0' });
+    expect(denied.events[0]?.type).toBe('illegal');
+    expect(denied.state).toBe(s); // untouched — no CAP lost
+
+    // With an explicit capCostReduce that reaches 0AP, it acts and stays Spent.
+    const res = reduce(s, { type: 'MOVE', unitId: 'A1', toHexId: '1,0', capCostReduce: 1 });
     expect(res.state.units['A1']!.hexId).toBe('1,0');
     expect(res.state.units['A1']!.status).toBe('spent'); // remains Spent after a 0AP action
+    expect(res.events.some((e) => e.type === 'spent' && /no Spent Check/.test(e.text))).toBe(true);
     expect(res.state.players.A.capCurrent).toBe(s.players.A.capCurrent - 1);
+  });
+
+  it('an explicit capCostReduce too small to reach 0AP is rejected for a Spent unit', () => {
+    const s = baseState();
+    addTemplate(s, rifleTemplate());
+    addHex(s, 0, 0);
+    addHex(s, 1, 0);
+    const u = addUnit(s, 'A1', 'A', 0, 0, 0, 'rifle');
+    u.status = 'spent';
+    u.stressed = true; // move cost 1 + Stress 1 = 2; reducing by 1 leaves 1AP > 0
+
+    const res = reduce(s, { type: 'MOVE', unitId: 'A1', toHexId: '1,0', capCostReduce: 1 });
+    expect(res.events[0]?.type).toBe('illegal');
+    expect(res.state).toBe(s);
   });
 
   it('a Spent unit with no CAPs cannot act', () => {

@@ -10,6 +10,7 @@ import {
   closeCombatContext,
   initGame,
   legalActionsForUnit,
+  modifiedActionCost,
   reduce,
   rollCloseCombat,
   rollRally,
@@ -131,6 +132,65 @@ interface Store {
 const HISTORY_LIMIT = 100;
 
 export const useGame = create<Store>((set, get) => {
+  /** The unit that performs an action (none for PASS). */
+  const actorOf = (action: Action): UnitId | null => {
+    switch (action.type) {
+      case 'MOVE':
+      case 'PIVOT':
+      case 'RALLY':
+      case 'STALL':
+        return action.unitId;
+      case 'FIRE':
+      case 'CLOSE_COMBAT':
+        return action.attackerId;
+      default:
+        return null;
+    }
+  };
+
+  /**
+   * Gate any action that would spend CAP behind an explicit confirmation (§3.4).
+   * Fresh units never spend CAP and proceed directly. A Spent unit may act only
+   * by buying its Action Cost down to 0AP with CAPs — so we show how many CAPs
+   * that costs and only proceed (with capCostReduce set) once the player accepts.
+   */
+  const capGate = (action: Action, proceed: (a: Action) => void) => {
+    const g = get().game;
+    if (!g) return;
+    if (action.type === 'PASS') {
+      proceed(action); // no actor, never spends CAP
+      return;
+    }
+    const id = actorOf(action);
+    const unit = id ? g.units[id] : null;
+    if (!unit || unit.status !== 'spent') {
+      proceed(action); // Fresh action — no CAP spent.
+      return;
+    }
+    const cost = modifiedActionCost(g, action);
+    if (cost == null) {
+      proceed(action); // illegal; let reduce report it
+      return;
+    }
+    const cap = g.players[unit.side].capCurrent;
+    if (cap < cost) {
+      set({
+        lastEvents: [
+          { type: 'illegal', round: g.round, text: `${id} is Spent and needs ${cost} CAP (only ${cap} left)` },
+        ],
+      });
+      return;
+    }
+    set({
+      pendingConfirm: {
+        message:
+          `${id} is Spent. Spend ${cost} CAP to take this Action at 0AP (§3.4)? ` +
+          `CAP ${cap} → ${cap - cost}.`,
+        proceed: () => proceed({ ...action, capCostReduce: cost }),
+      },
+    });
+  };
+
   /** Common UI reset when a whole new GameState is loaded/imported. */
   const resetForLoad = () => ({
     selectedUnitId: null,
@@ -146,11 +206,11 @@ export const useGame = create<Store>((set, get) => {
     hover: null,
   });
 
-  const requestFireRoll = (attackerId: UnitId, targetId: UnitId) => {
+  const requestFireRoll = (action: Extract<Action, { type: 'FIRE' }>) => {
     const g = get().game;
     if (!g) return;
-    const attacker = g.units[attackerId];
-    const target = g.units[targetId];
+    const attacker = g.units[action.attackerId];
+    const target = g.units[action.targetId];
     if (!attacker || !target) return;
     const ctx = attackContext(g, attacker, target);
     if (!ctx.legal) {
@@ -168,17 +228,17 @@ export const useGame = create<Store>((set, get) => {
         success: roll.hit,
         headline: roll.critical ? 'CRITICAL HIT' : roll.hit ? 'HIT' : 'MISS',
         detail: `FP ${fp} + 2d6 vs DV ${roll.dv}${roll.isFlank ? ' (flank)' : ''}`,
-        label: `${attackerId} → ${tid}`,
+        label: `${action.attackerId} → ${tid}`,
       };
     });
-    set({ pendingRoll: { action: { type: 'FIRE', attackerId, targetId }, kind: 'fire', steps } });
+    set({ pendingRoll: { action, kind: 'fire', steps } });
   };
 
-  const requestCcRoll = (attackerId: UnitId, targetId: UnitId) => {
+  const requestCcRoll = (action: Extract<Action, { type: 'CLOSE_COMBAT' }>) => {
     const g = get().game;
     if (!g) return;
-    const attacker = g.units[attackerId];
-    const target = g.units[targetId];
+    const attacker = g.units[action.attackerId];
+    const target = g.units[action.targetId];
     if (!attacker || !target) return;
     const ctx = closeCombatContext(g, attacker, target);
     if (!ctx.legal) {
@@ -189,7 +249,7 @@ export const useGame = create<Store>((set, get) => {
     const fp = roll.av - roll.dice[0] - roll.dice[1]; // static FP (no dice)
     set({
       pendingRoll: {
-        action: { type: 'CLOSE_COMBAT', attackerId, targetId },
+        action,
         kind: 'fire',
         steps: [
           {
@@ -197,17 +257,17 @@ export const useGame = create<Store>((set, get) => {
             success: roll.hit,
             headline: roll.critical ? 'CRITICAL HIT' : roll.hit ? 'HIT' : 'MISS',
             detail: `close combat · FP ${fp} + 2d6 vs flank DV ${roll.dv}`,
-            label: `${attackerId} ⚔ ${targetId}`,
+            label: `${action.attackerId} ⚔ ${action.targetId}`,
           },
         ],
       },
     });
   };
 
-  const requestRallyRoll = (unitId: UnitId) => {
+  const requestRallyRoll = (action: Extract<Action, { type: 'RALLY' }>) => {
     const g = get().game;
     if (!g) return;
-    const unit = g.units[unitId];
+    const unit = g.units[action.unitId];
     if (!unit) return;
     const rr = rollRally(g, unit);
     if (!rr.legal) {
@@ -217,7 +277,7 @@ export const useGame = create<Store>((set, get) => {
     const mod = rr.total - rr.roll; // cover/stacking/CAP modifiers (no dice)
     set({
       pendingRoll: {
-        action: { type: 'RALLY', unitId },
+        action,
         kind: 'rally',
         steps: [
           {
@@ -225,7 +285,7 @@ export const useGame = create<Store>((set, get) => {
             success: rr.success,
             headline: rr.success ? 'RALLIED' : 'NO RALLY',
             detail: `needs ${rr.target}+ on 2d6${mod ? ` (${mod > 0 ? '+' : ''}${mod} mods)` : ''}`,
-            label: `${unitId} rallies`,
+            label: `${action.unitId} rallies`,
           },
         ],
       },
@@ -390,11 +450,22 @@ export const useGame = create<Store>((set, get) => {
       });
     },
 
-    move: (unitId, toHexId) => get().dispatch({ type: 'MOVE', unitId, toHexId }),
-    fire: (attackerId, targetId) => requestFireRoll(attackerId, targetId),
-    closeCombat: (attackerId, targetId) => requestCcRoll(attackerId, targetId),
-    rally: (unitId) => requestRallyRoll(unitId),
-    pivot: (unitId, facing) => get().dispatch({ type: 'PIVOT', unitId, facing }),
+    move: (unitId, toHexId) =>
+      capGate({ type: 'MOVE', unitId, toHexId }, (a) => get().dispatch(a)),
+    fire: (attackerId, targetId) =>
+      capGate({ type: 'FIRE', attackerId, targetId }, (a) =>
+        requestFireRoll(a as Extract<Action, { type: 'FIRE' }>),
+      ),
+    closeCombat: (attackerId, targetId) =>
+      capGate({ type: 'CLOSE_COMBAT', attackerId, targetId }, (a) =>
+        requestCcRoll(a as Extract<Action, { type: 'CLOSE_COMBAT' }>),
+      ),
+    rally: (unitId) =>
+      capGate({ type: 'RALLY', unitId }, (a) =>
+        requestRallyRoll(a as Extract<Action, { type: 'RALLY' }>),
+      ),
+    pivot: (unitId, facing) =>
+      capGate({ type: 'PIVOT', unitId, facing }, (a) => get().dispatch(a)),
 
     commitRoll: () => {
       const { pendingRoll } = get();

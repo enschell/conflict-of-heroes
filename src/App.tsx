@@ -60,11 +60,12 @@ export function App() {
   const cs = game.currentSide;
   const nation = game.players[cs].nations.map((n) => NATIONS[n]?.name ?? n).join(', ');
 
-  // v3 Stall (§2.8) is taken by a specific Unit: prefer the selected unit, else
-  // the side's first Fresh unit. The reducer validates legality.
+  // v3 Stall (§2.8) is taken by a specific Fresh Unit: prefer the selected one,
+  // else the side's first Fresh unit. (A Spent unit would need an explicit CAP
+  // spend, which goes through the per-unit confirm flow, not this button.)
   const sel = selectedUnitId ? game.units[selectedUnitId] : null;
   const stallUnitId =
-    sel && sel.side === cs
+    sel && sel.side === cs && sel.status === 'fresh'
       ? sel.id
       : Object.values(game.units).find((u) => u.side === cs && u.status === 'fresh')?.id;
 

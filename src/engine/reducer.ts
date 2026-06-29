@@ -62,17 +62,19 @@ export function reduce(state: GameState, action: Action): ReduceResult {
   /**
    * Plan a cost-bearing action's CAP spend (§3.3–§3.4). `base` already folds in
    * terrain and hit-marker deltas (movement/hits do that); here we add Stress
-   * (+1AP, §2.6) then apply CAP cost-reduction. A Spent Unit must reach 0AP, so
-   * we force enough reduction for it (§3.4) — legality of that is checked by the
-   * caller against `capCurrent`.
+   * (+1AP, §2.6) then apply the caller's explicit CAP cost-reduction.
+   *
+   * Note: reduction is NEVER applied automatically. A Spent Unit may act only if
+   * the caller explicitly spends enough CAPs (`capCostReduce`) to bring the cost
+   * to exactly 0AP (§3.4) — taking a 0AP Action is a deliberate, costly choice,
+   * not something that happens silently when a Spent Unit is selected.
    */
   const planCost = (unit: Unit, base: number, requestedReduce: number) => {
     const stress = unit.stressed ? 1 : 0;
     const costBeforeReduce = base + stress;
-    let reduce = Math.max(0, Math.trunc(requestedReduce));
-    if (unit.status === 'spent') reduce = Math.max(reduce, costBeforeReduce);
+    const reduce = Math.max(0, Math.trunc(requestedReduce));
     const { cost, capsSpent } = reduceActionCost(costBeforeReduce, reduce);
-    return { cost, capsSpent, costBeforeReduce };
+    return { cost, capsSpent };
   };
 
   /**
@@ -141,9 +143,9 @@ export function reduce(state: GameState, action: Action): ReduceResult {
     const mc = moveCost(next, unit, a.toHexId);
     if (mc.ap == null) return deny(mc.reason ?? 'illegal move');
     const player = next.players[unit.side];
-    const { cost, capsSpent, costBeforeReduce } = planCost(unit, mc.ap, a.capCostReduce ?? 0);
-    if (unit.status === 'spent' && player.capCurrent < costBeforeReduce)
-      return deny('spent unit needs enough CAP to reach 0AP');
+    const { cost, capsSpent } = planCost(unit, mc.ap, a.capCostReduce ?? 0);
+    if (unit.status === 'spent' && cost > 0)
+      return deny('a Spent unit must spend CAPs to reduce its Action Cost to 0AP (§3.4)');
     if (player.capCurrent < capsSpent) return deny('not enough CAP');
     player.capCurrent -= capsSpent;
 
@@ -165,9 +167,9 @@ export function reduce(state: GameState, action: Action): ReduceResult {
     const eff = effectiveStats(next, unit);
     if (!eff.canPivot) return deny('unit cannot pivot');
     const player = next.players[unit.side];
-    const { cost, capsSpent, costBeforeReduce } = planCost(unit, pivotCost(), a.capCostReduce ?? 0);
-    if (unit.status === 'spent' && player.capCurrent < costBeforeReduce)
-      return deny('spent unit needs enough CAP to reach 0AP');
+    const { cost, capsSpent } = planCost(unit, pivotCost(), a.capCostReduce ?? 0);
+    if (unit.status === 'spent' && cost > 0)
+      return deny('a Spent unit must spend CAPs to reduce its Action Cost to 0AP (§3.4)');
     if (player.capCurrent < capsSpent) return deny('not enough CAP');
     player.capCurrent -= capsSpent;
     unit.facing = a.facing;
@@ -187,9 +189,9 @@ export function reduce(state: GameState, action: Action): ReduceResult {
 
     const player = next.players[attacker.side];
     const eff = effectiveStats(next, attacker);
-    const { cost, capsSpent, costBeforeReduce } = planCost(attacker, eff.apToFire, a.capCostReduce ?? 0);
-    if (attacker.status === 'spent' && player.capCurrent < costBeforeReduce)
-      return deny('spent unit needs enough CAP to reach 0AP');
+    const { cost, capsSpent } = planCost(attacker, eff.apToFire, a.capCostReduce ?? 0);
+    if (attacker.status === 'spent' && cost > 0)
+      return deny('a Spent unit must spend CAPs to reduce its Action Cost to 0AP (§3.4)');
     const capNeeded = capsSpent + Math.abs(diceMod);
     if (player.capCurrent < capNeeded) return deny('not enough CAP to fire');
     player.capCurrent -= capNeeded;
@@ -227,9 +229,9 @@ export function reduce(state: GameState, action: Action): ReduceResult {
 
     const player = next.players[attacker.side];
     const eff = effectiveStats(next, attacker);
-    const { cost, capsSpent, costBeforeReduce } = planCost(attacker, eff.apToFire, a.capCostReduce ?? 0);
-    if (attacker.status === 'spent' && player.capCurrent < costBeforeReduce)
-      return deny('spent unit needs enough CAP to reach 0AP');
+    const { cost, capsSpent } = planCost(attacker, eff.apToFire, a.capCostReduce ?? 0);
+    if (attacker.status === 'spent' && cost > 0)
+      return deny('a Spent unit must spend CAPs to reduce its Action Cost to 0AP (§3.4)');
     const capNeeded = capsSpent + Math.abs(diceMod);
     if (player.capCurrent < capNeeded) return deny('not enough CAP for close combat');
     player.capCurrent -= capNeeded;
@@ -260,9 +262,9 @@ export function reduce(state: GameState, action: Action): ReduceResult {
 
     const diceMod = clampCapMod(a.capDiceMod ?? 0);
     const player = next.players[unit.side];
-    const { cost, capsSpent, costBeforeReduce } = planCost(unit, RALLY_AP_COST, a.capCostReduce ?? 0);
-    if (unit.status === 'spent' && player.capCurrent < costBeforeReduce)
-      return deny('spent unit needs enough CAP to reach 0AP');
+    const { cost, capsSpent } = planCost(unit, RALLY_AP_COST, a.capCostReduce ?? 0);
+    if (unit.status === 'spent' && cost > 0)
+      return deny('a Spent unit must spend CAPs to reduce its Action Cost to 0AP (§3.4)');
     const capNeeded = capsSpent + Math.abs(diceMod);
     if (player.capCurrent < capNeeded) return deny('not enough CAP to rally');
     player.capCurrent -= capNeeded;
@@ -298,9 +300,9 @@ export function reduce(state: GameState, action: Action): ReduceResult {
     if (!unit) return deny('no such unit');
     if (unit.side !== next.currentSide) return deny('not your turn');
     const player = next.players[unit.side];
-    const { cost, capsSpent, costBeforeReduce } = planCost(unit, 1, a.capCostReduce ?? 0);
-    if (unit.status === 'spent' && player.capCurrent < costBeforeReduce)
-      return deny('spent unit needs enough CAP to reach 0AP');
+    const { cost, capsSpent } = planCost(unit, 1, a.capCostReduce ?? 0);
+    if (unit.status === 'spent' && cost > 0)
+      return deny('a Spent unit must spend CAPs to reduce its Action Cost to 0AP (§3.4)');
     if (player.capCurrent < capsSpent) return deny('not enough CAP');
     player.capCurrent -= capsSpent;
     log('stall', `${next.currentSide} stalls with ${unit.id} (cost ${cost})`, next.currentSide);

@@ -6,7 +6,7 @@ export * from './types';
 
 export { reduce } from './reducer';
 export { initGame, serialize, deserialize } from './state';
-export { legalActions, legalActionsForUnit } from './actions';
+export { legalActions, legalActionsForUnit, modifiedActionCost } from './actions';
 
 // Selected pure helpers useful to the UI (e.g. previews, LOS overlay):
 export {

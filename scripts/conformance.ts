@@ -561,7 +561,8 @@ function probe(): GameResult {
     const spentState: GameState = { ...state, units: { ...state.units, [u3.id]: { ...u3, status: 'spent', stressed: false } } };
     const capBefore = spentState.players[s3].capCurrent;
     const base = expectBase(spentState, moveTarget); // no Stress (cleared above)
-    const rc = reduce(spentState, moveTarget);
+    // §3.4: a Spent unit must explicitly spend CAPs to reach 0AP (no auto-reduce).
+    const rc = reduce(spentState, { ...moveTarget, capCostReduce: base });
     if (rc.events[0]?.type === 'illegal') {
       check(false, '3.4', `probe: spent-unit 0AP move rejected (${rc.events[0]?.text})`);
     } else {
