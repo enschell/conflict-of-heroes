@@ -58,14 +58,12 @@ describe('Firefight 1 — initial state', () => {
   });
 });
 
-/** Deterministic, dependency-free auto-player: fire > activate > move > pass. */
+/** Deterministic, dependency-free auto-player: close combat > fire > move > pass. */
 function autoAct(state: GameState): Action {
   const acts = legalActions(state);
   return (
+    acts.find((a) => a.type === 'CLOSE_COMBAT') ??
     acts.find((a) => a.type === 'FIRE') ??
-    (state.players[state.currentSide].activatedUnitId
-      ? null
-      : acts.find((a) => a.type === 'ACTIVATE_UNIT')) ??
     acts.find((a) => a.type === 'MOVE') ??
     { type: 'PASS' }
   );

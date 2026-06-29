@@ -111,10 +111,8 @@ export interface Unit {
   templateId: string;
   hexId: HexId;
   facing: Facing;
-  // v3 cutover note (§A): 'active' is legacy 2nd-ed (7AP activation) and is
-  // removed in the step-3 reducer rewrite, when the action economy becomes
-  // act → Spent Check → Stress. The Fresh/Spent pair is the v3 model (§2.2).
-  status: 'fresh' | 'active' | 'spent';
+  /** v3 (§2.2): a Unit is Fresh or Spent (no 7AP activation). */
+  status: 'fresh' | 'spent';
   /**
    * v3 Stress (§2.6): true once this Unit took an Action; adds +1AP to its next
    * Action Cost if it acts again on this side's very next Turn. Not cumulative;
@@ -214,10 +212,6 @@ export interface PlayerState {
   unitLosses: number;
   vp: number;
   hand: CardId[];
-  /** The single unit this side currently has activated (null if none). */
-  activatedUnitId: UnitId | null;
-  /** Action points remaining on the activated unit. */
-  ap: number;
   /** True once this side has passed in the current pass cycle. */
   passed: boolean;
 }
@@ -246,15 +240,28 @@ export interface GameEvent {
 // Actions (the only way to mutate state; also the future wire format)
 // ---------------------------------------------------------------------------
 
+// v3 CAP fields (§3.2–§3.4): `capCostReduce` lowers the Action Cost before the
+// Spent Check (any number, −1 each, can reach 0AP ⇒ no check); `capDiceMod`
+// shifts a d6 Number Check by ±1 each (≤2). Both spend CAPs.
 export type Action =
-  | { type: 'ACTIVATE_UNIT'; unitId: UnitId }
-  | { type: 'MOVE'; unitId: UnitId; toHexId: HexId; capSpend?: number }
-  | { type: 'PIVOT'; unitId: UnitId; facing: Facing; useCap?: boolean }
-  | { type: 'FIRE'; attackerId: UnitId; targetId: UnitId; capMod?: number; capSpend?: number }
-  | { type: 'CLOSE_COMBAT'; attackerId: UnitId; targetId: UnitId; capMod?: number; capSpend?: number }
-  | { type: 'RALLY'; unitId: UnitId; capMod?: number; capSpend?: number }
-  | { type: 'MARK_SPENT'; unitId: UnitId }
-  | { type: 'STALL'; useCap?: boolean }
+  | { type: 'MOVE'; unitId: UnitId; toHexId: HexId; capCostReduce?: number }
+  | { type: 'PIVOT'; unitId: UnitId; facing: Facing; capCostReduce?: number }
+  | {
+      type: 'FIRE';
+      attackerId: UnitId;
+      targetId: UnitId;
+      capDiceMod?: number;
+      capCostReduce?: number;
+    }
+  | {
+      type: 'CLOSE_COMBAT';
+      attackerId: UnitId;
+      targetId: UnitId;
+      capDiceMod?: number;
+      capCostReduce?: number;
+    }
+  | { type: 'RALLY'; unitId: UnitId; capDiceMod?: number; capCostReduce?: number }
+  | { type: 'STALL'; unitId: UnitId; capCostReduce?: number }
   | { type: 'PASS' };
 
 export type ActionType = Action['type'];

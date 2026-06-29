@@ -5,14 +5,21 @@
  * format (CLAUDE.md §3.4). It deep-clones the input, mutates the clone, and
  * returns it; all validation happens before any mutation, so a denied action
  * leaves the original state untouched.
+ *
+ * v3 action economy (§2.0–§2.8): pick one Unit → one Action. The Action Cost is
+ * a threshold, not a budget: after the action resolves, roll the Spent Die —
+ * `roll > cost` keeps the Unit Fresh, else it becomes Spent. CAPs may lower the
+ * cost before the check (to 0AP ⇒ no check, §3.4). Acting Stresses the Unit
+ * (+1AP next Turn if reused, §2.6).
  */
 import { FOOT_HIT_MARKERS } from '../data/hitMarkers';
-import { applyUnitLoss, clampCapMod } from './cap';
+import { applyUnitLoss, clampCapMod, reduceActionCost } from './cap';
 import { attackContext, closeCombatContext, rollCloseCombat, rollStackFire } from './combat';
 import { isInFrontArc, parseHexId } from './hex';
 import { drawHit, effectiveStats, returnHitToPile, templateOf } from './hits';
 import { directionTo, moveCost, pivotCost } from './movement';
 import { RALLY_AP_COST, rollRally } from './rally';
+import { spentCheck } from './spent';
 import { endRound, switchTurn } from './turn';
 import { otherSide, updateVictoryHexControl } from './victory';
 import type {
@@ -20,13 +27,10 @@ import type {
   Facing,
   GameEvent,
   GameState,
-  PlayerState,
   ReduceResult,
   SideId,
   Unit,
 } from './types';
-
-type Mode = 'ap' | 'opportunity';
 
 export function reduce(state: GameState, action: Action): ReduceResult {
   if (state.phase !== 'playing') {
@@ -49,43 +53,52 @@ export function reduce(state: GameState, action: Action): ReduceResult {
 
   // -- shared helpers -------------------------------------------------------
 
-  const actionMode = (unit: Unit): Mode | null => {
-    const player = next.players[unit.side];
-    if (unit.side !== next.currentSide) return null;
-    if (player.activatedUnitId === unit.id) return 'ap';
-    if (unit.status === 'fresh') return 'opportunity';
-    return null;
-  };
-
-  const payAP = (player: PlayerState, cost: number): boolean => {
-    const fromAp = Math.min(cost, player.ap);
-    const fromCap = cost - fromAp;
-    if (fromCap > player.capCurrent) return false;
-    player.ap -= fromAp;
-    player.capCurrent -= fromCap;
-    return true;
-  };
-
   const resetPassCycle = () => {
     next.consecutivePasses = 0;
     next.players.A.passed = false;
     next.players.B.passed = false;
   };
 
-  const maybeSpendActivated = (player: PlayerState) => {
-    if (player.activatedUnitId && player.ap <= 0) {
-      const u = next.units[player.activatedUnitId];
-      if (u) u.status = 'spent';
-      player.activatedUnitId = null;
-      player.ap = 0;
-    }
+  /**
+   * Plan a cost-bearing action's CAP spend (§3.3–§3.4). `base` already folds in
+   * terrain and hit-marker deltas (movement/hits do that); here we add Stress
+   * (+1AP, §2.6) then apply CAP cost-reduction. A Spent Unit must reach 0AP, so
+   * we force enough reduction for it (§3.4) — legality of that is checked by the
+   * caller against `capCurrent`.
+   */
+  const planCost = (unit: Unit, base: number, requestedReduce: number) => {
+    const stress = unit.stressed ? 1 : 0;
+    const costBeforeReduce = base + stress;
+    let reduce = Math.max(0, Math.trunc(requestedReduce));
+    if (unit.status === 'spent') reduce = Math.max(reduce, costBeforeReduce);
+    const { cost, capsSpent } = reduceActionCost(costBeforeReduce, reduce);
+    return { cost, capsSpent, costBeforeReduce };
   };
 
-  /** After a completed action: spend the unit appropriately and pass the turn. */
-  const completeAction = (unit: Unit, mode: Mode, player: PlayerState) => {
+  /**
+   * After an action resolves: roll the Spent Check (skipped at 0AP, §3.4), move
+   * the acting side's single Stress Marker onto `unit` (§2.6), break the pass
+   * cycle, and hand the turn over.
+   */
+  const afterAction = (unit: Unit, cost: number) => {
+    if (cost > 0) {
+      const sc = spentCheck(next.rng, cost);
+      next.rng = sc.rng;
+      if (!sc.fresh) unit.status = 'spent';
+      log(
+        'spent',
+        `${unit.id} Spent Check: rolled ${sc.roll} vs cost ${cost} -> ${sc.fresh ? 'Fresh' : 'Spent'}`,
+        unit.side,
+      );
+    } else {
+      log('spent', `${unit.id} 0AP action — no Spent Check`, unit.side);
+    }
+    // Stress Marker move (§2.6): at most one stressed Unit per side.
+    for (const u of Object.values(next.units)) {
+      if (u.side === unit.side) u.stressed = false;
+    }
+    unit.stressed = true;
     resetPassCycle();
-    if (mode === 'opportunity') unit.status = 'spent';
-    else maybeSpendActivated(player);
     switchTurn(next);
   };
 
@@ -97,11 +110,6 @@ export function reduce(state: GameState, action: Action): ReduceResult {
     const opp = otherSide(unit.side);
     next.players[opp].vp += tmpl.vp;
     applyUnitLoss(next.players[unit.side]);
-    const ownerP = next.players[unit.side];
-    if (ownerP.activatedUnitId === unit.id) {
-      ownerP.activatedUnitId = null;
-      ownerP.ap = 0;
-    }
     delete next.units[unit.id];
     log('destroyed', `${unit.id} destroyed (+${tmpl.vp} VP to ${opp})`, unit.side);
   };
@@ -126,61 +134,45 @@ export function reduce(state: GameState, action: Action): ReduceResult {
 
   // -- action handlers ------------------------------------------------------
 
-  const activate = (unitId: string): ReduceResult => {
-    const unit = next.units[unitId];
-    if (!unit) return deny('no such unit');
-    if (unit.side !== next.currentSide) return deny('not your turn');
-    if (unit.status !== 'fresh') return deny('unit must be fresh to activate');
-    const player = next.players[unit.side];
-    if (player.activatedUnitId && player.activatedUnitId !== unitId) {
-      const old = next.units[player.activatedUnitId];
-      if (old) old.status = 'spent';
-    }
-    player.activatedUnitId = unitId;
-    player.ap = 7;
-    unit.status = 'active';
-    resetPassCycle();
-    log('activate', `${unitId} activated (7 AP)`, unit.side);
-    return finish();
-  };
-
   const doMove = (a: Extract<Action, { type: 'MOVE' }>): ReduceResult => {
     const unit = next.units[a.unitId];
     if (!unit) return deny('no such unit');
-    const mode = actionMode(unit);
-    if (!mode) return deny('unit not actionable this turn');
+    if (unit.side !== next.currentSide) return deny('not your turn');
     const mc = moveCost(next, unit, a.toHexId);
     if (mc.ap == null) return deny(mc.reason ?? 'illegal move');
     const player = next.players[unit.side];
-    if (mode === 'ap' && !payAP(player, mc.ap)) return deny('not enough AP/CAP');
+    const { cost, capsSpent, costBeforeReduce } = planCost(unit, mc.ap, a.capCostReduce ?? 0);
+    if (unit.status === 'spent' && player.capCurrent < costBeforeReduce)
+      return deny('spent unit needs enough CAP to reach 0AP');
+    if (player.capCurrent < capsSpent) return deny('not enough CAP');
+    player.capCurrent -= capsSpent;
 
     const oldHexId = unit.hexId;
     const dir = directionTo(oldHexId, a.toHexId);
     const forward = isInFrontArc(parseHexId(oldHexId), unit.facing, parseHexId(a.toHexId));
     unit.hexId = a.toHexId;
     if (forward && dir >= 0) unit.facing = dir as Facing;
-    log(
-      'move',
-      `${unit.id} -> ${a.toHexId} (${mode === 'ap' ? mc.ap + ' AP' : 'opportunity'})`,
-      unit.side,
-    );
+    log('move', `${unit.id} -> ${a.toHexId} (cost ${cost})`, unit.side);
     updateVictoryHexControl(next);
-    completeAction(unit, mode, player);
+    afterAction(unit, cost);
     return finish();
   };
 
   const doPivot = (a: Extract<Action, { type: 'PIVOT' }>): ReduceResult => {
     const unit = next.units[a.unitId];
     if (!unit) return deny('no such unit');
-    const mode = actionMode(unit);
-    if (!mode) return deny('unit not actionable this turn');
+    if (unit.side !== next.currentSide) return deny('not your turn');
     const eff = effectiveStats(next, unit);
     if (!eff.canPivot) return deny('unit cannot pivot');
     const player = next.players[unit.side];
-    if (mode === 'ap' && !payAP(player, pivotCost())) return deny('not enough AP/CAP');
+    const { cost, capsSpent, costBeforeReduce } = planCost(unit, pivotCost(), a.capCostReduce ?? 0);
+    if (unit.status === 'spent' && player.capCurrent < costBeforeReduce)
+      return deny('spent unit needs enough CAP to reach 0AP');
+    if (player.capCurrent < capsSpent) return deny('not enough CAP');
+    player.capCurrent -= capsSpent;
     unit.facing = a.facing;
-    log('pivot', `${unit.id} pivots to ${a.facing}`, unit.side);
-    completeAction(unit, mode, player);
+    log('pivot', `${unit.id} pivots to ${a.facing} (cost ${cost})`, unit.side);
+    afterAction(unit, cost);
     return finish();
   };
 
@@ -188,22 +180,23 @@ export function reduce(state: GameState, action: Action): ReduceResult {
     const attacker = next.units[a.attackerId];
     const target = next.units[a.targetId];
     if (!attacker || !target) return deny('no such unit');
-    const mode = actionMode(attacker);
-    if (!mode) return deny('attacker not actionable this turn');
-    const capMod = clampCapMod(a.capMod ?? 0);
-    const ctx = attackContext(next, attacker, target, capMod);
+    if (attacker.side !== next.currentSide) return deny('not your turn');
+    const diceMod = clampCapMod(a.capDiceMod ?? 0);
+    const ctx = attackContext(next, attacker, target, diceMod);
     if (!ctx.legal) return deny(ctx.reason ?? 'illegal attack');
 
     const player = next.players[attacker.side];
     const eff = effectiveStats(next, attacker);
-    if (mode === 'ap' && !payAP(player, eff.apToFire)) return deny('not enough AP/CAP to fire');
-    const capModCost = Math.abs(capMod);
-    if (player.capCurrent < capModCost) return deny('not enough CAP for dice modifier');
-    player.capCurrent -= capModCost;
+    const { cost, capsSpent, costBeforeReduce } = planCost(attacker, eff.apToFire, a.capCostReduce ?? 0);
+    if (attacker.status === 'spent' && player.capCurrent < costBeforeReduce)
+      return deny('spent unit needs enough CAP to reach 0AP');
+    const capNeeded = capsSpent + Math.abs(diceMod);
+    if (player.capCurrent < capNeeded) return deny('not enough CAP to fire');
+    player.capCurrent -= capNeeded;
 
     // §7.5.1: one shot at a hex resolves against every enemy stacked there, each
     // with its own roll, for the single fire cost already paid above.
-    const stack = rollStackFire(next, attacker, target.hexId, capMod);
+    const stack = rollStackFire(next, attacker, target.hexId, diceMod);
     next.rng = stack.rng;
     for (const { targetId, roll } of stack.rolls) {
       log(
@@ -219,7 +212,7 @@ export function reduce(state: GameState, action: Action): ReduceResult {
         if (t) applyHit(t, roll.critical);
       }
     }
-    completeAction(attacker, mode, player);
+    afterAction(attacker, cost);
     return finish();
   };
 
@@ -227,21 +220,21 @@ export function reduce(state: GameState, action: Action): ReduceResult {
     const attacker = next.units[a.attackerId];
     const target = next.units[a.targetId];
     if (!attacker || !target) return deny('no such unit');
-    const mode = actionMode(attacker);
-    if (!mode) return deny('attacker not actionable this turn');
-    const capMod = clampCapMod(a.capMod ?? 0);
+    if (attacker.side !== next.currentSide) return deny('not your turn');
+    const diceMod = clampCapMod(a.capDiceMod ?? 0);
     const ctx = closeCombatContext(next, attacker, target);
     if (!ctx.legal) return deny(ctx.reason ?? 'illegal close combat');
 
     const player = next.players[attacker.side];
     const eff = effectiveStats(next, attacker);
-    if (mode === 'ap' && !payAP(player, eff.apToFire))
-      return deny('not enough AP/CAP for close combat');
-    const capModCost = Math.abs(capMod);
-    if (player.capCurrent < capModCost) return deny('not enough CAP for dice modifier');
-    player.capCurrent -= capModCost;
+    const { cost, capsSpent, costBeforeReduce } = planCost(attacker, eff.apToFire, a.capCostReduce ?? 0);
+    if (attacker.status === 'spent' && player.capCurrent < costBeforeReduce)
+      return deny('spent unit needs enough CAP to reach 0AP');
+    const capNeeded = capsSpent + Math.abs(diceMod);
+    if (player.capCurrent < capNeeded) return deny('not enough CAP for close combat');
+    player.capCurrent -= capNeeded;
 
-    const roll = rollCloseCombat(next, attacker, target, capMod);
+    const roll = rollCloseCombat(next, attacker, target, diceMod);
     next.rng = roll.rng;
     log(
       'cc',
@@ -251,29 +244,30 @@ export function reduce(state: GameState, action: Action): ReduceResult {
       attacker.side,
     );
     if (roll.hit) applyHit(target, roll.critical);
-    completeAction(attacker, mode, player);
+    afterAction(attacker, cost);
     return finish();
   };
 
   const doRally = (a: Extract<Action, { type: 'RALLY' }>): ReduceResult => {
     const unit = next.units[a.unitId];
     if (!unit) return deny('no such unit');
-    const mode = actionMode(unit);
-    if (!mode) return deny('unit not actionable this turn');
+    if (unit.side !== next.currentSide) return deny('not your turn');
     if (unit.hitMarkers.length === 0) return deny('unit has no hit marker');
     const enemyHere = Object.values(next.units).some(
       (u) => u.side !== unit.side && u.hexId === unit.hexId,
     );
     if (enemyHere) return deny('cannot rally with enemy in hex');
 
-    const capMod = clampCapMod(a.capMod ?? 0);
+    const diceMod = clampCapMod(a.capDiceMod ?? 0);
     const player = next.players[unit.side];
-    if (mode === 'ap' && !payAP(player, RALLY_AP_COST)) return deny('not enough AP/CAP to rally');
-    const capModCost = Math.abs(capMod);
-    if (player.capCurrent < capModCost) return deny('not enough CAP for dice modifier');
-    player.capCurrent -= capModCost;
+    const { cost, capsSpent, costBeforeReduce } = planCost(unit, RALLY_AP_COST, a.capCostReduce ?? 0);
+    if (unit.status === 'spent' && player.capCurrent < costBeforeReduce)
+      return deny('spent unit needs enough CAP to reach 0AP');
+    const capNeeded = capsSpent + Math.abs(diceMod);
+    if (player.capCurrent < capNeeded) return deny('not enough CAP to rally');
+    player.capCurrent -= capNeeded;
 
-    const rr = rollRally(next, unit, capMod);
+    const rr = rollRally(next, unit, diceMod);
     next.rng = rr.rng;
     if (rr.success) {
       const removed = unit.hitMarkers[0]!;
@@ -293,50 +287,32 @@ export function reduce(state: GameState, action: Action): ReduceResult {
         unit.side,
       );
     }
-    completeAction(unit, mode, player);
+    // §7.10: a mandatory Spent Check follows the rally regardless of result —
+    // produced here because every cost-bearing action goes through afterAction.
+    afterAction(unit, cost);
     return finish();
   };
 
-  const doMarkSpent = (a: Extract<Action, { type: 'MARK_SPENT' }>): ReduceResult => {
+  const doStall = (a: Extract<Action, { type: 'STALL' }>): ReduceResult => {
     const unit = next.units[a.unitId];
     if (!unit) return deny('no such unit');
     if (unit.side !== next.currentSide) return deny('not your turn');
     const player = next.players[unit.side];
-    unit.status = 'spent';
-    if (player.activatedUnitId === unit.id) {
-      player.activatedUnitId = null;
-      player.ap = 0;
-    }
-    log('spent', `${unit.id} marked spent`, unit.side);
-    return finish(); // not a turn handover (beginning-of-turn bookkeeping)
-  };
-
-  const doStall = (a: Extract<Action, { type: 'STALL' }>): ReduceResult => {
-    const player = next.players[next.currentSide];
-    if (a.useCap) {
-      if (player.capCurrent < 1) return deny('no CAP to stall');
-      player.capCurrent -= 1;
-    } else if (player.activatedUnitId && player.ap >= 1) {
-      player.ap -= 1;
-      maybeSpendActivated(player);
-    } else if (player.capCurrent >= 1) {
-      player.capCurrent -= 1;
-    } else {
-      return deny('nothing to spend for a stall');
-    }
-    resetPassCycle();
-    log('stall', `${next.currentSide} stalls`, next.currentSide);
-    switchTurn(next);
+    const { cost, capsSpent, costBeforeReduce } = planCost(unit, 1, a.capCostReduce ?? 0);
+    if (unit.status === 'spent' && player.capCurrent < costBeforeReduce)
+      return deny('spent unit needs enough CAP to reach 0AP');
+    if (player.capCurrent < capsSpent) return deny('not enough CAP');
+    player.capCurrent -= capsSpent;
+    log('stall', `${next.currentSide} stalls with ${unit.id} (cost ${cost})`, next.currentSide);
+    afterAction(unit, cost);
     return finish();
   };
 
   const doPass = (): ReduceResult => {
     const player = next.players[next.currentSide];
-    if (player.activatedUnitId) {
-      const u = next.units[player.activatedUnitId];
-      if (u) u.status = 'spent';
-      player.activatedUnitId = null;
-      player.ap = 0;
+    // §2.7: Passing removes the passing side's Stress Marker (opponent keeps theirs).
+    for (const u of Object.values(next.units)) {
+      if (u.side === next.currentSide) u.stressed = false;
     }
     player.passed = true;
     next.consecutivePasses += 1;
@@ -353,8 +329,6 @@ export function reduce(state: GameState, action: Action): ReduceResult {
   // -- dispatch -------------------------------------------------------------
 
   switch (action.type) {
-    case 'ACTIVATE_UNIT':
-      return activate(action.unitId);
     case 'MOVE':
       return doMove(action);
     case 'PIVOT':
@@ -365,8 +339,6 @@ export function reduce(state: GameState, action: Action): ReduceResult {
       return doCloseCombat(action);
     case 'RALLY':
       return doRally(action);
-    case 'MARK_SPENT':
-      return doMarkSpent(action);
     case 'STALL':
       return doStall(action);
     case 'PASS':

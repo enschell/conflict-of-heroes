@@ -57,8 +57,7 @@ describe('close combat', () => {
     addUnit(s, 'a', 'A', 0, 0, 0, 'rifle');
     addUnit(s, 'e', 'B', 0, 0, 0, 'rifle');
 
-    const activated = reduce(s, { type: 'ACTIVATE_UNIT', unitId: 'a' }).state;
-    const res = reduce(activated, { type: 'CLOSE_COMBAT', attackerId: 'a', targetId: 'e' });
+    const res = reduce(s, { type: 'CLOSE_COMBAT', attackerId: 'a', targetId: 'e' });
     expect(res.events.some((e) => e.type === 'cc')).toBe(true);
   });
 
@@ -74,8 +73,7 @@ describe('close combat', () => {
     expect(acts.some((x) => x.type === 'MOVE' && x.toHexId === '1,0')).toBe(true);
     expect(acts.some((x) => x.type === 'FIRE' && x.targetId === 'e')).toBe(true);
 
-    const activated = reduce(s, { type: 'ACTIVATE_UNIT', unitId: 'a' }).state;
-    const moved = reduce(activated, { type: 'MOVE', unitId: 'a', toHexId: '1,0' });
+    const moved = reduce(s, { type: 'MOVE', unitId: 'a', toHexId: '1,0' });
     expect(moved.state.units['a']?.hexId).toBe('1,0'); // moved into the enemy hex
   });
 });

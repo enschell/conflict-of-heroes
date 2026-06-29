@@ -21,8 +21,6 @@ function player(side: SideId): PlayerState {
     unitLosses: 0,
     vp: 0,
     hand: [],
-    activatedUnitId: null,
-    ap: 0,
     passed: false,
   };
 }

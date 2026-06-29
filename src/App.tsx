@@ -22,6 +22,7 @@ import { VictoryScreen } from './ui/VictoryScreen';
 
 export function App() {
   const game = useGame((s) => s.game);
+  const selectedUnitId = useGame((s) => s.selectedUnitId);
   const losMode = useGame((s) => s.losMode);
   const shiftHeld = useGame((s) => s.shiftHeld);
   const muted = useGame((s) => s.muted);
@@ -59,6 +60,14 @@ export function App() {
   const cs = game.currentSide;
   const nation = game.players[cs].nations.map((n) => NATIONS[n]?.name ?? n).join(', ');
 
+  // v3 Stall (§2.8) is taken by a specific Unit: prefer the selected unit, else
+  // the side's first Fresh unit. The reducer validates legality.
+  const sel = selectedUnitId ? game.units[selectedUnitId] : null;
+  const stallUnitId =
+    sel && sel.side === cs
+      ? sel.id
+      : Object.values(game.units).find((u) => u.side === cs && u.status === 'fresh')?.id;
+
   return (
     <div className="layout">
       <header className="topbar">
@@ -71,7 +80,13 @@ export function App() {
         </div>
         <div className="topbar__controls">
           <button onClick={() => dispatch({ type: 'PASS' })}>Pass</button>
-          <button onClick={() => dispatch({ type: 'STALL' })}>Stall</button>
+          <button
+            disabled={!stallUnitId}
+            title="Stall (§2.8): a unit does nothing but makes a Spent Check and is Stressed"
+            onClick={() => stallUnitId && dispatch({ type: 'STALL', unitId: stallUnitId })}
+          >
+            Stall
+          </button>
           <button onClick={undo}>Undo</button>
           <button onClick={redo}>Redo</button>
           <button onClick={() => setSavesOpen(true)}>Saves</button>

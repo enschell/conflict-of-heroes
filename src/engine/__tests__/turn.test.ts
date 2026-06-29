@@ -58,7 +58,7 @@ describe('turn & round flow (rulebook §2)', () => {
     s = reduce(s, { type: 'PASS' }).state;
     expect(s.consecutivePasses).toBe(1);
     const unit = s.currentSide === 'A' ? 'A1' : 'B1';
-    s = reduce(s, { type: 'ACTIVATE_UNIT', unitId: unit }).state;
+    s = reduce(s, { type: 'STALL', unitId: unit }).state;
     expect(s.consecutivePasses).toBe(0);
   });
 

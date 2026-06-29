@@ -26,7 +26,7 @@ describe('pinned', () => {
 });
 
 describe('suppressed', () => {
-  it('pays +1 AP to fire (4 → 5) and keeps firing legal', () => {
+  it('adds +1 AP to fire (4 → 5), so the Spent Check is taken against cost 5', () => {
     const s = baseState();
     addTemplate(s, rifleTemplate()); // apToFire 4
     addHex(s, 0, 0);
@@ -34,12 +34,9 @@ describe('suppressed', () => {
     addUnit(s, 'atk', 'A', 0, 0, 0, 'rifle', ['suppressed']);
     addUnit(s, 'tgt', 'B', 1, 0, 3, 'rifle');
 
-    const activated = reduce(s, { type: 'ACTIVATE_UNIT', unitId: 'atk' }).state;
-    expect(activated.players.A.ap).toBe(7);
-
-    const fired = reduce(activated, { type: 'FIRE', attackerId: 'atk', targetId: 'tgt' });
-    // 7 AP − (4 base + 1 suppressed) = 2 remaining
-    expect(fired.state.players.A.ap).toBe(2);
+    const fired = reduce(s, { type: 'FIRE', attackerId: 'atk', targetId: 'tgt' });
     expect(fired.events.some((e) => e.type === 'fire')).toBe(true);
+    const spent = fired.events.find((e) => e.type === 'spent');
+    expect(spent?.text).toMatch(/vs cost 5/); // 4 base + 1 suppressed
   });
 });

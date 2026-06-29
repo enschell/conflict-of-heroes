@@ -1,8 +1,8 @@
 /**
  * Selected-unit inspector + action menu. Shows the unit's effective stats and
  * the engine's legal actions as buttons (with a live AV vs DV fire preview).
- * Move/fire are also available by clicking the board. Opportunity actions are
- * confirmed via the store before they commit.
+ * Move/fire are also available by clicking the board. v3: each Action is
+ * followed by a Spent Check (§2.5) and Stresses the unit (§2.6).
  */
 import { attackContext, closeCombatContext, effectiveStats, legalActionsForUnit, templateOf } from '../engine';
 import type { Facing } from '../engine/types';
@@ -13,7 +13,6 @@ const ARROWS = ['→', '↗', '↖', '←', '↙', '↘'];
 export function Inspector() {
   const game = useGame((s) => s.game);
   const selectedUnitId = useGame((s) => s.selectedUnitId);
-  const dispatch = useGame((s) => s.dispatch);
   const fire = useGame((s) => s.fire);
   const closeCombat = useGame((s) => s.closeCombat);
   const rally = useGame((s) => s.rally);
@@ -34,11 +33,7 @@ export function Inspector() {
   const eff = effectiveStats(game, unit);
   const yours = unit.side === game.currentSide;
   const acts = yours ? legalActionsForUnit(game, unit.id) : [];
-  const player = game.players[unit.side];
-  const isActivated = player.activatedUnitId === unit.id;
 
-  const canActivate = acts.some((a) => a.type === 'ACTIVATE_UNIT');
-  const canMarkSpent = acts.some((a) => a.type === 'MARK_SPENT');
   const canPivot = acts.some((a) => a.type === 'PIVOT');
   const canRally = acts.some((a) => a.type === 'RALLY');
   const hasMove = acts.some((a) => a.type === 'MOVE');
@@ -53,18 +48,14 @@ export function Inspector() {
         {unit.id} <span className="dim">· {tmpl.name}</span>
       </h3>
 
-      {isActivated && (
-        <div className="ap-readout">
-          <span className="ap-readout__num">{player.ap}</span>
-          <span className="ap-readout__label">AP remaining (of 7)</span>
-        </div>
-      )}
-
       <div className="stats-grid">
         <span>Side</span>
         <b>{unit.side}</b>
         <span>Status</span>
-        <b>{isActivated ? 'activated' : unit.status}</b>
+        <b>
+          {unit.status}
+          {unit.stressed ? ' · stressed' : ''}
+        </b>
         <span>Hex / facing</span>
         <b>
           {unit.hexId} {ARROWS[unit.facing]}
@@ -94,13 +85,11 @@ export function Inspector() {
 
       {yours && (
         <div className="actions">
-          {canActivate && (
-            <button className="primary" onClick={() => dispatch({ type: 'ACTIVATE_UNIT', unitId: unit.id })}>
-              Activate (7 AP)
-            </button>
-          )}
-          {isActivated && canMarkSpent && (
-            <button onClick={() => dispatch({ type: 'MARK_SPENT', unitId: unit.id })}>End activation</button>
+          {unit.status === 'spent' && (
+            <p className="dim">
+              Spent — an Action is only possible by spending CAPs to reduce its
+              cost to 0AP (§3.4).
+            </p>
           )}
           {canRally && <button onClick={() => rally(unit.id)}>Rally (5 AP)</button>}
           {hasMove && <p className="dim">Move: click a highlighted green hex.</p>}
@@ -147,8 +136,11 @@ export function Inspector() {
             </div>
           )}
 
-          {!canActivate && !isActivated && acts.length > 0 && (
-            <p className="dim">Fresh unit — actions here are opportunity actions (you'll be asked to confirm; the unit is spent after).</p>
+          {acts.length > 0 && (
+            <p className="dim">
+              After acting, a Spent Check decides if {unit.id} stays Fresh; the
+              unit becomes Stressed (+1AP next Turn).
+            </p>
           )}
         </div>
       )}

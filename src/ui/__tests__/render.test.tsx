@@ -60,7 +60,7 @@ describe('UI renders', () => {
     useGame.getState().select(own.id);
     const html = render();
     expect(html).toContain(own.id);
-    expect(html).toContain('Activate');
+    expect(html).toContain('Spent Check'); // v3 inspector note (no more Activate)
   });
 
   it('renders the dice modal when a roll is pending', () => {

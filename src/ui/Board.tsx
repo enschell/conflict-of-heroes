@@ -189,7 +189,7 @@ export function Board() {
                     center={{ x: c.x + off, y: c.y + off }}
                     size={HEX_SIZE}
                     selected={u.id === selectedUnitId}
-                    activated={game.players[u.side].activatedUnitId === u.id}
+                    stressed={u.stressed}
                     onClick={(e) => hexClick(u.hexId, { ctrl: e.ctrlKey, x: e.clientX, y: e.clientY })}
                   />
                 </g>

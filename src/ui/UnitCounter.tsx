@@ -28,12 +28,12 @@ interface Props {
   center: Pt;
   size: number;
   selected: boolean;
-  /** True if this is its side's currently activated unit (orange outline). */
-  activated?: boolean;
+  /** True if this unit holds its side's Stress Marker (amber outline, §2.6). */
+  stressed?: boolean;
   onClick: (e: ReactMouseEvent) => void;
 }
 
-export function UnitCounter({ game, unit, center, size, selected, activated = false, onClick }: Props) {
+export function UnitCounter({ game, unit, center, size, selected, stressed = false, onClick }: Props) {
   const tmpl = templateOf(game, unit);
   const eff = effectiveStats(game, unit);
   const s = size * 1.42; // counter side
@@ -73,7 +73,7 @@ export function UnitCounter({ game, unit, center, size, selected, activated = fa
         stroke={selected ? '#ffd24a' : accent}
         strokeWidth={selected ? 3 : 1.5}
       />
-      {activated && (
+      {stressed && (
         <rect
           x={x - 3}
           y={y - 3}
@@ -83,6 +83,7 @@ export function UnitCounter({ game, unit, center, size, selected, activated = fa
           fill="none"
           stroke="#ff8c00"
           strokeWidth={3}
+          strokeDasharray="4 3"
           pointerEvents="none"
         />
       )}

@@ -131,25 +131,6 @@ interface Store {
 const HISTORY_LIMIT = 100;
 
 export const useGame = create<Store>((set, get) => {
-  /** Is acting with this unit an opportunity action (fresh + not activated)? */
-  const isOpportunity = (unitId: UnitId): boolean => {
-    const g = get().game;
-    if (!g) return false;
-    const u = g.units[unitId];
-    if (!u || u.side !== g.currentSide) return false;
-    return u.status === 'fresh' && g.players[u.side].activatedUnitId !== unitId;
-  };
-
-  const oppMessage = (unitId: UnitId): string =>
-    `${unitId} is not activated. This is an OPPORTUNITY action — the unit will be ` +
-    `marked spent immediately afterward (no further actions this round). ` +
-    `Tip: Activate it first to spend all 7 AP. Continue?`;
-
-  const guard = (unitId: UnitId, proceed: () => void) => {
-    if (isOpportunity(unitId)) set({ pendingConfirm: { message: oppMessage(unitId), proceed } });
-    else proceed();
-  };
-
   /** Common UI reset when a whole new GameState is loaded/imported. */
   const resetForLoad = () => ({
     selectedUnitId: null,
@@ -409,11 +390,11 @@ export const useGame = create<Store>((set, get) => {
       });
     },
 
-    move: (unitId, toHexId) => guard(unitId, () => get().dispatch({ type: 'MOVE', unitId, toHexId })),
-    fire: (attackerId, targetId) => guard(attackerId, () => requestFireRoll(attackerId, targetId)),
-    closeCombat: (attackerId, targetId) => guard(attackerId, () => requestCcRoll(attackerId, targetId)),
-    rally: (unitId) => guard(unitId, () => requestRallyRoll(unitId)),
-    pivot: (unitId, facing) => guard(unitId, () => get().dispatch({ type: 'PIVOT', unitId, facing })),
+    move: (unitId, toHexId) => get().dispatch({ type: 'MOVE', unitId, toHexId }),
+    fire: (attackerId, targetId) => requestFireRoll(attackerId, targetId),
+    closeCombat: (attackerId, targetId) => requestCcRoll(attackerId, targetId),
+    rally: (unitId) => requestRallyRoll(unitId),
+    pivot: (unitId, facing) => get().dispatch({ type: 'PIVOT', unitId, facing }),
 
     commitRoll: () => {
       const { pendingRoll } = get();

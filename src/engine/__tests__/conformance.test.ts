@@ -13,7 +13,7 @@ import { FIREFIGHT_1 } from '../../data/firefights/firefight1';
 import type { Action, GameState } from '../types';
 
 const ORDER: Action['type'][] = [
-  'CLOSE_COMBAT', 'FIRE', 'MOVE', 'ACTIVATE_UNIT', 'RALLY', 'PIVOT', 'MARK_SPENT', 'STALL', 'PASS',
+  'CLOSE_COMBAT', 'FIRE', 'MOVE', 'RALLY', 'PIVOT', 'STALL', 'PASS',
 ];
 
 function pick(state: GameState): Action {
@@ -37,8 +37,6 @@ function play(seed: number) {
     expect(res.events.length === 1 && res.events[0]?.type === 'illegal').toBe(false);
     const post = res.state;
 
-    expect(post.players.A.ap).toBeGreaterThanOrEqual(0);
-    expect(post.players.B.ap).toBeGreaterThanOrEqual(0);
     expect(post.players.A.capCurrent).toBeGreaterThanOrEqual(0);
     expect(post.players.B.capCurrent).toBeGreaterThanOrEqual(0);
     for (const u of Object.values(post.units)) expect(u.hitMarkers.length).toBeLessThanOrEqual(1);

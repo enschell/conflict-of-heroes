@@ -9,15 +9,20 @@ const SIDES: SideId[] = ['A', 'B'];
 
 /**
  * Pre-round sequence (infantry subset) + initiative roll. Mutates `state`.
- * Flips spent units fresh, clears activations, resets CAP to start − losses,
+ * Flips Spent units Fresh, clears Stress (§2.6/§9), resets CAP to start − losses,
  * then rolls 2D6 per side (reroll ties) to decide who goes first.
+ *
+ * v3 note: the Pre-Round CAP floor of 3 (§7.13) is step 4, and v3 initiative
+ * (only the non-VP-advantage side rolls, ≥7 goes first, §9.11) is step 6 — both
+ * deferred; this keeps the 2nd-ed both-sides-roll initiative for now.
  */
 export function startRound(state: GameState): void {
-  for (const u of Object.values(state.units)) u.status = 'fresh';
+  for (const u of Object.values(state.units)) {
+    u.status = 'fresh';
+    u.stressed = false;
+  }
   for (const side of SIDES) {
     const p = state.players[side];
-    p.activatedUnitId = null;
-    p.ap = 0;
     p.passed = false;
     p.capCurrent = Math.max(0, p.capStart - p.unitLosses);
   }
