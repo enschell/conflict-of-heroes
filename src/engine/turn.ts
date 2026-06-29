@@ -1,6 +1,7 @@
 /**
  * Round and turn flow (rulebook §2.0–§2.3).
  */
+import { capCeiling } from './cap';
 import { roll2d6 } from './rng';
 import type { GameState, SideId } from './types';
 import { computeWinner, otherSide, updateVictoryHexControl } from './victory';
@@ -12,9 +13,9 @@ const SIDES: SideId[] = ['A', 'B'];
  * Flips Spent units Fresh, clears Stress (§2.6/§9), resets CAP to start − losses,
  * then rolls 2D6 per side (reroll ties) to decide who goes first.
  *
- * v3 note: the Pre-Round CAP floor of 3 (§7.13) is step 4, and v3 initiative
- * (only the non-VP-advantage side rolls, ≥7 goes first, §9.11) is step 6 — both
- * deferred; this keeps the 2nd-ed both-sides-roll initiative for now.
+ * v3 note: v3 initiative (only the non-VP-advantage side rolls, ≥7 goes first,
+ * §9.11) is step 6 — deferred; this keeps the 2nd-ed both-sides-roll initiative
+ * for now. The Pre-Round CAP reset already applies the §7.13 floor of 3.
  */
 export function startRound(state: GameState): void {
   for (const u of Object.values(state.units)) {
@@ -24,7 +25,7 @@ export function startRound(state: GameState): void {
   for (const side of SIDES) {
     const p = state.players[side];
     p.passed = false;
-    p.capCurrent = Math.max(0, p.capStart - p.unitLosses);
+    p.capCurrent = capCeiling(p); // §7.13: at least 3 CAPs at round start
   }
   state.consecutivePasses = 0;
 

@@ -334,6 +334,15 @@ function playGame(seed: number, style: Style): GameResult {
     check(post.players.A.capCurrent >= 0 && post.players.B.capCurrent >= 0, '3.2', 'CAP went negative');
     for (const u of Object.values(post.units)) check(u.hitMarkers.length <= 1, '7.4', `${u.id} has >1 hit marker`);
 
+    // §7.13: a new Round resets each side's CAP to max(3, capStart − losses).
+    if (post.phase === 'playing' && post.round > pre.round) {
+      for (const sd of ['A', 'B'] as SideId[]) {
+        const p = post.players[sd];
+        const exp = Math.max(3, p.capStart - p.unitLosses);
+        check(p.capCurrent === exp, '7.13', `round-reset CAP for ${sd} ${p.capCurrent} != ${exp}`);
+      }
+    }
+
     // VP only from destroyed units this step (§7.0) -------------------------
     const destroyed = Object.keys(pre.units).filter((id) => !post.units[id]);
     let vpToA = 0;
