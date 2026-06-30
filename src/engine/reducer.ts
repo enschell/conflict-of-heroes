@@ -18,7 +18,7 @@ import { attackContext, closeCombatContext, rollCloseCombat, rollStackFire } fro
 import { isInFrontArc, parseHexId } from './hex';
 import { drawHit, effectiveStats, returnHitToPile, templateOf } from './hits';
 import { groupConnected, groupStress, isValidSupporter } from './groups';
-import { directionTo, moveCost, pivotCost } from './movement';
+import { directionTo, moveCost, pivotCost, planVehicleMove } from './movement';
 import { RALLY_AP_COST, rollRally } from './rally';
 import { spentCheck } from './spent';
 import { endRound, switchTurn } from './turn';
@@ -178,21 +178,41 @@ export function reduce(state: GameState, action: Action): ReduceResult {
     const unit = next.units[a.unitId];
     if (!unit) return deny('no such unit');
     if (unit.side !== next.currentSide) return deny('not your turn');
-    const mc = moveCost(next, unit, a.toHexId);
-    if (mc.ap == null) return deny(mc.reason ?? 'illegal move');
+    const tmpl = templateOf(next, unit);
+    const path = a.path && a.path.length ? a.path : [a.toHexId];
+
+    // Vehicles may chain Bonus Moves (§15.2); foot units take one hex.
+    let base: number;
+    let finalHexId: string;
+    let finalFacing: Facing;
+    if (tmpl.kind === 'vehicle') {
+      const plan = planVehicleMove(next, unit, path);
+      if (plan.ap == null) return deny(plan.reason ?? 'illegal move');
+      base = plan.ap;
+      finalHexId = plan.finalHexId;
+      finalFacing = plan.finalFacing;
+    } else {
+      if (path.length !== 1) return deny('only vehicles may take Bonus Moves');
+      const mc = moveCost(next, unit, path[0]!);
+      if (mc.ap == null) return deny(mc.reason ?? 'illegal move');
+      base = mc.ap;
+      finalHexId = path[0]!;
+      const dir = directionTo(unit.hexId, finalHexId);
+      const forward = isInFrontArc(parseHexId(unit.hexId), unit.facing, parseHexId(finalHexId));
+      finalFacing = forward && dir >= 0 ? (dir as Facing) : unit.facing;
+    }
+
     const player = next.players[unit.side];
-    const { cost, capsSpent } = planCost(unit, mc.ap, a.capCostReduce ?? 0);
+    const { cost, capsSpent } = planCost(unit, base, a.capCostReduce ?? 0);
     if (unit.status === 'spent' && cost > 0)
       return deny('a Spent unit must spend CAPs to reduce its Action Cost to 0AP (§3.4)');
     if (player.capCurrent < capsSpent) return deny('not enough CAP');
     player.capCurrent -= capsSpent;
 
-    const oldHexId = unit.hexId;
-    const dir = directionTo(oldHexId, a.toHexId);
-    const forward = isInFrontArc(parseHexId(oldHexId), unit.facing, parseHexId(a.toHexId));
-    unit.hexId = a.toHexId;
-    if (forward && dir >= 0) unit.facing = dir as Facing;
-    log('move', `${unit.id} -> ${a.toHexId} (cost ${cost})`, unit.side);
+    unit.hexId = finalHexId;
+    unit.facing = finalFacing;
+    const bonus = path.length > 1 ? ` (+${path.length - 1} bonus)` : '';
+    log('move', `${unit.id} -> ${finalHexId}${bonus} (cost ${cost})`, unit.side);
     updateVictoryHexControl(next);
     afterAction(unit, cost);
     return finish();

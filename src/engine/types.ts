@@ -267,7 +267,9 @@ export interface GameEvent {
 // Spent Check (any number, −1 each, can reach 0AP ⇒ no check); `capDiceMod`
 // shifts a d6 Number Check by ±1 each (≤2). Both spend CAPs.
 export type Action =
-  | { type: 'MOVE'; unitId: UnitId; toHexId: HexId; capCostReduce?: number }
+  // `path` (vehicles, §15.2): the multi-hex Bonus-Move sequence (each hex
+  // adjacent to the last); when set, `toHexId` is its final hex. Foot moves omit it.
+  | { type: 'MOVE'; unitId: UnitId; toHexId: HexId; path?: HexId[]; capCostReduce?: number }
   | { type: 'PIVOT'; unitId: UnitId; facing: Facing; capCostReduce?: number }
   | {
       type: 'FIRE';
