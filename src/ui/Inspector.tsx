@@ -5,8 +5,14 @@
  * followed by a Spent Check (§2.5) and Stresses the unit (§2.6).
  */
 import { attackContext, closeCombatContext, effectiveStats, legalActionsForUnit, templateOf } from '../engine';
+import { FOOT_HIT_MARKERS, hitMarkerEffects } from '../data/hitMarkers';
 import type { Facing } from '../engine/types';
 import { useGame } from '../state/store';
+
+/** Title-case a hit-marker type id, e.g. 'cowering' → 'Cowering'. */
+function markerName(type: string): string {
+  return type.charAt(0).toUpperCase() + type.slice(1);
+}
 
 const ARROWS = ['→', '↗', '↖', '←', '↙', '↘'];
 
@@ -79,7 +85,16 @@ export function Inspector() {
         </b>
       </div>
 
-      {unit.hitMarkers[0] && <p className="hit-note">Hit: {unit.hitMarkers[0]}</p>}
+      {unit.hitMarkers[0] && (
+        <div className="hit-note">
+          <div className="hit-note__title">Hit: {markerName(unit.hitMarkers[0])}</div>
+          <ul className="hit-note__effects">
+            {hitMarkerEffects(FOOT_HIT_MARKERS[unit.hitMarkers[0]]).map((line) => (
+              <li key={line}>{line}</li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       {!yours && <p className="dim">This is the other side's unit.</p>}
 

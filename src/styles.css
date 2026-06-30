@@ -206,6 +206,21 @@ button.link {
   color: #ff8a8a;
   font-weight: 700;
   margin: 0.4rem 0;
+  border: 1px solid rgba(255, 138, 138, 0.45);
+  border-radius: 4px;
+  padding: 0.35rem 0.5rem;
+  background: rgba(255, 138, 138, 0.08);
+}
+.hit-note__title {
+  margin-bottom: 0.25rem;
+}
+.hit-note__effects {
+  margin: 0;
+  padding-left: 1.1rem;
+  font-weight: 600;
+}
+.hit-note__effects li {
+  margin: 0.1rem 0;
 }
 .actions {
   display: flex;

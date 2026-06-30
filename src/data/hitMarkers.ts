@@ -43,10 +43,52 @@ export const FOOT_HIT_MARKERS: Record<HitType, HitMarkerDef> = {
     fpRedDelta: 1,
     fpBlueDelta: 1,
     rangeOverride: 1,
-    frontDrDelta: 1,
+    frontDrDelta: 2, // §7.5 Soft Target table: Berserk Front Def +2 (Flank +1)
     flankDrDelta: 1,
   },
 };
+
+/**
+ * Human-readable list of a Hit Marker's restrictions and stat effects (§7.5),
+ * for display under a Hit Unit. Derived from the marker's own data so the UI
+ * always matches the modifiers the engine actually applies. Restrictions (what
+ * the Unit may not do) come first, then stat modifiers, then the Rally Number.
+ */
+export function hitMarkerEffects(def: HitMarkerDef): string[] {
+  const lines: string[] = [];
+  const sign = (n: number) => (n > 0 ? `+${n}` : `${n}`);
+
+  // What the Unit may not do.
+  if (def.killOnDraw) lines.push('Destroyed');
+  if (def.onlyRally) lines.push('Cannot take any Action other than Rally');
+  if (def.cannotMove && def.cannotPivot) lines.push('Cannot Move or Pivot');
+  else if (def.cannotMove) lines.push('Cannot Move');
+  else if (def.cannotPivot) lines.push('Cannot Pivot');
+  if (def.cannotFire) lines.push('Cannot Attack');
+
+  // Stat modifiers.
+  if (def.apToFireDelta) lines.push(`Attack Cost ${sign(def.apToFireDelta)} AP`);
+  if (def.moveCostDelta) lines.push(`Move / Pivot Cost ${sign(def.moveCostDelta)} AP`);
+  if (def.fpRedDelta != null && def.fpRedDelta === def.fpBlueDelta) {
+    lines.push(`Firepower ${sign(def.fpRedDelta)}`);
+  } else {
+    if (def.fpRedDelta) lines.push(`Red Firepower ${sign(def.fpRedDelta)}`);
+    if (def.fpBlueDelta) lines.push(`Blue Firepower ${sign(def.fpBlueDelta)}`);
+  }
+  if (def.rangeOverride != null) lines.push(`Range drops to ${def.rangeOverride}`);
+  if (def.frontDrDelta != null && def.frontDrDelta === def.flankDrDelta) {
+    lines.push(`Defense ${sign(def.frontDrDelta)}`);
+  } else {
+    if (def.frontDrDelta) lines.push(`Front Defense ${sign(def.frontDrDelta)}`);
+    if (def.flankDrDelta) lines.push(`Flank Defense ${sign(def.flankDrDelta)}`);
+  }
+
+  // Rally.
+  if (def.rally > 0) lines.push(`Rally Number: ${def.rally}`);
+  else if (!def.killOnDraw) lines.push('Cannot Rally');
+
+  return lines;
+}
 
 /** Build the starting foot hit-marker pile (type -> count). */
 export function makeFootHitPile(): Record<HitType, number> {
