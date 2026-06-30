@@ -22,7 +22,7 @@ import {
   rollStackFire,
   serialize,
 } from '../engine';
-import type { Action, Facing, GameEvent, GameState, HexId, UnitId } from '../engine/types';
+import type { Action, Facing, GameEvent, GameState, HexId, MissionDef, UnitId } from '../engine/types';
 import { MISSION_1 } from '../data/missions/mission1';
 import { playFire, playMove } from '../ui/sound';
 import {
@@ -99,7 +99,7 @@ interface Store {
   lastEvents: GameEvent[];
   muted: boolean;
 
-  newGame: () => void;
+  newGame: (def?: MissionDef) => void;
   resume: () => void;
   quitToMenu: () => void;
 
@@ -325,12 +325,14 @@ export const useGame = create<Store>((set, get) => {
     lastEvents: [],
     muted: false,
 
-    newGame: () => {
-      const game = initGame(MISSION_1);
+    newGame: (def = MISSION_1) => {
+      const game = initGame(def);
       saveAuto(game);
       set({
         game,
         selectedUnitId: null,
+        groupMode: false,
+        groupSel: [],
         losMode: false,
         losSource: null,
         hover: null,

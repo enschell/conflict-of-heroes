@@ -27,7 +27,7 @@ export function VictoryScreen() {
             Side B · {label('B')}: <b>{scores.B} VP</b>
           </div>
         </div>
-        <button className="primary" onClick={newGame}>
+        <button className="primary" onClick={() => newGame()}>
           New game
         </button>
       </div>

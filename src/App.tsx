@@ -103,7 +103,7 @@ export function App() {
           <button onClick={toggleMute} title="toggle sound">
             {muted ? '🔇' : '🔊'}
           </button>
-          <button onClick={newGame}>Restart</button>
+          <button onClick={() => newGame()}>Restart</button>
           <button onClick={quitToMenu}>Menu</button>
         </div>
       </header>
