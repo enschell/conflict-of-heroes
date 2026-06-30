@@ -111,6 +111,9 @@ This repo is self-describing: a fresh session needs only the code + these docs.
   §4, rules index §6, roadmap §8), then `README.md`, then **`rules/INDEX.md`** and the specific
   `rules/NN-*.md` for whatever you're building. (The old `reference/rulebook.txt` is superseded by
   `rules/`.)
+- **Authoring a Mission from the Mission Book PDF:** follow
+  `docs/extracting-missions-from-the-mission-book.md` (PyMuPDF render+extract, the
+  A–S × 01–12 label↔axial system, terrain transcription, and how Mission 1 was encoded).
 - **Verify before changing:** `npm install` (first time), then `npm test` (Vitest),
   `npm run typecheck`, `npm run build`, and `npm run conformance`. All green = known-good baseline.
 - **Run it:** `npm run dev` → http://localhost:5173. Windows: Node 24 is at
