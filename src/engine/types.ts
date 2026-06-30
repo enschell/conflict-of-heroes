@@ -280,6 +280,15 @@ export interface GameState {
   roundsTotal: number;
   /** Side that won initiative this round (took the first turn). */
   initiativeSide: SideId;
+  /** Side with first-Turn Initiative in Round 1 (mission-defined, §2.0). */
+  firstInitiativeSide: SideId;
+  /**
+   * The v3 "no-tie" VP track marker (§9.2): a signed VP Advantage from Side A's
+   * perspective — `> 0` means A leads by that many, `< 0` means B leads. It is
+   * never 0 (one side always holds VP Advantage); gaining VP steps it one space,
+   * skipping 0 when it would flip sides. `vpLeader`/`vpMargin` derive from it.
+   */
+  vpMarker: number;
   /** Side whose turn it currently is. */
   currentSide: SideId;
   /** Consecutive passes; 2 ends the round. */
@@ -293,7 +302,7 @@ export interface GameState {
   firefightId: string;
   victory: VictoryConfig;
   log: GameEvent[];
-  /** Winner once phase === 'gameOver' ('A' | 'B' | null for a tie). */
+  /** Winner once phase === 'gameOver'. v3 has no ties — always the VP-Advantage holder (§9.3). */
   winner?: SideId | null;
 }
 
@@ -333,6 +342,10 @@ export interface FirefightDef {
   seed: number;
   caps: Record<SideId, number>;
   nations: Record<SideId, NationId[]>;
+  /** Side with Round-1 Initiative (§2.0). Defaults to 'A' if omitted. */
+  firstInitiative?: SideId;
+  /** Starting VP per side (§9.2), e.g. Mission 1: Soviets begin with 1 VP. */
+  startVp?: Partial<Record<SideId, number>>;
   hexes: MapHexDef[];
   units: UnitPlacement[];
   templates: UnitTemplate[];

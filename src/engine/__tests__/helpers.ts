@@ -32,6 +32,8 @@ export function baseState(seed = 1): GameState {
     round: 1,
     roundsTotal: 5,
     initiativeSide: 'A',
+    firstInitiativeSide: 'A',
+    vpMarker: -1, // B (defender) holds the opening 1-VP advantage by default
     currentSide: 'A',
     consecutivePasses: 0,
     players: { A: player('A'), B: player('B') },

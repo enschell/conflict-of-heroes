@@ -4,18 +4,18 @@
 import { capCeiling } from './cap';
 import { roll2d6 } from './rng';
 import type { GameState, SideId } from './types';
-import { computeWinner, otherSide, updateVictoryHexControl } from './victory';
+import { computeWinner, gainVp, otherSide, updateVictoryHexControl, vpLeader } from './victory';
 
 const SIDES: SideId[] = ['A', 'B'];
 
 /**
- * Pre-round sequence (infantry subset) + initiative roll. Mutates `state`.
- * Flips Spent units Fresh, clears Stress (§2.6/§9), resets CAP to start − losses,
- * then rolls 2D6 per side (reroll ties) to decide who goes first.
- *
- * v3 note: v3 initiative (only the non-VP-advantage side rolls, ≥7 goes first,
- * §9.11) is step 6 — deferred; this keeps the 2nd-ed both-sides-roll initiative
- * for now. The Pre-Round CAP reset already applies the §7.13 floor of 3.
+ * Pre-Round Sequence (infantry subset, §9.4) + Initiative. Mutates `state`.
+ * Flips Spent units Fresh keeping markers + facing (§9.6), clears Stress, resets
+ * CAP to ceiling (floor 3, §7.13), then sets Initiative (§9.11):
+ *  - Round 1: the mission-defined side goes first (§2.0).
+ *  - Later Rounds: only the side WITHOUT VP Advantage rolls 2d6; on **7+** it
+ *    takes the first Turn, otherwise the VP leader does.
+ * (Smoke, cards, reinforcements, and artillery steps are later modules.)
  */
 export function startRound(state: GameState): void {
   for (const u of Object.values(state.units)) {
@@ -29,29 +29,50 @@ export function startRound(state: GameState): void {
   }
   state.consecutivePasses = 0;
 
-  let a: number;
-  let b: number;
-  do {
-    const ra = roll2d6(state.rng);
-    state.rng = ra.rng;
-    const rb = roll2d6(state.rng);
-    state.rng = rb.rng;
-    a = ra.value;
-    b = rb.value;
-  } while (a === b);
-  state.initiativeSide = a > b ? 'A' : 'B';
+  if (state.round === 1) {
+    state.initiativeSide = state.firstInitiativeSide;
+    state.log.push({
+      type: 'roundStart',
+      round: state.round,
+      text: `Round 1 — initiative: Side ${state.initiativeSide} (mission)`,
+    });
+  } else {
+    const leader = vpLeader(state); // holds VP Advantage → does NOT roll (§9.11)
+    const challenger = otherSide(leader);
+    const r = roll2d6(state.rng);
+    state.rng = r.rng;
+    state.initiativeSide = r.value >= 7 ? challenger : leader;
+    state.log.push({
+      type: 'roundStart',
+      round: state.round,
+      text:
+        `Round ${state.round} — initiative: Side ${challenger} (no VP advantage) ` +
+        `rolled ${r.value} → Side ${state.initiativeSide} goes first`,
+    });
+  }
   state.currentSide = state.initiativeSide;
   state.phase = 'playing';
-  state.log.push({
-    type: 'roundStart',
-    round: state.round,
-    text: `Round ${state.round} — initiative: A rolled ${a}, B rolled ${b} → Side ${state.initiativeSide} goes first`,
-  });
 }
 
-/** End the current round: score control, then advance or finish the game. */
+/**
+ * End the current Round (§9.0): update control, **award end-of-Round control VP**
+ * (§9.1) onto the no-tie track, then either finish the Mission (last Round → the
+ * VP-Advantage holder wins, §9.3) or advance into the next Pre-Round Sequence.
+ */
 export function endRound(state: GameState): void {
   updateVictoryHexControl(state);
+  for (const vh of state.victory.victoryHexes) {
+    const ctrl = state.hexes[vh.hexId]?.features.control;
+    if (ctrl) {
+      gainVp(state, ctrl, vh.vp);
+      state.log.push({
+        type: 'vp',
+        round: state.round,
+        side: ctrl,
+        text: `Side ${ctrl} controls ${vh.hexId}: +${vh.vp} VP (end of Round ${state.round})`,
+      });
+    }
+  }
   if (state.round >= state.roundsTotal) {
     state.phase = 'gameOver';
     state.winner = computeWinner(state);

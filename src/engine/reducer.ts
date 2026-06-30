@@ -21,7 +21,7 @@ import { directionTo, moveCost, pivotCost } from './movement';
 import { RALLY_AP_COST, rollRally } from './rally';
 import { spentCheck } from './spent';
 import { endRound, switchTurn } from './turn';
-import { otherSide, updateVictoryHexControl } from './victory';
+import { gainVp, otherSide, updateVictoryHexControl } from './victory';
 import type {
   Action,
   Facing,
@@ -110,7 +110,7 @@ export function reduce(state: GameState, action: Action): ReduceResult {
     }
     const tmpl = templateOf(next, unit);
     const opp = otherSide(unit.side);
-    next.players[opp].vp += tmpl.vp;
+    gainVp(next, opp, tmpl.vp); // §9.1: VP to the destroyer + step the no-tie marker
     applyUnitLoss(next.players[unit.side]);
     delete next.units[unit.id];
     log('destroyed', `${unit.id} destroyed (+${tmpl.vp} VP to ${opp})`, unit.side);

@@ -192,6 +192,11 @@ button.link {
   background: var(--line);
   color: var(--dim);
 }
+.badge--adv {
+  background: #d8b24a;
+  color: #1b1b1b;
+  margin-left: 0.35rem;
+}
 
 .stats-grid {
   display: grid;
@@ -352,6 +357,11 @@ button.link {
 }
 .outcome--miss {
   color: #ff8a8a;
+}
+.victory__adv {
+  color: #d8b24a;
+  font-weight: 700;
+  margin: 0.2rem 0 0;
 }
 .victory__scores {
   margin: 1rem 0;

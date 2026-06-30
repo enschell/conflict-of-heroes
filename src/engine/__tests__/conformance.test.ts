@@ -41,7 +41,7 @@ function play(seed: number) {
     expect(post.players.B.capCurrent).toBeGreaterThanOrEqual(0);
     for (const u of Object.values(post.units)) expect(u.hitMarkers.length).toBeLessThanOrEqual(1);
 
-    // VP changes only from kills during play (§2.5.1).
+    // VP changes from kills (§9.1) plus end-of-Round control awards (§9.0).
     const destroyed = Object.keys(pre.units).filter((id) => !post.units[id]);
     let vpToA = 0;
     let vpToB = 0;
@@ -51,8 +51,17 @@ function play(seed: number) {
       if (otherSide(u.side) === 'A') vpToA += vp;
       else vpToB += vp;
     }
+    const roundEnded = action.type === 'PASS' && (post.round > pre.round || post.phase === 'gameOver');
+    if (roundEnded) {
+      for (const vh of post.victory.victoryHexes) {
+        const ctrl = post.hexes[vh.hexId]?.features.control;
+        if (ctrl === 'A') vpToA += vh.vp;
+        else if (ctrl === 'B') vpToB += vh.vp;
+      }
+    }
     expect(post.players.A.vp - pre.players.A.vp).toBe(vpToA);
     expect(post.players.B.vp - pre.players.B.vp).toBe(vpToB);
+    expect(post.vpMarker).not.toBe(0); // §9.2 no-tie: always a leader
 
     // A unit sharing a hex with an enemy may not fire OUT of it (§7.7.3).
     for (const u of Object.values(pre.units)) {

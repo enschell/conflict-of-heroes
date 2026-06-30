@@ -343,7 +343,7 @@ function playGame(seed: number, style: Style): GameResult {
       }
     }
 
-    // VP only from destroyed units this step (§7.0) -------------------------
+    // VP from destroyed units (§9.1) plus end-of-Round control awards (§9.1) --
     const destroyed = Object.keys(pre.units).filter((id) => !post.units[id]);
     let vpToA = 0;
     let vpToB = 0;
@@ -353,8 +353,19 @@ function playGame(seed: number, style: Style): GameResult {
       if (otherSide(u.side) === 'A') vpToA += vp;
       else vpToB += vp;
     }
-    check(post.players.A.vp - pre.players.A.vp === vpToA, '7.0', `Side A VP delta ${post.players.A.vp - pre.players.A.vp} != ${vpToA} from kills`);
-    check(post.players.B.vp - pre.players.B.vp === vpToB, '7.0', `Side B VP delta ${post.players.B.vp - pre.players.B.vp} != ${vpToB} from kills`);
+    // A Round-ending Pass also awards control VP for each held objective (§9.0).
+    const roundEnded = action.type === 'PASS' && (post.round > pre.round || post.phase === 'gameOver');
+    if (roundEnded) {
+      for (const vh of post.victory.victoryHexes) {
+        const ctrl = post.hexes[vh.hexId]?.features.control;
+        if (ctrl === 'A') vpToA += vh.vp;
+        else if (ctrl === 'B') vpToB += vh.vp;
+      }
+    }
+    check(post.players.A.vp - pre.players.A.vp === vpToA, '9.1', `Side A VP delta ${post.players.A.vp - pre.players.A.vp} != ${vpToA} (kills+control)`);
+    check(post.players.B.vp - pre.players.B.vp === vpToB, '9.1', `Side B VP delta ${post.players.B.vp - pre.players.B.vp} != ${vpToB} (kills+control)`);
+    // §9.2: the no-tie marker is never 0 — one side always holds VP Advantage.
+    check(post.vpMarker !== 0, '9.2', 'VP marker landed on 0 (no-tie violated)');
 
     const handover = (turnAction: boolean) => {
       if (post.phase !== 'playing' || post.round !== pre.round) return; // round/game ended

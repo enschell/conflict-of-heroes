@@ -1,4 +1,5 @@
 /** Per-side track sheet: CAP, VP, losses, and Fresh/Stressed unit counts. */
+import { vpLeader, vpMargin } from '../engine';
 import { useGame } from '../state/store';
 import { NATIONS } from '../data/nations';
 import type { SideId } from '../engine/types';
@@ -8,6 +9,7 @@ export function TrackSheet({ side }: { side: SideId }) {
   if (!game) return null;
   const p = game.players[side];
   const active = game.currentSide === side;
+  const hasVpAdvantage = vpLeader(game) === side;
   const names = p.nations.map((n) => NATIONS[n]?.name ?? n).join(', ');
   const sideUnits = Object.values(game.units).filter((u) => u.side === side);
   const freshCount = sideUnits.filter((u) => u.status === 'fresh').length;
@@ -28,6 +30,7 @@ export function TrackSheet({ side }: { side: SideId }) {
         </div>
         <div>
           VP <b>{p.vp}</b>
+          {hasVpAdvantage && <span className="badge badge--adv">+{vpMargin(game)} adv</span>}
         </div>
         <div>
           Losses <b>{p.unitLosses}</b>

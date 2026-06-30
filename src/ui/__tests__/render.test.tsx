@@ -87,7 +87,8 @@ describe('UI renders', () => {
 
   it('renders the victory overlay at game over', () => {
     useGame.getState().newGame();
-    const finished = { ...useGame.getState().game!, phase: 'gameOver' as const, winner: 'A' as const };
+    // v3: the winner is the VP-Advantage holder (positive marker = Side A).
+    const finished = { ...useGame.getState().game!, phase: 'gameOver' as const, vpMarker: 3 };
     useGame.setState({ game: finished });
     expect(render()).toContain('Side A wins');
   });

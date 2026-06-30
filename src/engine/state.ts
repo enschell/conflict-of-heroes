@@ -38,7 +38,7 @@ function buildPlayer(side: SideId, def: FirefightDef): PlayerState {
     capStart: def.caps[side],
     capCurrent: def.caps[side],
     unitLosses: 0,
-    vp: 0,
+    vp: def.startVp?.[side] ?? 0, // §9.2 starting VP (e.g. Mission 1: Soviets 1)
     hand: [],
     passed: false,
   };
@@ -70,15 +70,24 @@ export function initGame(def: FirefightDef): GameState {
 
   const footPile: HitPile = makeFootHitPile();
 
+  const firstInitiativeSide: SideId = def.firstInitiative ?? 'A';
+  const players = { A: buildPlayer('A', def), B: buildPlayer('B', def) };
+  // No-tie marker (§9.2): start from the starting-VP difference; if even, the
+  // side WITHOUT Round-1 Initiative holds the opening 1-VP advantage.
+  const startNet = players.A.vp - players.B.vp;
+  const vpMarker = startNet !== 0 ? startNet : firstInitiativeSide === 'A' ? -1 : 1;
+
   const state: GameState = {
     rng: makeRng(def.seed),
     phase: 'setup',
     round: 1,
     roundsTotal: def.roundsTotal,
-    initiativeSide: 'A',
-    currentSide: 'A',
+    initiativeSide: firstInitiativeSide,
+    firstInitiativeSide,
+    vpMarker,
+    currentSide: firstInitiativeSide,
     consecutivePasses: 0,
-    players: { A: buildPlayer('A', def), B: buildPlayer('B', def) },
+    players,
     units,
     templates,
     hexes,

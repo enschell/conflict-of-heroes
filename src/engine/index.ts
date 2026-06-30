@@ -23,7 +23,7 @@ export { hasLOS, inArc, canSightTarget, visibleHexesFrom } from './los';
 export { moveCost, directionTo, pivotCost } from './movement';
 export { rangeBand, fpRangeModifier } from './range';
 export { rallyModifier, RALLY_AP_COST } from './rally';
-export { finalScores, computeWinner, otherSide } from './victory';
+export { finalScores, computeWinner, otherSide, vpLeader, vpMargin, gainVp } from './victory';
 export {
   AXIAL_DIRECTIONS,
   distance,
