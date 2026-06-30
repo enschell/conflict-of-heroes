@@ -147,3 +147,53 @@ describe('Group Attack (§10.5–§10.8 red box)', () => {
     expect(res.events[0]?.type).toBe('illegal');
   });
 });
+
+describe('Group Rally (§10.9)', () => {
+  /** Two adjacent hit rifles rallying together. */
+  function rallyScene(seed = 1): GameState {
+    const s = baseState(seed);
+    addTemplate(s, rifleTemplate());
+    addHex(s, 0, 0);
+    addHex(s, 1, 0);
+    addUnit(s, 'R1', 'A', 0, 0, 0).hitMarkers = ['pinned']; // rally 7
+    addUnit(s, 'R2', 'A', 1, 0, 0).hitMarkers = ['pinned'];
+    return s;
+  }
+  const groupRally: Action = { type: 'GROUP_RALLY', unitIds: ['R1', 'R2'] };
+
+  it('rolls an individual Rally Check per member but one Group Spent Check', () => {
+    const res = reduce(rallyScene(2), groupRally);
+    expect(res.events.some((e) => e.type === 'illegal')).toBe(false);
+    // Two rally events (one per member), exactly one Group Spent Check.
+    expect(res.events.filter((e) => e.type === 'rally')).toHaveLength(2);
+    const checks = res.events.filter((e) => e.type === 'spent');
+    expect(checks).toHaveLength(1);
+    expect(checks[0]!.text).toMatch(/Group Spent Check/);
+    // Both members are Stressed regardless of rally outcome (§10.10).
+    expect(res.state.units['R1']?.stressed).toBe(true);
+    expect(res.state.units['R2']?.stressed).toBe(true);
+  });
+
+  it('removes a marker only from members that pass their own Rally Check', () => {
+    // Members succeed/fail independently, so across seeds both outcomes appear.
+    let sawKept = false;
+    let sawRemoved = false;
+    for (let seed = 1; seed <= 30 && !(sawKept && sawRemoved); seed++) {
+      const st = reduce(rallyScene(seed), groupRally).state;
+      for (const id of ['R1', 'R2']) {
+        if (st.units[id]!.hitMarkers.length === 0) sawRemoved = true;
+        else sawKept = true;
+      }
+    }
+    expect(sawRemoved).toBe(true);
+    expect(sawKept).toBe(true);
+  });
+
+  it('rejects a member with no hit marker', () => {
+    const s = rallyScene();
+    s.units['R2']!.hitMarkers = [];
+    const res = reduce(s, groupRally);
+    expect(res.events[0]?.type).toBe('illegal');
+    expect(res.state).toBe(s);
+  });
+});

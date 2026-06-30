@@ -472,6 +472,53 @@ export function reduce(state: GameState, action: Action): ReduceResult {
     return finish();
   };
 
+  const doGroupRally = (a: Extract<Action, { type: 'GROUP_RALLY' }>): ReduceResult => {
+    if (a.unitIds.length === 0) return deny('empty group');
+    const ids = [...new Set(a.unitIds)];
+    if (ids.length !== a.unitIds.length) return deny('duplicate group member');
+    const members: Unit[] = [];
+    for (const id of ids) {
+      const u = next.units[id];
+      if (!u) return deny('no such unit');
+      if (u.side !== next.currentSide) return deny('not your turn');
+      members.push(u);
+    }
+    if (!groupConnected(next, ids)) return deny('group is not continuously adjacent');
+    // Every member must be a Hit Unit able to Rally (§7.9): has a rallyable
+    // marker and shares no hex with an enemy.
+    for (const u of members) {
+      if (u.hitMarkers.length === 0) return deny(`${u.id} has no hit marker`);
+      if (FOOT_HIT_MARKERS[u.hitMarkers[0]!].rally <= 0) return deny(`${u.id} cannot rally`);
+      if (Object.values(next.units).some((e) => e.side !== u.side && e.hexId === u.hexId))
+        return deny(`${u.id} shares a hex with an enemy`);
+    }
+
+    const costBeforeReduce = RALLY_AP_COST + groupStress(members); // §10.9 / §10.11
+    const reduceBy = Math.max(0, Math.trunc(a.capCostReduce ?? 0));
+    const { cost, capsSpent } = reduceActionCost(costBeforeReduce, reduceBy);
+    if (members.some((u) => u.status === 'spent') && cost > 0)
+      return deny('a Group with a Spent Unit must reach 0AP with CAPs (§10.1/§3.4)');
+    const player = next.players[next.currentSide];
+    if (player.capCurrent < capsSpent) return deny('not enough CAP');
+    player.capCurrent -= capsSpent;
+
+    // §10.9: roll an INDIVIDUAL Rally Check per member; each success removes its marker.
+    for (const u of members) {
+      const rr = rollRally(next, u);
+      next.rng = rr.rng;
+      if (rr.success) {
+        const removed = u.hitMarkers[0]!;
+        u.hitMarkers = [];
+        next.hitPiles.foot = returnHitToPile(next.hitPiles.foot, removed);
+        log('rally', `${u.id} rallies — ${rr.dice[0]}+${rr.dice[1]} total ${rr.total} >= ${rr.target}`, u.side);
+      } else {
+        log('rally', `${u.id} fails to rally — total ${rr.total} < ${rr.target}`, u.side);
+      }
+    }
+    afterGroupAction(members, cost); // §10.10: ONE Group Spent Check
+    return finish();
+  };
+
   // -- dispatch -------------------------------------------------------------
 
   switch (action.type) {
@@ -491,6 +538,8 @@ export function reduce(state: GameState, action: Action): ReduceResult {
       return doGroupMove(action);
     case 'GROUP_ATTACK':
       return doGroupAttack(action);
+    case 'GROUP_RALLY':
+      return doGroupRally(action);
     case 'PASS':
       return doPass();
     default:

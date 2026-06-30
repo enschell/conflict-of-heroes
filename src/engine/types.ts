@@ -282,6 +282,9 @@ export type Action =
       capDiceMod?: number;
       capCostReduce?: number;
     }
+  // Group Rally (§10.9): same/adjacent Hit Units Rally as one Action — an
+  // individual Rally Check per Unit, but a single Group Spent Check at 5AP.
+  | { type: 'GROUP_RALLY'; unitIds: UnitId[]; capCostReduce?: number }
   | { type: 'PASS' };
 
 export type ActionType = Action['type'];
