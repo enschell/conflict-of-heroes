@@ -32,6 +32,22 @@ function wallDMForFire(state: GameState, attackerHexId: string, targetHexId: str
   return target?.walls[dir] || prevHex?.walls[opp] ? 1 : 0;
 }
 
+/**
+ * §15.15 Vehicles as Cover: a foot Unit sharing its hex with a friendly Vehicle
+ * gains +1 DR. (Transport is a later module, so "not being transported" is moot.)
+ */
+function vehicleCoverBonus(state: GameState, target: Unit): number {
+  if (templateOf(state, target).kind === 'vehicle') return 0;
+  const covered = Object.values(state.units).some(
+    (u) =>
+      u.id !== target.id &&
+      u.side === target.side &&
+      u.hexId === target.hexId &&
+      templateOf(state, u).kind === 'vehicle',
+  );
+  return covered ? 1 : 0;
+}
+
 export interface AttackContext {
   legal: boolean;
   reason?: string;
@@ -82,7 +98,11 @@ export function attackContext(
   const attackerInTargetFront = inArc(target.hexId, target.facing, attacker.hexId);
   const isFlank = !attackerInTargetFront;
   const defense = attackerInTargetFront ? tEff.dr.front : tEff.dr.flank;
-  const dr = defense + terrainDM(state, target.hexId) + wallDMForFire(state, attacker.hexId, target.hexId);
+  const dr =
+    defense +
+    terrainDM(state, target.hexId) +
+    wallDMForFire(state, attacker.hexId, target.hexId) +
+    vehicleCoverBonus(state, target);
   const ar = (fpColor === 'red' ? aEff.fp.red : aEff.fp.blue) + fpRangeModifier(band) + arBonus;
 
   return { legal: true, band, fpColor, ar, dr, hitNumber: dr - ar, isFlank };
@@ -180,7 +200,10 @@ export function closeCombatContext(state: GameState, attacker: Unit, target: Uni
 
   const ccMod = templateOf(state, attacker).whiteBoxFp ? -2 : 4;
   const ar = (fpColor === 'red' ? aEff.fp.red : aEff.fp.blue) + ccMod;
-  const dr = tEff.dr.flank + terrainDM(state, target.hexId);
+  // §15.14: Vehicles get NO defensive terrain bonus in close combat (foot do, §6.10).
+  const targetIsVehicle = templateOf(state, target).kind === 'vehicle';
+  const terrain = targetIsVehicle ? 0 : terrainDM(state, target.hexId);
+  const dr = tEff.dr.flank + terrain + vehicleCoverBonus(state, target);
   return { legal: true, band: 'short', fpColor, ar, dr, hitNumber: dr - ar, isFlank: true };
 }
 
