@@ -272,6 +272,16 @@ export type Action =
       moves: { unitId: UnitId; toHexId?: HexId; facing?: Facing }[];
       capCostReduce?: number;
     }
+  // Group Attack (§10.5–§10.8): a leader fires at a target with support from
+  // adjacent units (+1AR each); cost = the leader's Attack Cost; one Spent Check.
+  | {
+      type: 'GROUP_ATTACK';
+      leaderId: UnitId;
+      supporterIds: UnitId[];
+      targetId: UnitId;
+      capDiceMod?: number;
+      capCostReduce?: number;
+    }
   | { type: 'PASS' };
 
 export type ActionType = Action['type'];

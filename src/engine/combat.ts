@@ -47,12 +47,16 @@ export interface AttackContext {
   isFlank: boolean;
 }
 
-/** Compute the static combat picture (no dice). Used by the UI for previews. */
+/**
+ * Compute the static combat picture (no dice). Used by the UI for previews.
+ * `arBonus` is the Group Support Bonus (+1AR per Supporting Unit, §10.7).
+ */
 export function attackContext(
   state: GameState,
   attacker: Unit,
   target: Unit,
   _capMod = 0,
+  arBonus = 0,
 ): AttackContext {
   const aEff = effectiveStats(state, attacker);
   const tEff = effectiveStats(state, target);
@@ -79,7 +83,7 @@ export function attackContext(
   const isFlank = !attackerInTargetFront;
   const defense = attackerInTargetFront ? tEff.dr.front : tEff.dr.flank;
   const dr = defense + terrainDM(state, target.hexId) + wallDMForFire(state, attacker.hexId, target.hexId);
-  const ar = (fpColor === 'red' ? aEff.fp.red : aEff.fp.blue) + fpRangeModifier(band);
+  const ar = (fpColor === 'red' ? aEff.fp.red : aEff.fp.blue) + fpRangeModifier(band) + arBonus;
 
   return { legal: true, band, fpColor, ar, dr, hitNumber: dr - ar, isFlank };
 }
@@ -117,8 +121,9 @@ export function rollAttack(
   attacker: Unit,
   target: Unit,
   capMod = 0,
+  arBonus = 0,
 ): AttackRoll {
-  const ctx = attackContext(state, attacker, target, capMod);
+  const ctx = attackContext(state, attacker, target, capMod, arBonus);
   if (!ctx.legal) {
     return {
       legal: false,
@@ -258,12 +263,13 @@ export function rollStackFire(
   attacker: Unit,
   targetHexId: string,
   capMod = 0,
+  arBonus = 0,
 ): StackFireResult {
   const targets = enemiesInHex(state, attacker.side, targetHexId);
   const rolls: StackFireRoll[] = [];
   let rng = state.rng;
   for (const t of targets) {
-    const roll = rollAttack({ ...state, rng }, attacker, t, capMod);
+    const roll = rollAttack({ ...state, rng }, attacker, t, capMod, arBonus);
     rolls.push({ targetId: t.id, roll });
     rng = roll.rng;
   }

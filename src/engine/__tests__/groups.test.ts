@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { reduce } from '../reducer';
-import { groupConnected } from '../groups';
+import { groupConnected, isValidSupporter } from '../groups';
 import type { Action, GameState } from '../types';
 import { addHex, addTemplate, addUnit, baseState, rifleTemplate } from './helpers';
 
@@ -92,6 +92,58 @@ describe('Group Move (§10.4 red box)', () => {
     addHex(s, 0, 1);
     addUnit(s, 'E1', 'B', 0, 1, 0);
     const res = reduce(s, { type: 'GROUP_MOVE', moves: [{ unitId: 'R1' }, { unitId: 'E1' }] });
+    expect(res.events[0]?.type).toBe('illegal');
+  });
+});
+
+/** §10.7 red box: HMG34 leader (red 5 FP) + 2 supporting Rifles → 7AR vs 12DR. */
+function groupAttackScene(seed = 1): GameState {
+  const s = baseState(seed);
+  addTemplate(s, rifleTemplate({ id: 'hmg', fp: { red: 5, blue: 0 }, range: 9, apToFire: 2 }));
+  addTemplate(s, rifleTemplate({ id: 'rifle', fp: { red: 3, blue: 0 }, range: 5 }));
+  for (let q = -1; q <= 4; q++) for (let r = -1; r <= 1; r++) addHex(s, q, r);
+  addUnit(s, 'HMG', 'A', 0, 0, 0, 'hmg'); // leader, faces east
+  addUnit(s, 'S1', 'A', 1, 0, 0, 'rifle'); // supporter, adjacent to leader
+  addUnit(s, 'S2', 'A', 0, 1, 0, 'rifle'); // supporter, adjacent to leader
+  addUnit(s, 'T', 'B', 3, 0, 3, 'rifle'); // target faces west → front DR 12
+  return s;
+}
+
+const groupAttack: Action = {
+  type: 'GROUP_ATTACK',
+  leaderId: 'HMG',
+  supporterIds: ['S1', 'S2'],
+  targetId: 'T',
+};
+
+describe('Group Attack (§10.5–§10.8 red box)', () => {
+  it('adds +1AR per qualifying supporter: 5AR + 2 → 7AR vs 12DR, Hit# 5', () => {
+    const res = reduce(groupAttackScene(1), groupAttack);
+    expect(res.events.some((e) => e.type === 'illegal')).toBe(false);
+    const fire = res.events.find((e) => e.type === 'groupFire');
+    expect(fire?.text).toMatch(/AR 7 /);
+    expect(fire?.text).toMatch(/Hit# 5 /);
+    // One Group Spent Check at the leader's 2AP cost; all members Stressed.
+    const checks = res.events.filter((e) => e.type === 'spent');
+    expect(checks).toHaveLength(1);
+    expect(checks[0]!.text).toMatch(/cost 2/);
+    for (const id of ['HMG', 'S1', 'S2']) expect(res.state.units[id]?.stressed).toBe(true);
+  });
+
+  it('rejects a supporter that is not adjacent to the leader', () => {
+    const s = groupAttackScene();
+    addHex(s, 6, 0);
+    addUnit(s, 'FAR', 'A', 6, 0, 0, 'rifle'); // not within 1 hex of the leader
+    const res = reduce(s, { ...groupAttack, supporterIds: ['S1', 'FAR'] });
+    expect(res.events[0]?.type).toBe('illegal');
+    expect(res.state).toBe(s);
+  });
+
+  it('rejects a supporter whose hit marker affects its Firepower (§10.6)', () => {
+    const s = groupAttackScene();
+    s.units['S1']!.hitMarkers = ['suppressed']; // Suppressed = −2 FP
+    expect(isValidSupporter(s, s.units['HMG']!, s.units['S1']!, s.units['T']!)).toBe(false);
+    const res = reduce(s, groupAttack);
     expect(res.events[0]?.type).toBe('illegal');
   });
 });

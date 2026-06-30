@@ -17,7 +17,7 @@ import { applyUnitLoss, clampCapMod, reduceActionCost } from './cap';
 import { attackContext, closeCombatContext, rollCloseCombat, rollStackFire } from './combat';
 import { isInFrontArc, parseHexId } from './hex';
 import { drawHit, effectiveStats, returnHitToPile, templateOf } from './hits';
-import { groupConnected, groupStress } from './groups';
+import { groupConnected, groupStress, isValidSupporter } from './groups';
 import { directionTo, moveCost, pivotCost } from './movement';
 import { RALLY_AP_COST, rollRally } from './rally';
 import { spentCheck } from './spent';
@@ -414,6 +414,64 @@ export function reduce(state: GameState, action: Action): ReduceResult {
     return finish();
   };
 
+  const doGroupAttack = (a: Extract<Action, { type: 'GROUP_ATTACK' }>): ReduceResult => {
+    const leader = next.units[a.leaderId];
+    const target = next.units[a.targetId];
+    if (!leader || !target) return deny('no such unit');
+    if (leader.side !== next.currentSide) return deny('not your turn');
+    if (target.side === leader.side) return deny('friendly target');
+    // Group close combat is a later increment; support ranged Group Attacks now.
+    if (target.hexId === leader.hexId) return deny('group close combat not yet supported');
+
+    const capMod = clampCapMod(a.capDiceMod ?? 0);
+    const ctx = attackContext(next, leader, target, capMod);
+    if (!ctx.legal) return deny(ctx.reason ?? 'illegal attack');
+
+    // Validate supporters (§10.6) and de-dup against the leader.
+    const supIds = [...new Set(a.supporterIds)].filter((id) => id !== a.leaderId);
+    const members: Unit[] = [leader];
+    for (const id of supIds) {
+      const sup = next.units[id];
+      if (!sup) return deny('no such supporter');
+      if (sup.side !== next.currentSide) return deny('not your turn');
+      if (!isValidSupporter(next, leader, sup, target)) return deny(`${id} cannot support this attack`);
+      members.push(sup);
+    }
+    const arBonus = supIds.length; // +1AR per qualifying Supporting Unit (§10.7)
+
+    // §10.8: Group Attack cost = the Leader's Attack Cost (+ Group Stress).
+    const eff = effectiveStats(next, leader);
+    const costBeforeReduce = eff.apToFire + groupStress(members);
+    const reduceBy = Math.max(0, Math.trunc(a.capCostReduce ?? 0));
+    const { cost, capsSpent } = reduceActionCost(costBeforeReduce, reduceBy);
+    if (members.some((u) => u.status === 'spent') && cost > 0)
+      return deny('a Group with a Spent Unit must reach 0AP with CAPs (§10.1/§3.4)');
+    const player = next.players[next.currentSide];
+    const capNeeded = capsSpent + Math.abs(capMod);
+    if (player.capCurrent < capNeeded) return deny('not enough CAP');
+    player.capCurrent -= capNeeded;
+
+    // §7.5.1: one shot at the hex resolves against every stacked enemy; the
+    // leader's AR carries the +1AR-per-supporter Group Support Bonus.
+    const stack = rollStackFire(next, leader, target.hexId, capMod, arBonus);
+    next.rng = stack.rng;
+    for (const { targetId, roll } of stack.rolls) {
+      log(
+        'groupFire',
+        `Group [${members.map((m) => m.id).join('+')}] fires at ${targetId}: rolled ${roll.dice[0]}+${roll.dice[1]}=` +
+          `${roll.total} vs Hit# ${roll.hitNumber} (AR ${roll.ar} / DR ${roll.dr})` +
+          `${roll.isFlank ? ' (flank)' : ''} -> ${roll.critical ? 'CRITICAL' : roll.hit ? 'hit' : 'miss'}`,
+        leader.side,
+      );
+      if (roll.hit) {
+        const t = next.units[targetId];
+        if (t) applyHit(t, roll.critical);
+      }
+    }
+    afterGroupAction(members, cost);
+    return finish();
+  };
+
   // -- dispatch -------------------------------------------------------------
 
   switch (action.type) {
@@ -431,6 +489,8 @@ export function reduce(state: GameState, action: Action): ReduceResult {
       return doStall(action);
     case 'GROUP_MOVE':
       return doGroupMove(action);
+    case 'GROUP_ATTACK':
+      return doGroupAttack(action);
     case 'PASS':
       return doPass();
     default:
