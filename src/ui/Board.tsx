@@ -15,8 +15,10 @@ import {
   EDGE_CORNERS,
   HEX_SIZE,
   computeLayout,
+  fringeHexes,
   hexCenter,
   hexCorners,
+  playableBounds,
   pointsAttr,
 } from './hexgeo';
 import { HEX_STROKE, ROAD_STROKE, TERRAIN_FILL, WALL_STROKE } from './theme';
@@ -38,7 +40,10 @@ export function Board() {
 
   if (!game) return null;
 
-  const layout = computeLayout(game, HEX_SIZE);
+  // Non-playable edge hexes, drawn (clipped) as the board's half-hex border.
+  const fringe = fringeHexes(game);
+  const layout = computeLayout(game, HEX_SIZE, HEX_SIZE * 0.7, fringe);
+  const bounds = playableBounds(game, HEX_SIZE); // clip edge for the fringe
   const clipPoints = pointsAttr(hexCorners({ x: 0, y: 0 }));
   const artW = Math.sqrt(3) * HEX_SIZE;
 
@@ -104,8 +109,34 @@ export function Board() {
           <clipPath id="hexclip">
             <polygon points={clipPoints} />
           </clipPath>
+          {/* Cuts the fringe hexes at the playable board edge → half-hexes. */}
+          <clipPath id="boardclip">
+            <rect
+              x={bounds.minX}
+              y={bounds.minY}
+              width={bounds.maxX - bounds.minX}
+              height={bounds.maxY - bounds.minY}
+            />
+          </clipPath>
         </defs>
         <g transform={`translate(${layout.offset.x},${layout.offset.y})`}>
+          {/* Edge half-hexes (non-playable), clipped to the board rectangle. */}
+          <g clipPath="url(#boardclip)" pointerEvents="none">
+            {fringe.map((id) => {
+              const pts = pointsAttr(hexCorners(hexCenter(id)));
+              return (
+                <polygon
+                  key={`fr-${id}`}
+                  className="hex-fringe"
+                  points={pts}
+                  fill={TERRAIN_FILL.open}
+                  stroke={HEX_STROKE}
+                  strokeWidth={1}
+                  opacity={0.45}
+                />
+              );
+            })}
+          </g>
           {ids.map((id) => {
             const hex = game.hexes[id]!;
             const c = hexCenter(id);

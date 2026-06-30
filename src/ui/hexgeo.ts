@@ -3,7 +3,7 @@
  * engine's axial→pixel mapping. (The ASCII grid in scripts/ is debug-only;
  * this is the actual visual model — CLAUDE.md §7.)
  */
-import { AXIAL_DIRECTIONS, axialToPixel, parseHexId } from '../engine/hex';
+import { AXIAL_DIRECTIONS, axialToPixel, idOf, neighbors, parseHexId } from '../engine/hex';
 import type { GameState, Facing, HexId } from '../engine/types';
 
 export const HEX_SIZE = 36; // circumradius in px
@@ -50,6 +50,45 @@ export function facingVector(facing: Facing): Pt {
   return { x: d.x / len, y: d.y / len };
 }
 
+/**
+ * The one-hex-thick fringe around the board: hexes adjacent to a playable hex
+ * that are not themselves playable. Rendered (clipped) as the edge half-hexes.
+ */
+export function fringeHexes(state: GameState): HexId[] {
+  const playable = new Set(Object.keys(state.hexes));
+  const fringe = new Set<HexId>();
+  for (const id of playable) {
+    for (const n of neighbors(parseHexId(id))) {
+      const nid = idOf(n);
+      if (!playable.has(nid)) fringe.add(nid);
+    }
+  }
+  return [...fringe];
+}
+
+export interface Bounds {
+  minX: number;
+  minY: number;
+  maxX: number;
+  maxY: number;
+}
+
+/** Bounding box (hex-corner inclusive) of just the PLAYABLE hexes — the clip edge. */
+export function playableBounds(state: GameState, size = HEX_SIZE): Bounds {
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  for (const id of Object.keys(state.hexes)) {
+    const c = hexCenter(id, size);
+    minX = Math.min(minX, c.x - size);
+    maxX = Math.max(maxX, c.x + size);
+    minY = Math.min(minY, c.y - size);
+    maxY = Math.max(maxY, c.y + size);
+  }
+  return { minX, minY, maxX, maxY };
+}
+
 export interface Layout {
   width: number;
   height: number;
@@ -57,13 +96,22 @@ export interface Layout {
   size: number;
 }
 
-/** Bounding box + translate offset so the whole map fits the SVG viewBox. */
-export function computeLayout(state: GameState, size = HEX_SIZE, pad = size * 0.7): Layout {
+/**
+ * Bounding box + translate offset so the whole map fits the SVG viewBox. `extra`
+ * ids (e.g. the fringe) are included so half-hexes drawn outside the playable
+ * area aren't cut off by the viewBox.
+ */
+export function computeLayout(
+  state: GameState,
+  size = HEX_SIZE,
+  pad = size * 0.7,
+  extra: HexId[] = [],
+): Layout {
   let minX = Infinity;
   let minY = Infinity;
   let maxX = -Infinity;
   let maxY = -Infinity;
-  for (const id of Object.keys(state.hexes)) {
+  for (const id of [...Object.keys(state.hexes), ...extra]) {
     const c = hexCenter(id, size);
     minX = Math.min(minX, c.x - size);
     maxX = Math.max(maxX, c.x + size);
