@@ -15,10 +15,14 @@ Guidance for Claude Code when building this project. Read this first, every sess
 
 ---
 
-## A. v3 MIGRATION — read before touching the engine
+## A. v3 MIGRATION — ✅ COMPLETE (kept as reference)
+
+> **Status:** the cutover below (§A.3 steps 1–6) is **done**, and M5 Group Actions is built. This
+> section is retained as the rationale/spec for the 3rd-ed model — not a TODO. **Never reintroduce
+> 7AP logic.**
 
 The 2nd→3rd edition change is **not** a tweak; it replaces the **action economy**, which most of
-the engine hangs off. Everything below is the plan to cut over. **Never reintroduce 7AP logic.**
+the engine hangs off. Everything below is the plan we cut over by.
 
 ### A.1 What changed (and the one-line "why")
 
@@ -111,8 +115,14 @@ This repo is self-describing: a fresh session needs only the code + these docs.
   `npm run typecheck`, `npm run build`, and `npm run conformance`. All green = known-good baseline.
 - **Run it:** `npm run dev` → http://localhost:5173. Windows: Node 24 is at
   `C:\Program Files\nodejs` (not on Git Bash's PATH; in PowerShell prepend it).
-- **Current status / next:** **M0–M4 done in 2nd-ed rules.** The immediate work is the **v3
-  cutover (§A.3)**; after it, **M5 is re-scoped to Group Actions (§10)**.
+- **Current status / next:** **v3 cutover DONE (§A.3 steps 1–6)** and **M5 — Group Actions DONE**.
+  The engine runs on 3rd-ed rules: Spent Die/Check, Fresh/Spent + Stress, Pass/Stall, CAP floor 3,
+  AR/DR + Hit Number, v3 initiative + no-tie VP track, and Group Move/Attack/Rally (engine + UI).
+  **Real Mission 1 ("Partisans") is wired** on the authored Map 1 (206 hexes), 7 CAP/side, German
+  Round-1 initiative, Soviets start +1 VP, I06 scores 1 VP/round, 1 VP/kill. The old 2nd-ed
+  `FIREFIGHT_1`/`partisans` scaffold is retired. **Next:** Mission 1 reinforcements / map-edge entry
+  (German R1 south edge, Soviet R2 → R07, German R3 SS — currently stopgap pre-placed), Group close
+  combat, then M6 (vehicles + armored hit deck). A board-rendering polish pass is also pending.
 
 ---
 
@@ -211,13 +221,13 @@ conflict-of-heroes/
       victory.ts            # VP for kills, objective control, game end (no-tie track)
       actions.ts            # action defs + getLegalActions()  [drop ACTIVATE/MARK_SPENT]
       reducer.ts            # central reduce(state, action) → { state, events }
-      groups.ts             # ★ NEW (M5): Group Actions §10 (one Spent Check for the group)
+      groups.ts             # ✅ Group Actions §10: connectivity, support, one Spent Check/group
       cards.ts              # (deferred) Battle/Weapon cards §8
       index.ts              # public engine API surface
       __tests__/            # Vitest
     data/                   # authored content (no logic)
       nations.ts terrainTypes.ts hitMarkers.ts units.ts hexArt.ts
-      maps/partisans.ts  missions/mission1.ts   # ("Partisans"; was firefights/firefight1)
+      maps/mission1.ts   missions/mission1.ts   # Mission 1 "Partisans": Map 1 board + setup
       cards/                # deferred to the cards milestone
       __tests__/
     state/  store.ts persistence.ts             # Zustand + localStorage saves
@@ -225,9 +235,10 @@ conflict-of-heroes/
   scripts/  play.ts conformance.ts              # terminal driver + v3 conformance audit
 ```
 
-> **Current state:** engine/data/state/ui/scripts compile and pass under 2nd-ed rules (M4: saves,
-> undo/redo, JSON export/import; conformance 0 violations). The **v3 cutover (§A)** is the active
-> work; `rules/` is the new committed source of truth.
+> **Current state:** engine/data/state/ui/scripts compile and pass under **3rd-ed (v3) rules** — the
+> §A cutover is complete and **M5 Group Actions** is built (conformance 0 violations). Data is the
+> real **Mission 1** on **`maps/mission1.ts`** + **`missions/mission1.ts`** (the 2nd-ed
+> `firefights/`/`maps/partisans.ts` are deleted). `rules/` is the committed source of truth.
 
 ---
 
@@ -385,9 +396,11 @@ Spent-Check die instead of a remaining-AP pool)*
 - **M1 — Engine core (infantry, 2nd ed)** ✅ terrain, movement/facing, LOS/arc, combat, hits, rally,
   range, CAP, turn/round, victory, `reduce`, `initGame`, `legalActions`.
 - **M2 — Mission 1 content** ✅ `nations.ts`, `units.ts` (German + Soviet infantry, our own stats),
-  `maps/partisans.ts`, `missions/mission1.ts` ("Partisans": 5×Germans attack W→E, 5×partisans hold
-  the hamlet, 5 rounds, objectives 6,3=5VP & 3,3=3VP). FF1/Mission 1 is a **Section-1 teaching
-  Mission played before cards**, so it uses **no cards** (card subsystem deferred).
+  `maps/mission1.ts` (the real **Map 1** board, 206 hexes authored from the Mission Book) +
+  `missions/mission1.ts` ("Partisans": 5 rounds, 7 CAP/side, German Round-1 initiative, Soviets +1
+  VP, objective **I06** = 1 VP/round, 1 VP/kill). Mission 1 is a **Section-1 teaching Mission played
+  before cards**, so it uses **no cards** (card subsystem deferred). *(Replaced the earlier invented
+  2nd-ed firefight + `maps/partisans.ts`.)*
 - **M3 — UI** ✅ Zustand + React/SVG board, counters, inspector, LOS overlay, animated dice + SFX,
   log, setup/victory screens.
 - **M3.1–M3.2 — UX** ✅ per-hex art; stacked-unit picker; SFX; right-sidebar hover panel; hold-Shift
@@ -396,16 +409,17 @@ Spent-Check die instead of a remaining-AP pool)*
 - **M3.4 — Conformance audit** ✅ `scripts/conformance.ts` self-plays + re-derives each move.
 - **M4 — Persistence** ✅ named save slots, JSON export/import, undo/redo; saves round-trip with RNG.
 
-- **★ M4.5 — v3 CUTOVER (ACTIVE, see §A.3):** Spent Die + Spent Check → Fresh/Spent state → action
-  economy (drop 7AP/activation; Stress; Pass/Stall) → CAP floor 3 → rename combat to AR/DR + post-
-  rally Spent Check → v3 initiative/Pre-Round/VP. **Done = Mission 1 plays end-to-end under 3rd-ed
-  rules and conformance re-derives against `rules/`.**
+- **★ M4.5 — v3 CUTOVER ✅ (see §A.3):** Spent Die + Spent Check → Fresh/Spent state → action
+  economy (dropped 7AP/activation; Stress; Pass/Stall) → CAP floor 3 → combat renamed to AR/DR +
+  post-rally Spent Check → v3 initiative/Pre-Round/no-tie VP. Real **Mission 1** plays under 3rd-ed
+  rules; conformance re-derives against `rules/`.
 
-- **M5 — Group Actions (§10)** *(re-scoped from "shared activations/firegroups")*: `groups.ts` —
-  `GROUP_ACTION` with **one** Spent Check for the group; **group move** cost = highest member;
-  **group attack** = leader **+1AR per qualifying supporter** (supporter must be adjacent, target in
-  its Fire Zone + Normal Range, no FP-affecting hit marker); group rally. **Done = a full game of
-  Mission 1 is winnable** with groups.
+- **M5 — Group Actions (§10)** ✅ `groups.ts` + `GROUP_MOVE`/`GROUP_ATTACK`/`GROUP_RALLY` (each
+  with **one** Spent Check for the group, all members Stressed): **group move** cost = highest member
+  move; **group attack** = leader **+1AR per qualifying supporter** (adjacent, target in Fire Zone +
+  Normal Range, no FP-affecting hit marker); **group rally** = per-unit Rally Checks, one group
+  Spent Check. UI: "Group" mode (multi-select, formation-move arrows, rally, click-enemy attack).
+  *Deferred:* group **close combat**; Mission 1 **reinforcements/edge entry** (stopgap pre-placed).
 
 - **Later (additive, v3 order):** M6 vehicles + armored hit deck (§15–16) → M7 mortars/OBA/smoke
   (§13–14) → M8 hidden units (§11) → M9 elevation/hills (§12) → M10 fortifications/obstacles/mines
