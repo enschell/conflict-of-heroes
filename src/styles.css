@@ -227,6 +227,27 @@ button.link {
 .hit-note__effects li {
   margin: 0.1rem 0;
 }
+.group-members {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  margin: 0.4rem 0;
+}
+.group-chip {
+  border: 1px solid #22d3ee;
+  background: rgba(34, 211, 238, 0.12);
+  color: #d7fbff;
+  border-radius: 999px;
+  padding: 0.15rem 0.5rem;
+  font-size: 0.82rem;
+  cursor: pointer;
+}
+.group-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  margin-top: 0.4rem;
+}
 .actions {
   display: flex;
   flex-direction: column;

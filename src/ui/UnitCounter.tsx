@@ -30,10 +30,12 @@ interface Props {
   selected: boolean;
   /** True if this unit holds its side's Stress Marker (amber outline, §2.6). */
   stressed?: boolean;
+  /** True if this unit is in the current Group selection (§10) — cyan ring. */
+  inGroup?: boolean;
   onClick: (e: ReactMouseEvent) => void;
 }
 
-export function UnitCounter({ game, unit, center, size, selected, stressed = false, onClick }: Props) {
+export function UnitCounter({ game, unit, center, size, selected, stressed = false, inGroup = false, onClick }: Props) {
   const tmpl = templateOf(game, unit);
   const eff = effectiveStats(game, unit);
   const s = size * 1.42; // counter side
@@ -70,8 +72,8 @@ export function UnitCounter({ game, unit, center, size, selected, stressed = fal
         height={s}
         rx={size * 0.14}
         fill={fill}
-        stroke={selected ? '#ffd24a' : accent}
-        strokeWidth={selected ? 3 : 1.5}
+        stroke={inGroup ? '#22d3ee' : selected ? '#ffd24a' : accent}
+        strokeWidth={selected || inGroup ? 3 : 1.5}
       />
       {stressed && (
         <rect

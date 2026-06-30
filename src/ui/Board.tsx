@@ -26,6 +26,7 @@ import { UnitPicker } from './UnitPicker';
 export function Board() {
   const game = useGame((s) => s.game);
   const selectedUnitId = useGame((s) => s.selectedUnitId);
+  const groupSel = useGame((s) => s.groupSel);
   const losMode = useGame((s) => s.losMode);
   const losSource = useGame((s) => s.losSource);
   const shiftHeld = useGame((s) => s.shiftHeld);
@@ -189,6 +190,7 @@ export function Board() {
                     center={{ x: c.x + off, y: c.y + off }}
                     size={HEX_SIZE}
                     selected={u.id === selectedUnitId}
+                    inGroup={groupSel.includes(u.id)}
                     stressed={u.stressed}
                     onClick={(e) => hexClick(u.hexId, { ctrl: e.ctrlKey, x: e.clientX, y: e.clientY })}
                   />

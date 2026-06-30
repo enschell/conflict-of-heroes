@@ -8,9 +8,14 @@ import { create } from 'zustand';
 import {
   attackContext,
   closeCombatContext,
+  idOf,
   initGame,
+  isValidSupporter,
   legalActionsForUnit,
   modifiedActionCost,
+  moveCost,
+  neighbor,
+  parseHexId,
   reduce,
   rollCloseCombat,
   rollRally,
@@ -75,6 +80,9 @@ interface ClickOpts {
 interface Store {
   game: GameState | null;
   selectedUnitId: UnitId | null;
+  /** Group Actions (§10): when on, board clicks build/act on a unit Group. */
+  groupMode: boolean;
+  groupSel: UnitId[];
   losMode: boolean;
   losSource: HexId | null;
   shiftHeld: boolean;
@@ -106,6 +114,13 @@ interface Store {
   closeCombat: (attackerId: UnitId, targetId: UnitId) => void;
   rally: (unitId: UnitId) => void;
   pivot: (unitId: UnitId, facing: Facing) => void;
+
+  toggleGroupMode: () => void;
+  toggleGroupMember: (unitId: UnitId) => void;
+  clearGroup: () => void;
+  groupMove: (dir: Facing) => void;
+  groupRally: () => void;
+  groupAttack: (targetId: UnitId) => void;
 
   commitRoll: () => void;
   cancelRoll: () => void;
@@ -194,6 +209,7 @@ export const useGame = create<Store>((set, get) => {
   /** Common UI reset when a whole new GameState is loaded/imported. */
   const resetForLoad = () => ({
     selectedUnitId: null,
+    groupSel: [] as UnitId[],
     history: [] as GameState[],
     future: [] as GameState[],
     picker: null,
@@ -293,6 +309,8 @@ export const useGame = create<Store>((set, get) => {
   return {
     game: null,
     selectedUnitId: null,
+    groupMode: false,
+    groupSel: [],
     losMode: false,
     losSource: null,
     shiftHeld: false,
@@ -353,6 +371,27 @@ export const useGame = create<Store>((set, get) => {
 
       if (losMode) {
         set({ losSource: hexId });
+        return;
+      }
+
+      // Group mode (§10): clicks build the Group, or Group-attack an enemy hex.
+      if (get().groupMode) {
+        const hereU = Object.values(game.units).filter((u) => u.hexId === hexId);
+        const enemy = hereU.find((u) => u.side !== game.currentSide);
+        if (enemy && get().groupSel.length > 0) {
+          get().groupAttack(enemy.id);
+          return;
+        }
+        const ownFresh = hereU.filter((u) => u.side === game.currentSide && u.status === 'fresh');
+        if (ownFresh.length) {
+          const sel = get().groupSel;
+          const allIn = ownFresh.every((u) => sel.includes(u.id));
+          set({
+            groupSel: allIn
+              ? sel.filter((id) => !ownFresh.some((u) => u.id === id))
+              : [...new Set([...sel, ...ownFresh.map((u) => u.id)])],
+          });
+        }
         return;
       }
 
@@ -464,6 +503,55 @@ export const useGame = create<Store>((set, get) => {
       ),
     pivot: (unitId, facing) =>
       capGate({ type: 'PIVOT', unitId, facing }, (a) => get().dispatch(a)),
+
+    toggleGroupMode: () =>
+      set((s) => ({ groupMode: !s.groupMode, groupSel: [], selectedUnitId: null })),
+    clearGroup: () => set({ groupSel: [] }),
+    toggleGroupMember: (unitId) => {
+      const { game, groupSel } = get();
+      if (!game) return;
+      const u = game.units[unitId];
+      // A Group is built from your own Fresh Units (§10.1).
+      if (!u || u.side !== game.currentSide || u.status !== 'fresh') return;
+      set({
+        groupSel: groupSel.includes(unitId)
+          ? groupSel.filter((id) => id !== unitId)
+          : [...groupSel, unitId],
+      });
+    },
+    groupMove: (dir) => {
+      const { game, groupSel } = get();
+      if (!game || groupSel.length === 0) return;
+      // Formation move: each member steps one hex in `dir` if legal, else stays (§10.2).
+      const moves = groupSel.map((id) => {
+        const u = game.units[id]!;
+        const to = idOf(neighbor(parseHexId(u.hexId), dir));
+        if (game.hexes[to] && moveCost(game, u, to).ap != null) return { unitId: id, toHexId: to };
+        return { unitId: id };
+      });
+      get().dispatch({ type: 'GROUP_MOVE', moves });
+      set({ groupSel: [] });
+    },
+    groupRally: () => {
+      const { groupSel } = get();
+      if (groupSel.length === 0) return;
+      get().dispatch({ type: 'GROUP_RALLY', unitIds: groupSel });
+      set({ groupSel: [] });
+    },
+    groupAttack: (targetId) => {
+      const { game, groupSel } = get();
+      if (!game || groupSel.length === 0) return;
+      const leaderId = groupSel[0]!;
+      const leader = game.units[leaderId];
+      const target = game.units[targetId];
+      if (!leader || !target) return;
+      // Only qualifying supporters add +1AR (§10.6); the engine re-validates.
+      const supporterIds = groupSel
+        .slice(1)
+        .filter((id) => isValidSupporter(game, leader, game.units[id]!, target));
+      get().dispatch({ type: 'GROUP_ATTACK', leaderId, supporterIds, targetId });
+      set({ groupSel: [] });
+    },
 
     commitRoll: () => {
       const { pendingRoll } = get();

@@ -12,6 +12,7 @@ import { Board } from './ui/Board';
 import { ConfirmDialog } from './ui/ConfirmDialog';
 import { SavesDialog } from './ui/SavesDialog';
 import { DiceRoller } from './ui/DiceRoller';
+import { GroupPanel } from './ui/GroupPanel';
 import { HoverPanel } from './ui/HoverPanel';
 import { Inspector } from './ui/Inspector';
 import { Log } from './ui/Log';
@@ -30,6 +31,8 @@ export function App() {
   const undo = useGame((s) => s.undo);
   const redo = useGame((s) => s.redo);
   const toggleLosMode = useGame((s) => s.toggleLosMode);
+  const groupMode = useGame((s) => s.groupMode);
+  const toggleGroupMode = useGame((s) => s.toggleGroupMode);
   const toggleMute = useGame((s) => s.toggleMute);
   const setShift = useGame((s) => s.setShift);
   const newGame = useGame((s) => s.newGame);
@@ -94,6 +97,9 @@ export function App() {
           <button className={losMode ? 'on' : ''} onClick={toggleLosMode} title="Pin LOS by click (or hold Shift to hover)">
             LOS
           </button>
+          <button className={groupMode ? 'on' : ''} onClick={toggleGroupMode} title="Group Actions (§10): click your Fresh units to build a Group">
+            Group
+          </button>
           <button onClick={toggleMute} title="toggle sound">
             {muted ? '🔇' : '🔊'}
           </button>
@@ -118,7 +124,7 @@ export function App() {
       </main>
 
       <aside className="right">
-        <Inspector />
+        {groupMode ? <GroupPanel /> : <Inspector />}
         <HoverPanel />
         <Log />
       </aside>
