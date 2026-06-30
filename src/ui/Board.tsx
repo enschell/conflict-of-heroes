@@ -73,7 +73,7 @@ export function Board() {
   // Fire-odds popup when hovering a hex with a selected attacker. A shot resolves
   // the whole hex (§7.5.1), so show one row per targetable enemy (in the same
   // deterministic id order the engine rolls them).
-  type OddsRow = { targetId: string; fp: number; dv: number; flank: boolean; hit: number; crit: number };
+  type OddsRow = { targetId: string; ar: number; dr: number; hitNumber: number; flank: boolean; hit: number; crit: number };
   const odds: { x: number; y: number; targets: OddsRow[] } | null = (() => {
     if (!hover || !selectedUnitId || !game.units[selectedUnitId]) return null;
     const sel = game.units[selectedUnitId]!;
@@ -85,8 +85,8 @@ export function Board() {
     for (const enemy of enemies) {
       const ctx = attackContext(game, sel, enemy);
       if (!ctx.legal) continue;
-      const o = fireOdds(ctx.baseFP, ctx.defenseValue);
-      rows.push({ targetId: enemy.id, fp: ctx.baseFP, dv: ctx.defenseValue, flank: ctx.isFlank, hit: o.hit, crit: o.crit });
+      const o = fireOdds(ctx.ar, ctx.dr);
+      rows.push({ targetId: enemy.id, ar: ctx.ar, dr: ctx.dr, hitNumber: ctx.hitNumber, flank: ctx.isFlank, hit: o.hit, crit: o.crit });
     }
     return rows.length ? { x: hover.x, y: hover.y, targets: rows } : null;
   })();
@@ -221,7 +221,7 @@ export function Board() {
               <div className="fire-odds__big">{pct(t.hit)}% to hit</div>
               <div className="dim">incl. {pct(t.crit)}% critical (instant kill)</div>
               <div className="fire-odds__detail">
-                FP {t.fp} + 2d6 vs DV {t.dv}
+                AR {t.ar} vs DR {t.dr} — 2d6 ≥ {t.hitNumber}
                 {t.flank ? ' (flank)' : ''}
               </div>
             </div>

@@ -222,12 +222,11 @@ export const useGame = create<Store>((set, get) => {
     const stack = rollStackFire(g, attacker, target.hexId);
     if (!stack.rolls.length) return;
     const steps: RollStep[] = stack.rolls.map(({ targetId: tid, roll }) => {
-      const fp = roll.av - roll.dice[0] - roll.dice[1]; // static FP (no dice)
       return {
         dice: roll.dice,
         success: roll.hit,
         headline: roll.critical ? 'CRITICAL HIT' : roll.hit ? 'HIT' : 'MISS',
-        detail: `FP ${fp} + 2d6 vs DV ${roll.dv}${roll.isFlank ? ' (flank)' : ''}`,
+        detail: `AR ${roll.ar} vs DR ${roll.dr} — 2d6 ≥ ${roll.hitNumber}${roll.isFlank ? ' (flank)' : ''}`,
         label: `${action.attackerId} → ${tid}`,
       };
     });
@@ -246,7 +245,6 @@ export const useGame = create<Store>((set, get) => {
       return;
     }
     const roll = rollCloseCombat(g, attacker, target);
-    const fp = roll.av - roll.dice[0] - roll.dice[1]; // static FP (no dice)
     set({
       pendingRoll: {
         action,
@@ -256,7 +254,7 @@ export const useGame = create<Store>((set, get) => {
             dice: roll.dice,
             success: roll.hit,
             headline: roll.critical ? 'CRITICAL HIT' : roll.hit ? 'HIT' : 'MISS',
-            detail: `close combat · FP ${fp} + 2d6 vs flank DV ${roll.dv}`,
+            detail: `close combat · AR ${roll.ar} vs flank DR ${roll.dr} — 2d6 ≥ ${roll.hitNumber}`,
             label: `${action.attackerId} ⚔ ${action.targetId}`,
           },
         ],

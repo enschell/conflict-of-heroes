@@ -35,8 +35,8 @@ describe('close combat', () => {
     const ctx = closeCombatContext(s, s.units['a']!, s.units['e']!);
     expect(ctx.legal).toBe(true);
     expect(ctx.isFlank).toBe(true);
-    expect(ctx.baseFP).toBe(3 + 4);
-    expect(ctx.defenseValue).toBe(11); // flank DR 11 + 0 terrain
+    expect(ctx.ar).toBe(3 + 4); // AR = Firepower + close-combat +4
+    expect(ctx.dr).toBe(11); // flank DR 11 + 0 terrain
   });
 
   it('white-box (crew-served) FP is −2 in CC', () => {
@@ -47,7 +47,7 @@ describe('close combat', () => {
     addUnit(s, 'a', 'A', 0, 0, 0, 'mg');
     addUnit(s, 'e', 'B', 0, 0, 0, 'rifle');
 
-    expect(closeCombatContext(s, s.units['a']!, s.units['e']!).baseFP).toBe(5 - 2);
+    expect(closeCombatContext(s, s.units['a']!, s.units['e']!).ar).toBe(5 - 2);
   });
 
   it('resolves a CLOSE_COMBAT action through the reducer', () => {

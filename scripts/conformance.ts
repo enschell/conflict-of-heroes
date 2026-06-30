@@ -103,22 +103,22 @@ function expectFire(state: GameState, atk: Unit, tgt: Unit) {
   const dist = distance(parseHexId(atk.hexId), parseHexId(tgt.hexId));
   const rm = rangeMod(dist, ae.range);
   if (rm === null) return null;
-  const baseFP = (te.color === 'red' ? ae.fpRed : ae.fpBlue) + rm;
+  const ar = (te.color === 'red' ? ae.fpRed : ae.fpBlue) + rm;
   const inFront = inArc(tgt.hexId, tgt.facing, atk.hexId); // attacker in target's front?
-  const dr = inFront ? te.front : te.flank;
+  const defense = inFront ? te.front : te.flank;
   const tHex = state.hexes[tgt.hexId]!;
-  const dv = dr + TERRAIN[tHex.terrain].dm + (tHex.features.smoke ?? 0) + myWallDM(state, atk.hexId, tgt.hexId);
-  return { baseFP, dv, isFlank: !inFront, apToFire: ae.apToFire };
+  const dr = defense + TERRAIN[tHex.terrain].dm + (tHex.features.smoke ?? 0) + myWallDM(state, atk.hexId, tgt.hexId);
+  return { ar, dr, hitNumber: dr - ar, isFlank: !inFront, apToFire: ae.apToFire };
 }
 
 function expectCC(state: GameState, atk: Unit, tgt: Unit) {
   const ae = myEff(state, atk);
   const te = myEff(state, tgt);
   const whiteBox = !!state.templates[atk.templateId]!.whiteBoxFp;
-  const baseFP = (te.color === 'red' ? ae.fpRed : ae.fpBlue) + (whiteBox ? -2 : 4);
+  const ar = (te.color === 'red' ? ae.fpRed : ae.fpBlue) + (whiteBox ? -2 : 4);
   const tHex = state.hexes[tgt.hexId]!;
-  const dv = te.flank + TERRAIN[tHex.terrain].dm + (tHex.features.smoke ?? 0);
-  return { baseFP, dv, apToFire: ae.apToFire };
+  const dr = te.flank + TERRAIN[tHex.terrain].dm + (tHex.features.smoke ?? 0);
+  return { ar, dr, hitNumber: dr - ar, apToFire: ae.apToFire };
 }
 
 function expectMoveCost(state: GameState, unit: Unit, toId: string): number {
@@ -241,11 +241,11 @@ function chooseAction(state: GameState, style: Style): Action {
     enemies.length ? -Math.min(...enemies.map((e) => distance(parseHexId(toHexId), parseHexId(e.hexId)))) : 0;
   const fireScore = (a: { attackerId: string; targetId: string }) => {
     const ex = expectFire(state, state.units[a.attackerId]!, state.units[a.targetId]!);
-    return ex ? ex.baseFP - ex.dv : -Infinity;
+    return ex ? -ex.hitNumber : -Infinity; // lower Hit Number = easier
   };
 
   const cc = acts.filter((a): a is Extract<Action, { type: 'CLOSE_COMBAT' }> => a.type === 'CLOSE_COMBAT');
-  if (cc.length) return bestBy(cc, (a) => { const e = expectCC(state, state.units[a.attackerId]!, state.units[a.targetId]!); return e.baseFP - e.dv; })!;
+  if (cc.length) return bestBy(cc, (a) => { const e = expectCC(state, state.units[a.attackerId]!, state.units[a.targetId]!); return -e.hitNumber; })!;
 
   const fires = acts.filter((a): a is Extract<Action, { type: 'FIRE' }> => a.type === 'FIRE');
   if (fires.length) return bestBy(fires, fireScore)!;
@@ -401,11 +401,13 @@ function playGame(seed: number, style: Style): GameResult {
             check(false, '6.0', `${targetId} in fired hex should be a legal target`);
             continue;
           }
-          check(roll.dv === exp.dv, '6.3', `DV: engine ${roll.dv} != expected ${exp.dv}`);
-          const myAV = exp.baseFP + roll.dice[0] + roll.dice[1];
-          check(roll.av === myAV, '6.8', `AV: engine ${roll.av} != expected ${myAV} (FP ${exp.baseFP}+${roll.dice[0]}+${roll.dice[1]})`);
-          check(roll.hit === myAV >= exp.dv, '6.8', `hit: engine ${roll.hit} != ${myAV >= exp.dv}`);
-          check(roll.critical === myAV >= exp.dv + 4, '6.8', `crit: engine ${roll.critical} != ${myAV >= exp.dv + 4}`);
+          check(roll.ar === exp.ar, '6.1', `AR: engine ${roll.ar} != expected ${exp.ar}`);
+          check(roll.dr === exp.dr, '6.3', `DR: engine ${roll.dr} != expected ${exp.dr}`);
+          check(roll.hitNumber === exp.hitNumber, '6.8', `Hit Number: engine ${roll.hitNumber} != expected ${exp.hitNumber} (DR ${exp.dr} − AR ${exp.ar})`);
+          const myTotal = roll.dice[0] + roll.dice[1];
+          check(roll.total === myTotal, '6.8', `total: engine ${roll.total} != ${myTotal}`);
+          check(roll.hit === myTotal >= exp.hitNumber, '6.8', `hit: engine ${roll.hit} != ${myTotal >= exp.hitNumber}`);
+          check(roll.critical === myTotal >= exp.hitNumber + 4, '6.8', `crit: engine ${roll.critical} != ${myTotal >= exp.hitNumber + 4}`);
           check(roll.isFlank === exp.isFlank, '6.3', `flank flag mismatch`);
           verifyHit(pre, post, targetId, roll.hit, roll.critical, check);
         }
@@ -417,9 +419,9 @@ function playGame(seed: number, style: Style): GameResult {
       case 'CLOSE_COMBAT': {
         const exp = expectCC(pre, pre.units[action.attackerId]!, pre.units[action.targetId]!);
         const peek = ccPeek!;
-        check(peek.dv === exp.dv, '6.11', `CC DV: engine ${peek.dv} != expected ${exp.dv} (flank+terrain)`);
-        const myAV = exp.baseFP + peek.dice[0] + peek.dice[1];
-        check(peek.av === myAV, '6.11', `CC AV: engine ${peek.av} != expected ${myAV} (FP ${exp.baseFP})`);
+        check(peek.ar === exp.ar, '6.11', `CC AR: engine ${peek.ar} != expected ${exp.ar}`);
+        check(peek.dr === exp.dr, '6.11', `CC DR: engine ${peek.dr} != expected ${exp.dr} (flank+terrain)`);
+        check(peek.hitNumber === exp.hitNumber, '6.11', `CC Hit Number: engine ${peek.hitNumber} != expected ${exp.hitNumber}`);
         check(peek.isFlank === true, '6.11', 'CC must resolve vs flank DR');
         verifyHit(pre, post, action.targetId, peek.hit, peek.critical, check);
         verifyEconomy(pre.units[action.attackerId]!.side, action.attackerId);

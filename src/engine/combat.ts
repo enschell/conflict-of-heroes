@@ -1,9 +1,14 @@
 /**
- * Combat resolution (rulebook §7.0–§7.3, §7.7).
+ * Combat resolution (rulebook v3 §6.0–§6.11).
  *
- *   AV = FP(target's DR colour) + 2D6 + CAP   (+ range modifier)
- *   DV = DR(front if attacker in target's arc, else flank) + terrain/wall DMs
- *   Hit if AV ≥ DV.  Critical (instant kill) if AV ≥ DV + 4.
+ *   AR = Firepower(target's DR colour) + AR modifiers (range, close combat)
+ *   DR = Defense(front if attacker in target's arc, else flank) + terrain/wall DM
+ *   Hit Number = DR − AR (− CAP dice mod, §3.2)
+ *   A 2d6 roll ≥ Hit Number is a Hit; Critical (instant kill) if it exceeds the
+ *   Hit Number by 4+ (§6.8 / §7.1).
+ *
+ * (The algebra is identical to the 2nd-ed AV = FP + 2d6 ≥ DV; v3 just names the
+ *  static Attack/Defense Ratings AR/DR and compares the dice to DR − AR.)
  */
 import { distance, idOf, lineDraw, parseHexId } from './hex';
 import { effectiveStats, templateOf } from './hits';
@@ -32,10 +37,12 @@ export interface AttackContext {
   reason?: string;
   band: RangeBand;
   fpColor: DRColor;
-  /** Attacker FP of the target's colour, including range modifier. */
-  baseFP: number;
-  /** Defender DV before the attacker's dice. */
-  defenseValue: number;
+  /** Attack Rating: attacker Firepower of the target's colour + range/CC mods. */
+  ar: number;
+  /** Defense Rating: target Defense (front/flank) + terrain/wall DM. */
+  dr: number;
+  /** Hit Number the 2d6 must reach = DR − AR (before any CAP dice mod). */
+  hitNumber: number;
   /** True if resolved against the target's flank DR. */
   isFlank: boolean;
 }
@@ -70,23 +77,29 @@ export function attackContext(
 
   const attackerInTargetFront = inArc(target.hexId, target.facing, attacker.hexId);
   const isFlank = !attackerInTargetFront;
-  const dr = attackerInTargetFront ? tEff.dr.front : tEff.dr.flank;
-  const dv = dr + terrainDM(state, target.hexId) + wallDMForFire(state, attacker.hexId, target.hexId);
-  const baseFP = (fpColor === 'red' ? aEff.fp.red : aEff.fp.blue) + fpRangeModifier(band);
+  const defense = attackerInTargetFront ? tEff.dr.front : tEff.dr.flank;
+  const dr = defense + terrainDM(state, target.hexId) + wallDMForFire(state, attacker.hexId, target.hexId);
+  const ar = (fpColor === 'red' ? aEff.fp.red : aEff.fp.blue) + fpRangeModifier(band);
 
-  return { legal: true, band, fpColor, baseFP, defenseValue: dv, isFlank };
+  return { legal: true, band, fpColor, ar, dr, hitNumber: dr - ar, isFlank };
 }
 
 function fail(reason: string, band: RangeBand, fpColor: DRColor): AttackContext {
-  return { legal: false, reason, band, fpColor, baseFP: 0, defenseValue: 0, isFlank: false };
+  return { legal: false, reason, band, fpColor, ar: 0, dr: 0, hitNumber: 0, isFlank: false };
 }
 
 export interface AttackRoll {
   legal: boolean;
   reason?: string;
-  av: number;
-  dv: number;
+  /** Attack Rating (Firepower + mods, static — no dice). */
+  ar: number;
+  /** Defense Rating (Defense + terrain/wall DM). */
+  dr: number;
+  /** Hit Number the dice had to reach = DR − AR − CAP dice mod (§3.2, §6.8). */
+  hitNumber: number;
   dice: [number, number];
+  /** The 2d6 total rolled. */
+  total: number;
   hit: boolean;
   critical: boolean;
   isFlank: boolean;
@@ -110,9 +123,11 @@ export function rollAttack(
     return {
       legal: false,
       reason: ctx.reason,
-      av: 0,
-      dv: 0,
+      ar: 0,
+      dr: 0,
+      hitNumber: 0,
       dice: [0, 0],
+      total: 0,
       hit: false,
       critical: false,
       isFlank: false,
@@ -122,14 +137,17 @@ export function rollAttack(
     };
   }
   const { value, dice, rng } = roll2d6(state.rng);
-  const av = ctx.baseFP + value + capMod;
-  const hit = av >= ctx.defenseValue;
-  const critical = av >= ctx.defenseValue + 4;
+  // CAPs lower the Hit Number before the roll (§3.2); the dice must reach it.
+  const hitNumber = ctx.dr - ctx.ar - capMod;
+  const hit = value >= hitNumber;
+  const critical = value >= hitNumber + 4;
   return {
     legal: true,
-    av,
-    dv: ctx.defenseValue,
+    ar: ctx.ar,
+    dr: ctx.dr,
+    hitNumber,
     dice,
+    total: value,
     hit,
     critical,
     isFlank: ctx.isFlank,
@@ -156,9 +174,9 @@ export function closeCombatContext(state: GameState, attacker: Unit, target: Uni
   if (attacker.hexId !== target.hexId) return fail('not in the same hex', 'short', fpColor);
 
   const ccMod = templateOf(state, attacker).whiteBoxFp ? -2 : 4;
-  const baseFP = (fpColor === 'red' ? aEff.fp.red : aEff.fp.blue) + ccMod;
-  const dv = tEff.dr.flank + terrainDM(state, target.hexId);
-  return { legal: true, band: 'short', fpColor, baseFP, defenseValue: dv, isFlank: true };
+  const ar = (fpColor === 'red' ? aEff.fp.red : aEff.fp.blue) + ccMod;
+  const dr = tEff.dr.flank + terrainDM(state, target.hexId);
+  return { legal: true, band: 'short', fpColor, ar, dr, hitNumber: dr - ar, isFlank: true };
 }
 
 export function rollCloseCombat(
@@ -172,9 +190,11 @@ export function rollCloseCombat(
     return {
       legal: false,
       reason: ctx.reason,
-      av: 0,
-      dv: 0,
+      ar: 0,
+      dr: 0,
+      hitNumber: 0,
       dice: [0, 0],
+      total: 0,
       hit: false,
       critical: false,
       isFlank: true,
@@ -184,14 +204,16 @@ export function rollCloseCombat(
     };
   }
   const { value, dice, rng } = roll2d6(state.rng);
-  const av = ctx.baseFP + value + capMod;
-  const hit = av >= ctx.defenseValue;
-  const critical = av >= ctx.defenseValue + 4;
+  const hitNumber = ctx.dr - ctx.ar - capMod;
+  const hit = value >= hitNumber;
+  const critical = value >= hitNumber + 4;
   return {
     legal: true,
-    av,
-    dv: ctx.defenseValue,
+    ar: ctx.ar,
+    dr: ctx.dr,
+    hitNumber,
     dice,
+    total: value,
     hit,
     critical,
     isFlank: true,

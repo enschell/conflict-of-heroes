@@ -204,7 +204,7 @@ export function reduce(state: GameState, action: Action): ReduceResult {
       log(
         'fire',
         `${attacker.id} fires at ${targetId}: rolled ${roll.dice[0]}+${roll.dice[1]}=` +
-          `${roll.dice[0] + roll.dice[1]} · AV ${roll.av} vs DV ${roll.dv}` +
+          `${roll.total} vs Hit# ${roll.hitNumber} (AR ${roll.ar} / DR ${roll.dr})` +
           `${roll.isFlank ? ' (flank)' : ''} -> ` +
           `${roll.critical ? 'CRITICAL' : roll.hit ? 'hit' : 'miss'}`,
         attacker.side,
@@ -241,7 +241,7 @@ export function reduce(state: GameState, action: Action): ReduceResult {
     log(
       'cc',
       `${attacker.id} close-combats ${target.id}: rolled ${roll.dice[0]}+${roll.dice[1]}=` +
-        `${roll.dice[0] + roll.dice[1]} · AV ${roll.av} vs flank DV ${roll.dv} -> ` +
+        `${roll.total} vs flank Hit# ${roll.hitNumber} (AR ${roll.ar} / DR ${roll.dr}) -> ` +
         `${roll.critical ? 'CRITICAL' : roll.hit ? 'hit' : 'miss'}`,
       attacker.side,
     );

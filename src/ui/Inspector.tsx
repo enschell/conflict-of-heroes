@@ -1,6 +1,6 @@
 /**
  * Selected-unit inspector + action menu. Shows the unit's effective stats and
- * the engine's legal actions as buttons (with a live AV vs DV fire preview).
+ * the engine's legal actions as buttons (with a live AR vs DR fire preview).
  * Move/fire are also available by clicking the board. v3: each Action is
  * followed by a Spent Check (§2.5) and Stresses the unit (§2.6).
  */
@@ -102,7 +102,7 @@ export function Inspector() {
                 const ctx = attackContext(game, unit, tgt);
                 return (
                   <button key={a.targetId} onClick={() => fire(unit.id, a.targetId)}>
-                    → {a.targetId}: FP {ctx.baseFP}+2d6 vs DV {ctx.defenseValue}
+                    → {a.targetId}: AR {ctx.ar} vs DR {ctx.dr} — 2d6 ≥ {ctx.hitNumber}
                     {ctx.isFlank ? ' (flank)' : ''}
                   </button>
                 );
@@ -118,7 +118,7 @@ export function Inspector() {
                 const ctx = closeCombatContext(game, unit, tgt);
                 return (
                   <button key={a.targetId} className="cc-btn" onClick={() => closeCombat(unit.id, a.targetId)}>
-                    ⚔ {a.targetId}: FP {ctx.baseFP}+2d6 vs flank DV {ctx.defenseValue}
+                    ⚔ {a.targetId}: AR {ctx.ar} vs flank DR {ctx.dr} — 2d6 ≥ {ctx.hitNumber}
                   </button>
                 );
               })}

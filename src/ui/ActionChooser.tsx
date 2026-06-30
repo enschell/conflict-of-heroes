@@ -37,12 +37,12 @@ export function ActionChooser() {
   let fireHit: number | null = null;
   if (fireAct && enemy) {
     const c = attackContext(game, unit, enemy);
-    fireHit = pct(fireOdds(c.baseFP, c.defenseValue).hit);
+    fireHit = pct(fireOdds(c.ar, c.dr).hit);
   }
   let ccHit: number | null = null;
   if (ccAct && enemy) {
     const c = closeCombatContext(game, unit, enemy);
-    ccHit = pct(fireOdds(c.baseFP, c.defenseValue).hit);
+    ccHit = pct(fireOdds(c.ar, c.dr).hit);
   }
 
   const run = (fn: () => void) => {

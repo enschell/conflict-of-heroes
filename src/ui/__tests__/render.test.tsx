@@ -74,7 +74,7 @@ describe('UI renders', () => {
             dice: [3, 4],
             success: true,
             headline: 'HIT',
-            detail: 'AV 12 vs DV 11',
+            detail: 'AR 6 vs DR 12 — 2d6 ≥ 6',
             label: 'test roll',
           },
         ],

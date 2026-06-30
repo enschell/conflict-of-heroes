@@ -31,40 +31,42 @@ describe('combat resolution (rulebook §7)', () => {
     expect(ctx.legal).toBe(true);
     expect(ctx.fpColor).toBe('red');
     expect(ctx.isFlank).toBe(false);
-    expect(ctx.defenseValue).toBe(12); // front DR
-    expect(ctx.baseFP).toBe(3 + 3); // FP + short-range bonus
+    expect(ctx.dr).toBe(12); // front DR
+    expect(ctx.ar).toBe(3 + 3); // AR = Firepower + short-range bonus
+    expect(ctx.hitNumber).toBe(12 - 6); // Hit Number = DR − AR
   });
 
   it('uses flank DR when the attacker is outside the target arc', () => {
     const { s, a, t } = scene({ targetFacing: 0 }); // target faces East (away)
     const ctx = attackContext(s, a, t);
     expect(ctx.isFlank).toBe(true);
-    expect(ctx.defenseValue).toBe(11); // flank DR
+    expect(ctx.dr).toBe(11); // flank DR
   });
 
-  it('adds terrain DM to the defender', () => {
+  it('adds terrain DM to the defender DR', () => {
     const { s, a, t } = scene({ targetFacing: 3, targetTerrain: 'woodsHeavy' });
-    expect(attackContext(s, a, t).defenseValue).toBe(12 + 2);
+    expect(attackContext(s, a, t).dr).toBe(12 + 2);
   });
 
-  it('applies range bands: normal (0), long (-2), out of range', () => {
+  it('applies range bands to AR: normal (0), long (-2), out of range', () => {
     const normal = scene({ targetFacing: 3, targetQ: 3 }); // dist 3, range 4
-    expect(attackContext(normal.s, normal.a, normal.t).baseFP).toBe(3);
+    expect(attackContext(normal.s, normal.a, normal.t).ar).toBe(3);
 
     const long = scene({ targetFacing: 3, targetQ: 6 }); // dist 6, range 4 (≤ 8)
-    expect(attackContext(long.s, long.a, long.t).baseFP).toBe(3 - 2);
+    expect(attackContext(long.s, long.a, long.t).ar).toBe(3 - 2);
 
     const out = scene({ targetFacing: 3, targetQ: 9 }); // dist 9 > 8
     expect(attackContext(out.s, out.a, out.t).legal).toBe(false);
   });
 
-  it('wires AV/DV, hit and critical correctly', () => {
-    const { s, a, t } = scene({ targetFacing: 3 }); // baseFP 6, dv 12
+  it('wires Hit Number, hit and critical correctly (2d6 ≥ DR − AR, crit by 4)', () => {
+    const { s, a, t } = scene({ targetFacing: 3 }); // AR 6, DR 12 → Hit Number 6
     const r = rollAttack(s, a, t);
     expect(r.legal).toBe(true);
-    expect(r.av).toBe(r.dice[0] + r.dice[1] + 6);
-    expect(r.hit).toBe(r.av >= r.dv);
-    expect(r.critical).toBe(r.av >= r.dv + 4);
+    expect(r.total).toBe(r.dice[0] + r.dice[1]);
+    expect(r.hitNumber).toBe(r.dr - r.ar); // 12 − 6 = 6 (no CAP mod)
+    expect(r.hit).toBe(r.total >= r.hitNumber);
+    expect(r.critical).toBe(r.total >= r.hitNumber + 4);
   });
 
   it('overwhelming firepower yields a critical hit', () => {
