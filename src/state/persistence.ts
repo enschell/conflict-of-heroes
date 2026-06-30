@@ -52,7 +52,7 @@ export interface SlotMeta {
   savedAt: string; // ISO timestamp
   round: number;
   roundsTotal: number;
-  firefightId: string;
+  missionId: string;
   phase: string;
 }
 
@@ -86,7 +86,7 @@ export function saveSlot(name: string, state: GameState): SlotMeta | null {
     savedAt: new Date().toISOString(),
     round: state.round,
     roundsTotal: state.roundsTotal,
-    firefightId: state.firefightId,
+    missionId: state.missionId,
     phase: state.phase,
   };
   try {

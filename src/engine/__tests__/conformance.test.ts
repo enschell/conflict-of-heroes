@@ -9,7 +9,7 @@ import { reduce } from '../reducer';
 import { legalActions } from '../actions';
 import { initGame } from '../state';
 import { otherSide } from '../victory';
-import { FIREFIGHT_1 } from '../../data/firefights/firefight1';
+import { MISSION_1 } from '../../data/missions/mission1';
 import type { Action, GameState } from '../types';
 
 const ORDER: Action['type'][] = [
@@ -26,7 +26,7 @@ function pick(state: GameState): Action {
 }
 
 function play(seed: number) {
-  let state = initGame({ ...FIREFIGHT_1, seed });
+  let state = initGame({ ...MISSION_1, seed });
   let steps = 0;
   while (state.phase === 'playing' && steps < 6000) {
     const pre = state;
@@ -47,7 +47,7 @@ function play(seed: number) {
     let vpToB = 0;
     for (const id of destroyed) {
       const u = pre.units[id]!;
-      const vp = pre.templates[u.templateId]!.vp;
+      const vp = pre.victory.vpPerKill ?? pre.templates[u.templateId]!.vp;
       if (otherSide(u.side) === 'A') vpToA += vp;
       else vpToB += vp;
     }

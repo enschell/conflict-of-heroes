@@ -93,8 +93,8 @@ export function initGame(def: FirefightDef): GameState {
     hexes,
     // Vehicle markers are a later module; reuse the foot pile shape for now.
     hitPiles: { foot: footPile, vehicle: makeFootHitPile() },
-    firefightId: def.id,
-    victory: { victoryHexes: def.victoryHexes },
+    missionId: def.id,
+    victory: { victoryHexes: def.victoryHexes, vpPerKill: def.vpPerKill },
     log: [],
   };
 

@@ -18,7 +18,7 @@ import {
   serialize,
 } from '../engine';
 import type { Action, Facing, GameEvent, GameState, HexId, UnitId } from '../engine/types';
-import { FIREFIGHT_1 } from '../data/firefights/firefight1';
+import { MISSION_1 } from '../data/missions/mission1';
 import { playFire, playMove } from '../ui/sound';
 import {
   clearAuto,
@@ -308,7 +308,7 @@ export const useGame = create<Store>((set, get) => {
     muted: false,
 
     newGame: () => {
-      const game = initGame(FIREFIGHT_1);
+      const game = initGame(MISSION_1);
       saveAuto(game);
       set({
         game,

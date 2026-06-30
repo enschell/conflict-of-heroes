@@ -110,10 +110,12 @@ export function reduce(state: GameState, action: Action): ReduceResult {
     }
     const tmpl = templateOf(next, unit);
     const opp = otherSide(unit.side);
-    gainVp(next, opp, tmpl.vp); // §9.1: VP to the destroyer + step the no-tie marker
+    // §9.1: VP to the destroyer (flat per-Mission value if set) + step the no-tie marker.
+    const killVp = next.victory.vpPerKill ?? tmpl.vp;
+    gainVp(next, opp, killVp);
     applyUnitLoss(next.players[unit.side]);
     delete next.units[unit.id];
-    log('destroyed', `${unit.id} destroyed (+${tmpl.vp} VP to ${opp})`, unit.side);
+    log('destroyed', `${unit.id} destroyed (+${killVp} VP to ${opp})`, unit.side);
   };
 
   const applyHit = (target: Unit, critical: boolean) => {

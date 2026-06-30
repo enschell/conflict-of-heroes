@@ -24,9 +24,9 @@ import {
   visibleHexesFrom,
 } from '../src/engine/index';
 import type { Action, GameState } from '../src/engine/types';
-import { FIREFIGHT_1 } from '../src/data/firefights/firefight1';
+import { MISSION_1 } from '../src/data/missions/mission1';
 
-const SCENARIO = FIREFIGHT_1;
+const SCENARIO = MISSION_1;
 
 const ARROWS = ['→', '↗', '↖', '←', '↙', '↘'];
 

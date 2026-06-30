@@ -41,7 +41,7 @@ export function baseState(seed = 1): GameState {
     templates: {},
     hexes: {},
     hitPiles: { foot: makeFootHitPile(), vehicle: makeFootHitPile() },
-    firefightId: 'test',
+    missionId: 'test',
     victory: { victoryHexes: [] },
     log: [],
   };

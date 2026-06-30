@@ -4,7 +4,7 @@
  */
 import { afterEach, describe, expect, it } from 'vitest';
 import { initGame, serialize } from '../../engine';
-import { FIREFIGHT_1 } from '../../data/firefights/firefight1';
+import { MISSION_1 } from '../../data/missions/mission1';
 import {
   deleteSlot,
   isGameState,
@@ -21,7 +21,7 @@ afterEach(() => {
 
 describe('named slots', () => {
   it('saves, lists, loads, and deletes a slot (round-trips exactly)', () => {
-    const game = initGame({ ...FIREFIGHT_1, seed: 5 });
+    const game = initGame({ ...MISSION_1, seed: 5 });
     expect(saveSlot('alpha', game)).not.toBeNull();
 
     const metas = listSlots();
@@ -38,7 +38,7 @@ describe('named slots', () => {
 
   it('rejects non-game JSON on import validation', () => {
     expect(isGameState({ hello: 'world' })).toBe(false);
-    expect(isGameState(initGame({ ...FIREFIGHT_1, seed: 1 }))).toBe(true);
+    expect(isGameState(initGame({ ...MISSION_1, seed: 1 }))).toBe(true);
   });
 });
 

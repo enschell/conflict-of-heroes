@@ -221,8 +221,10 @@ export interface PlayerState {
 // ---------------------------------------------------------------------------
 
 export interface VictoryConfig {
-  /** Victory hexes and the VP each is worth to whoever controls it at game end. */
+  /** Objective hexes and the VP each is worth to its controller at end of Round (§9.1). */
   victoryHexes: { hexId: HexId; vp: number }[];
+  /** Flat VP awarded per enemy Unit destroyed; falls back to the unit's template vp. */
+  vpPerKill?: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -299,7 +301,7 @@ export interface GameState {
   templates: Record<string, UnitTemplate>;
   hexes: Record<HexId, Hex>;
   hitPiles: { foot: HitPile; vehicle: HitPile };
-  firefightId: string;
+  missionId: string;
   victory: VictoryConfig;
   log: GameEvent[];
   /** Winner once phase === 'gameOver'. v3 has no ties — always the VP-Advantage holder (§9.3). */
@@ -334,7 +336,7 @@ export interface UnitPlacement {
   facing: Facing;
 }
 
-export interface FirefightDef {
+export interface MissionDef {
   id: string;
   name: string;
   roundsTotal: number;
@@ -346,8 +348,13 @@ export interface FirefightDef {
   firstInitiative?: SideId;
   /** Starting VP per side (§9.2), e.g. Mission 1: Soviets begin with 1 VP. */
   startVp?: Partial<Record<SideId, number>>;
+  /** Flat VP per enemy Unit destroyed (§9.1); falls back to template vp if unset. */
+  vpPerKill?: number;
   hexes: MapHexDef[];
   units: UnitPlacement[];
   templates: UnitTemplate[];
   victoryHexes: { hexId: HexId; vp: number }[];
 }
+
+/** @deprecated 2nd-ed name; use {@link MissionDef}. */
+export type FirefightDef = MissionDef;

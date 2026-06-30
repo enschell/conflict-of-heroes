@@ -32,7 +32,7 @@ import {
 import { lineDraw } from '../src/engine/hex';
 import { TERRAIN } from '../src/data/terrainTypes';
 import { FOOT_HIT_MARKERS } from '../src/data/hitMarkers';
-import { FIREFIGHT_1 } from '../src/data/firefights/firefight1';
+import { MISSION_1 } from '../src/data/missions/mission1';
 import type { Action, GameEvent, GameState, SideId, Unit } from '../src/engine/types';
 
 // ---------------------------------------------------------------------------
@@ -280,7 +280,7 @@ interface GameResult {
 }
 
 function playGame(seed: number, style: Style): GameResult {
-  let state = initGame({ ...FIREFIGHT_1, seed });
+  let state = initGame({ ...MISSION_1, seed });
   const violations: Violation[] = [];
   const coverage: Record<string, number> = {};
   const bump = (k: string) => (coverage[k] = (coverage[k] ?? 0) + 1);
@@ -349,7 +349,7 @@ function playGame(seed: number, style: Style): GameResult {
     let vpToB = 0;
     for (const id of destroyed) {
       const u = pre.units[id]!;
-      const vp = pre.templates[u.templateId]!.vp;
+      const vp = pre.victory.vpPerKill ?? pre.templates[u.templateId]!.vp;
       if (otherSide(u.side) === 'A') vpToA += vp;
       else vpToB += vp;
     }
@@ -534,7 +534,7 @@ function verifyHit(
 // ---------------------------------------------------------------------------
 
 function probe(): GameResult {
-  let state = initGame({ ...FIREFIGHT_1, seed: 909 });
+  let state = initGame({ ...MISSION_1, seed: 909 });
   const violations: Violation[] = [];
   const coverage: Record<string, number> = {};
   const bump = (k: string) => (coverage[k] = (coverage[k] ?? 0) + 1);

@@ -40,7 +40,7 @@ afterEach(() => {
 describe('UI renders', () => {
   it('shows the setup screen before a game starts', () => {
     useGame.setState({ game: null });
-    expect(render()).toContain('Start Firefight 1');
+    expect(render()).toContain('Start Mission 1');
   });
 
   it('renders the board + panels in-game', () => {
