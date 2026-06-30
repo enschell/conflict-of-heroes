@@ -106,6 +106,8 @@ export const GERMAN_UNITS: UnitTemplate[] = [
     apToFire: 3,
     vp: 3,
     unburdened: false,
+    propulsion: 'tracked',
+    bonusMoves: 1,
   },
 ];
 
@@ -182,6 +184,8 @@ export const SOVIET_UNITS: UnitTemplate[] = [
     apToFire: 3,
     vp: 3,
     unburdened: false,
+    propulsion: 'tracked',
+    bonusMoves: 2,
   },
 ];
 

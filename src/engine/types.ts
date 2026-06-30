@@ -101,6 +101,10 @@ export interface UnitTemplate {
    * gets −2FP instead of the usual +4 (rulebook §7.7.3).
    */
   whiteBoxFp?: boolean;
+  /** Vehicle propulsion (§15.1): wheeled (green Move Cost) or tracked (blue). */
+  propulsion?: 'wheeled' | 'tracked';
+  /** Vehicle Bonus Move symbols (§15.2): extra hexes per Move Action at no AP. */
+  bonusMoves?: number;
 }
 
 /** A unit instance on the map. */
