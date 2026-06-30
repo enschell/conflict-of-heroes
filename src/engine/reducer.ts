@@ -17,6 +17,7 @@ import { applyUnitLoss, clampCapMod, reduceActionCost } from './cap';
 import { attackContext, closeCombatContext, rollCloseCombat, rollStackFire } from './combat';
 import { isInFrontArc, parseHexId } from './hex';
 import { drawHit, effectiveStats, returnHitToPile, templateOf } from './hits';
+import { groupConnected, groupStress } from './groups';
 import { directionTo, moveCost, pivotCost } from './movement';
 import { RALLY_AP_COST, rollRally } from './rally';
 import { spentCheck } from './spent';
@@ -100,6 +101,32 @@ export function reduce(state: GameState, action: Action): ReduceResult {
       if (u.side === unit.side) u.stressed = false;
     }
     unit.stressed = true;
+    resetPassCycle();
+    switchTurn(next);
+  };
+
+  /**
+   * After a Group Action (§10.10): ONE Spent Check at the group cost — on a fail
+   * EVERY member becomes Spent — and ALL members are Stressed regardless (§10.11),
+   * so a side may hold several Stress markers. Then break the pass cycle and hand
+   * the turn over.
+   */
+  const afterGroupAction = (members: Unit[], cost: number) => {
+    const side = members[0]!.side;
+    if (cost > 0) {
+      const sc = spentCheck(next.rng, cost);
+      next.rng = sc.rng;
+      if (!sc.fresh) for (const m of members) m.status = 'spent';
+      log(
+        'spent',
+        `Group Spent Check: rolled ${sc.roll} vs cost ${cost} -> ${sc.fresh ? 'Fresh' : 'Spent'} (whole Group)`,
+        side,
+      );
+    } else {
+      log('spent', `Group 0AP action — no Spent Check`, side);
+    }
+    for (const u of Object.values(next.units)) if (u.side === side) u.stressed = false;
+    for (const m of members) m.stressed = true;
     resetPassCycle();
     switchTurn(next);
   };
@@ -330,6 +357,63 @@ export function reduce(state: GameState, action: Action): ReduceResult {
     return finish();
   };
 
+  const doGroupMove = (a: Extract<Action, { type: 'GROUP_MOVE' }>): ReduceResult => {
+    if (a.moves.length === 0) return deny('empty group');
+    const ids = a.moves.map((m) => m.unitId);
+    if (new Set(ids).size !== ids.length) return deny('duplicate group member');
+    const members: Unit[] = [];
+    for (const id of ids) {
+      const u = next.units[id];
+      if (!u) return deny('no such unit');
+      if (u.side !== next.currentSide) return deny('not your turn');
+      members.push(u);
+    }
+    // §10.2: the Group must BEGIN in one continuously-adjacent cluster.
+    if (!groupConnected(next, ids)) return deny('group is not continuously adjacent');
+
+    // §10.4: Group Move cost = the highest individual move cost (movers only).
+    let maxMove = 0;
+    for (const m of a.moves) {
+      if (m.toHexId == null) continue;
+      const unit = next.units[m.unitId]!;
+      const mc = moveCost(next, unit, m.toHexId);
+      if (mc.ap == null) return deny(mc.reason ?? 'illegal move');
+      maxMove = Math.max(maxMove, mc.ap);
+    }
+    const costBeforeReduce = maxMove + groupStress(members); // §10.11
+    const reduceBy = Math.max(0, Math.trunc(a.capCostReduce ?? 0));
+    const { cost, capsSpent } = reduceActionCost(costBeforeReduce, reduceBy);
+    // §10.1: a Spent member may join only if the Group cost is 0AP.
+    if (members.some((u) => u.status === 'spent') && cost > 0)
+      return deny('a Group with a Spent Unit must reach 0AP with CAPs (§10.1/§3.4)');
+    const player = next.players[next.currentSide];
+    if (player.capCurrent < capsSpent) return deny('not enough CAP');
+    player.capCurrent -= capsSpent;
+
+    // Apply each member's move/pivot (members may separate, §10.3).
+    for (const m of a.moves) {
+      const unit = next.units[m.unitId]!;
+      if (m.toHexId != null) {
+        const oldHexId = unit.hexId;
+        const dir = directionTo(oldHexId, m.toHexId);
+        const forward = isInFrontArc(parseHexId(oldHexId), unit.facing, parseHexId(m.toHexId));
+        unit.hexId = m.toHexId;
+        if (m.facing != null) unit.facing = m.facing;
+        else if (forward && dir >= 0) unit.facing = dir as Facing;
+      } else if (m.facing != null) {
+        unit.facing = m.facing;
+      }
+    }
+    log(
+      'groupMove',
+      `${next.currentSide} Group Moves ${ids.join(', ')} (cost ${cost})`,
+      next.currentSide,
+    );
+    updateVictoryHexControl(next);
+    afterGroupAction(members, cost);
+    return finish();
+  };
+
   // -- dispatch -------------------------------------------------------------
 
   switch (action.type) {
@@ -345,6 +429,8 @@ export function reduce(state: GameState, action: Action): ReduceResult {
       return doRally(action);
     case 'STALL':
       return doStall(action);
+    case 'GROUP_MOVE':
+      return doGroupMove(action);
     case 'PASS':
       return doPass();
     default:

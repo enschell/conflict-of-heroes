@@ -264,6 +264,14 @@ export type Action =
     }
   | { type: 'RALLY'; unitId: UnitId; capDiceMod?: number; capCostReduce?: number }
   | { type: 'STALL'; unitId: UnitId; capCostReduce?: number }
+  // Group Move (§10.2–§10.4): one Action for a continuously-adjacent Group; each
+  // member may move to an adjacent hex and/or pivot, or stay. Cost = the highest
+  // member move cost; one Spent Check for the Group.
+  | {
+      type: 'GROUP_MOVE';
+      moves: { unitId: UnitId; toHexId?: HexId; facing?: Facing }[];
+      capCostReduce?: number;
+    }
   | { type: 'PASS' };
 
 export type ActionType = Action['type'];
