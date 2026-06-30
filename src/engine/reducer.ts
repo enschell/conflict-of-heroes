@@ -12,7 +12,7 @@
  * cost before the check (to 0AP ⇒ no check, §3.4). Acting Stresses the Unit
  * (+1AP next Turn if reused, §2.6).
  */
-import { FOOT_HIT_MARKERS } from '../data/hitMarkers';
+import { HIT_MARKERS, isArmoredMarker } from '../data/hitMarkers';
 import { applyUnitLoss, clampCapMod, reduceActionCost } from './cap';
 import { attackContext, closeCombatContext, rollCloseCombat, rollStackFire } from './combat';
 import { isInFrontArc, parseHexId } from './hex';
@@ -131,10 +131,16 @@ export function reduce(state: GameState, action: Action): ReduceResult {
     switchTurn(next);
   };
 
+  // §7.5 / §15.13: a marker returns to the deck it was drawn from.
+  const returnMarker = (type: Parameters<typeof returnHitToPile>[1]) => {
+    if (isArmoredMarker(type)) next.hitPiles.vehicle = returnHitToPile(next.hitPiles.vehicle, type);
+    else next.hitPiles.foot = returnHitToPile(next.hitPiles.foot, type);
+  };
+  /** Armored Targets (blue Defense, §15.13) draw from the vehicle pile. */
+  const isArmored = (unit: Unit) => templateOf(next, unit).dr.color === 'blue';
+
   const destroyUnit = (unit: Unit) => {
-    for (const hm of unit.hitMarkers) {
-      next.hitPiles.foot = returnHitToPile(next.hitPiles.foot, hm);
-    }
+    for (const hm of unit.hitMarkers) returnMarker(hm);
     const tmpl = templateOf(next, unit);
     const opp = otherSide(unit.side);
     // §9.1: VP to the destroyer (flat per-Mission value if set) + step the no-tie marker.
@@ -150,12 +156,15 @@ export function reduce(state: GameState, action: Action): ReduceResult {
       destroyUnit(target);
       return;
     }
-    const draw = drawHit(next.rng, next.hitPiles.foot);
+    const armored = isArmored(target);
+    const pile = armored ? next.hitPiles.vehicle : next.hitPiles.foot;
+    const draw = drawHit(next.rng, pile);
     next.rng = draw.rng;
-    next.hitPiles.foot = draw.pile;
-    const def = FOOT_HIT_MARKERS[draw.type];
+    if (armored) next.hitPiles.vehicle = draw.pile;
+    else next.hitPiles.foot = draw.pile;
+    const def = HIT_MARKERS[draw.type];
     if (def.killOnDraw) {
-      next.hitPiles.foot = returnHitToPile(next.hitPiles.foot, draw.type);
+      returnMarker(draw.type);
       destroyUnit(target);
     } else {
       target.hitMarkers = [draw.type];
@@ -303,7 +312,7 @@ export function reduce(state: GameState, action: Action): ReduceResult {
     if (rr.success) {
       const removed = unit.hitMarkers[0]!;
       unit.hitMarkers = [];
-      next.hitPiles.foot = returnHitToPile(next.hitPiles.foot, removed);
+      returnMarker(removed);
       log(
         'rally',
         `${unit.id} rallies — rolled ${rr.dice[0]}+${rr.dice[1]}=${rr.roll} · ` +
@@ -488,7 +497,7 @@ export function reduce(state: GameState, action: Action): ReduceResult {
     // marker and shares no hex with an enemy.
     for (const u of members) {
       if (u.hitMarkers.length === 0) return deny(`${u.id} has no hit marker`);
-      if (FOOT_HIT_MARKERS[u.hitMarkers[0]!].rally <= 0) return deny(`${u.id} cannot rally`);
+      if (HIT_MARKERS[u.hitMarkers[0]!].rally <= 0) return deny(`${u.id} cannot rally`);
       if (Object.values(next.units).some((e) => e.side !== u.side && e.hexId === u.hexId))
         return deny(`${u.id} shares a hex with an enemy`);
     }
@@ -509,7 +518,7 @@ export function reduce(state: GameState, action: Action): ReduceResult {
       if (rr.success) {
         const removed = u.hitMarkers[0]!;
         u.hitMarkers = [];
-        next.hitPiles.foot = returnHitToPile(next.hitPiles.foot, removed);
+        returnMarker(removed);
         log('rally', `${u.id} rallies — ${rr.dice[0]}+${rr.dice[1]} total ${rr.total} >= ${rr.target}`, u.side);
       } else {
         log('rally', `${u.id} fails to rally — total ${rr.total} < ${rr.target}`, u.side);

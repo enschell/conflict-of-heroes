@@ -5,7 +5,7 @@
  * This module holds the pure group helpers (connectivity, group cost pieces);
  * the reducer wires them into the act → one Spent Check → Stress-all flow.
  */
-import { FOOT_HIT_MARKERS } from '../data/hitMarkers';
+import { HIT_MARKERS } from '../data/hitMarkers';
 import { distance, parseHexId } from './hex';
 import { effectiveStats } from './hits';
 import { hasLOS, inArc } from './los';
@@ -50,7 +50,7 @@ export function groupStress(units: Unit[]): number {
 /** Does any of the Unit's hit markers modify its Firepower (disqualifies support)? */
 function hasFirepowerHitMarker(unit: Unit): boolean {
   return unit.hitMarkers.some((t) => {
-    const d = FOOT_HIT_MARKERS[t];
+    const d = HIT_MARKERS[t];
     return (d.fpRedDelta ?? 0) !== 0 || (d.fpBlueDelta ?? 0) !== 0;
   });
 }

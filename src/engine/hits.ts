@@ -4,7 +4,7 @@
  * A unit holds at most one hit marker; a second hit destroys it. Effective
  * stats = template stats modified by the current hit marker.
  */
-import { FOOT_HIT_MARKERS } from '../data/hitMarkers';
+import { HIT_MARKERS } from '../data/hitMarkers';
 import { randInt } from './rng';
 import type {
   DRColor,
@@ -51,7 +51,7 @@ export function effectiveStats(state: GameState, unit: Unit): EffectiveStats {
   };
 
   for (const hitType of unit.hitMarkers) {
-    const def = FOOT_HIT_MARKERS[hitType];
+    const def = HIT_MARKERS[hitType];
     eff.fp.red += def.fpRedDelta ?? 0;
     eff.fp.blue += def.fpBlueDelta ?? 0;
     eff.dr.front += def.frontDrDelta ?? 0;

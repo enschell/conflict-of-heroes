@@ -5,7 +5,7 @@
  * followed by a Spent Check (§2.5) and Stresses the unit (§2.6).
  */
 import { attackContext, closeCombatContext, effectiveStats, legalActionsForUnit, templateOf } from '../engine';
-import { FOOT_HIT_MARKERS, hitMarkerEffects } from '../data/hitMarkers';
+import { HIT_MARKERS, hitMarkerEffects } from '../data/hitMarkers';
 import type { Facing } from '../engine/types';
 import { useGame } from '../state/store';
 
@@ -89,7 +89,7 @@ export function Inspector() {
         <div className="hit-note">
           <div className="hit-note__title">Hit: {markerName(unit.hitMarkers[0])}</div>
           <ul className="hit-note__effects">
-            {hitMarkerEffects(FOOT_HIT_MARKERS[unit.hitMarkers[0]]).map((line) => (
+            {hitMarkerEffects(HIT_MARKERS[unit.hitMarkers[0]]).map((line) => (
               <li key={line}>{line}</li>
             ))}
           </ul>

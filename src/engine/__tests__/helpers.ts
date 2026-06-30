@@ -1,5 +1,5 @@
 /** Test helpers for building small, controlled game states. */
-import { makeFootHitPile } from '../../data/hitMarkers';
+import { makeArmoredHitPile, makeFootHitPile } from '../../data/hitMarkers';
 import { makeRng } from '../rng';
 import type {
   Facing,
@@ -40,7 +40,7 @@ export function baseState(seed = 1): GameState {
     units: {},
     templates: {},
     hexes: {},
-    hitPiles: { foot: makeFootHitPile(), vehicle: makeFootHitPile() },
+    hitPiles: { foot: makeFootHitPile(), vehicle: makeArmoredHitPile() },
     missionId: 'test',
     victory: { victoryHexes: [] },
     log: [],

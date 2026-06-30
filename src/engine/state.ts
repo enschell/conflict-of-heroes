@@ -1,7 +1,7 @@
 /**
  * Game state construction and (de)serialization.
  */
-import { makeFootHitPile } from '../data/hitMarkers';
+import { makeArmoredHitPile, makeFootHitPile } from '../data/hitMarkers';
 import { makeRng } from './rng';
 import { startRound } from './turn';
 import type {
@@ -91,8 +91,8 @@ export function initGame(def: FirefightDef): GameState {
     units,
     templates,
     hexes,
-    // Vehicle markers are a later module; reuse the foot pile shape for now.
-    hitPiles: { foot: footPile, vehicle: makeFootHitPile() },
+    // Soft Target (foot) and Armored Target (vehicle) draw piles (§7.5, §15.13).
+    hitPiles: { foot: footPile, vehicle: makeArmoredHitPile() },
     missionId: def.id,
     victory: { victoryHexes: def.victoryHexes, vpPerKill: def.vpPerKill },
     log: [],

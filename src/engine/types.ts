@@ -128,7 +128,8 @@ export interface Unit {
 // Hit markers
 // ---------------------------------------------------------------------------
 
-export type HitType =
+/** Soft Target (foot) hit markers (§7.5). */
+export type SoftHitType =
   | 'stunned'
   | 'unnerved'
   | 'kia'
@@ -137,6 +138,22 @@ export type HitType =
   | 'suppressed'
   | 'cowering'
   | 'berserk';
+
+/**
+ * Armored Target (vehicle) hit markers (§15.13). Distinct ids (prefixed `a`) so
+ * a marker is self-describing — its own effects and rally number — regardless of
+ * which draw pile it came from.
+ */
+export type ArmoredHitType =
+  | 'aStunned'
+  | 'aDestroyed'
+  | 'aImmobilized'
+  | 'aLightDamage'
+  | 'aGunDamaged'
+  | 'aPanicked'
+  | 'aSuppressed';
+
+export type HitType = SoftHitType | ArmoredHitType;
 
 /** Definition of a foot hit marker (rulebook §7.5). */
 export interface HitMarkerDef {

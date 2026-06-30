@@ -92,6 +92,21 @@ export const GERMAN_UNITS: UnitTemplate[] = [
     vp: 1,
     unburdened: true,
   },
+  {
+    // M6 vehicle (Armored Target, blue Defense). Stats are ours; movement
+    // bonus-move / wheeled-tracked fields arrive with the vehicle-movement step.
+    id: 'ger-pz3',
+    nation: 'germans',
+    name: 'Panzer III',
+    kind: 'vehicle',
+    fp: { red: 4, blue: 8 },
+    dr: { front: 16, flank: 13, color: 'blue' },
+    move: 2,
+    range: 12,
+    apToFire: 3,
+    vp: 3,
+    unburdened: false,
+  },
 ];
 
 export const SOVIET_UNITS: UnitTemplate[] = [
@@ -152,6 +167,21 @@ export const SOVIET_UNITS: UnitTemplate[] = [
     apToFire: 4,
     vp: 1,
     unburdened: true,
+  },
+  {
+    // M6 vehicle (Armored Target, blue Defense). Stats are ours; movement
+    // bonus-move / wheeled-tracked fields arrive with the vehicle-movement step.
+    id: 'sov-t34',
+    nation: 'soviets',
+    name: 'T-34',
+    kind: 'vehicle',
+    fp: { red: 5, blue: 10 },
+    dr: { front: 18, flank: 15, color: 'blue' },
+    move: 1,
+    range: 15,
+    apToFire: 3,
+    vp: 3,
+    unburdened: false,
   },
 ];
 

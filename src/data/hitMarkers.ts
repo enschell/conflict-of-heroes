@@ -2,9 +2,9 @@
  * Foot Unit Hit Markers (rulebook §7.5): pile counts, rally numbers, and the
  * stat/ability modifiers each one imposes.
  */
-import type { HitMarkerDef, HitType } from '../engine/types';
+import type { ArmoredHitType, HitMarkerDef, HitType, SoftHitType } from '../engine/types';
 
-export const FOOT_HIT_MARKERS: Record<HitType, HitMarkerDef> = {
+export const FOOT_HIT_MARKERS: Record<SoftHitType, HitMarkerDef> = {
   stunned: { type: 'stunned', count: 2, rally: 7, onlyRally: true },
   unnerved: { type: 'unnerved', count: 2, rally: 7 },
   kia: { type: 'kia', count: 1, rally: 0, killOnDraw: true },
@@ -91,8 +91,63 @@ export function hitMarkerEffects(def: HitMarkerDef): string[] {
 }
 
 /** Build the starting foot hit-marker pile (type -> count). */
-export function makeFootHitPile(): Record<HitType, number> {
+/**
+ * Armored Target Hit Markers (§15.13). Same mechanism as the foot deck, with
+ * vehicle-specific effects/rally numbers. "No Rally" (physical damage) = rally 0.
+ */
+export const ARMORED_HIT_MARKERS: Record<ArmoredHitType, HitMarkerDef> = {
+  aStunned: { type: 'aStunned', count: 2, rally: 9, onlyRally: true },
+  aDestroyed: { type: 'aDestroyed', count: 1, rally: 0, killOnDraw: true },
+  aImmobilized: {
+    type: 'aImmobilized',
+    count: 5,
+    rally: 0, // No Rally
+    cannotMove: true,
+    cannotPivot: true,
+    flankDrDelta: 1,
+    frontDrDelta: -1,
+  },
+  aLightDamage: { type: 'aLightDamage', count: 4, rally: 0 }, // No Rally, no stat effect
+  aGunDamaged: { type: 'aGunDamaged', count: 2, rally: 0, cannotFire: true }, // No Rally
+  aPanicked: { type: 'aPanicked', count: 1, rally: 9, cannotFire: true, frontDrDelta: -4 },
+  aSuppressed: {
+    type: 'aSuppressed',
+    count: 5,
+    rally: 8,
+    apToFireDelta: 1,
+    fpRedDelta: -3,
+    fpBlueDelta: -5,
+  },
+};
+
+/** Every hit marker keyed by type — used to resolve a marker's effects/rally. */
+export const HIT_MARKERS: Record<HitType, HitMarkerDef> = {
+  ...FOOT_HIT_MARKERS,
+  ...ARMORED_HIT_MARKERS,
+};
+
+/** A zero-filled pile over every HitType (so every key is always present). */
+function emptyPile(): Record<HitType, number> {
   const pile = {} as Record<HitType, number>;
+  for (const type of Object.keys(HIT_MARKERS) as HitType[]) pile[type] = 0;
+  return pile;
+}
+
+/** Build the starting Soft Target (foot) draw pile (type → count). */
+export function makeFootHitPile(): Record<HitType, number> {
+  const pile = emptyPile();
   for (const def of Object.values(FOOT_HIT_MARKERS)) pile[def.type] = def.count;
   return pile;
+}
+
+/** Build the starting Armored Target (vehicle) draw pile (type → count). */
+export function makeArmoredHitPile(): Record<HitType, number> {
+  const pile = emptyPile();
+  for (const def of Object.values(ARMORED_HIT_MARKERS)) pile[def.type] = def.count;
+  return pile;
+}
+
+/** True for an Armored Target marker (drawn from / returned to the vehicle pile). */
+export function isArmoredMarker(type: HitType): boolean {
+  return type in ARMORED_HIT_MARKERS;
 }
