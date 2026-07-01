@@ -20,6 +20,7 @@ import { drawHit, effectiveStats, returnHitToPile, templateOf } from './hits';
 import { groupConnected, groupStress, isValidSupporter } from './groups';
 import { directionTo, moveCost, pivotCost, planVehicleMove } from './movement';
 import { RALLY_AP_COST, rollRally } from './rally';
+import { legalEntryHexes } from './reinforcements';
 import { spentCheck } from './spent';
 import { endRound, switchTurn } from './turn';
 import { gainVp, otherSide, updateVictoryHexControl } from './victory';
@@ -691,6 +692,59 @@ export function reduce(state: GameState, action: Action): ReduceResult {
     return finish();
   };
 
+  const doEnter = (a: Extract<Action, { type: 'ENTER' }>): ReduceResult => {
+    if (a.placements.length === 0) return deny('empty entry');
+    const unitIds = a.placements.map((p) => p.unitId);
+    if (new Set(unitIds).size !== unitIds.length) return deny('duplicate unit in entry');
+
+    const entrants: { hexId: string; facing: Facing }[] = [];
+    for (const p of a.placements) {
+      const r = next.reinforcements.find((x) => x.id === p.unitId);
+      if (!r) return deny('no such reinforcement');
+      if (r.side !== next.currentSide) return deny('not your turn');
+      if (next.round < r.earliestRound)
+        return deny(`${r.id} is not available until Round ${r.earliestRound}`);
+      if (!next.hexes[p.hexId]) return deny('no such hex');
+      if (!legalEntryHexes(next, r).includes(p.hexId))
+        return deny(`${p.hexId} is not a legal entry Hex for ${r.id} (§4.12)`);
+      entrants.push({ hexId: p.hexId, facing: p.facing ?? r.facing });
+    }
+
+    // Place each Unit (0AP, §4.12 — the Spent Check/Stress happen below, once
+    // for the whole placed Group).
+    const placed: Unit[] = [];
+    a.placements.forEach((p, i) => {
+      const r = next.reinforcements.find((x) => x.id === p.unitId)!;
+      const { hexId, facing } = entrants[i]!;
+      const unit: Unit = {
+        id: r.id,
+        side: r.side,
+        nation: r.nation,
+        templateId: r.templateId,
+        hexId,
+        facing,
+        status: 'fresh',
+        stressed: false,
+        hitMarkers: [],
+        assignedWeaponCards: [],
+      };
+      next.units[unit.id] = unit;
+      placed.push(unit);
+    });
+    next.reinforcements = next.reinforcements.filter((r) => !unitIds.includes(r.id));
+
+    log(
+      'enter',
+      `${unitIds.join('+')} enter${unitIds.length > 1 ? '' : 's'} at ${entrants.map((e) => e.hexId).join(', ')}`,
+      next.currentSide,
+    );
+    updateVictoryHexControl(next);
+    // §4.12: 0AP, never a Spent Check, but the Unit(s) are Stressed. Entering as
+    // a Group (multiple Units, one Action) reuses the Group-Action Stress-all flow.
+    afterGroupAction(placed, 0);
+    return finish();
+  };
+
   // -- dispatch -------------------------------------------------------------
 
   switch (action.type) {
@@ -716,6 +770,8 @@ export function reduce(state: GameState, action: Action): ReduceResult {
       return doLoad(action);
     case 'UNLOAD':
       return doUnload(action);
+    case 'ENTER':
+      return doEnter(action);
     case 'PASS':
       return doPass();
     default:

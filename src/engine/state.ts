@@ -10,6 +10,7 @@ import type {
   Hex,
   HitPile,
   PlayerState,
+  ReinforcementUnit,
   SideId,
   Unit,
   UnitTemplate,
@@ -68,6 +69,24 @@ export function initGame(def: FirefightDef): GameState {
   const templates: Record<string, UnitTemplate> = {};
   for (const t of def.templates) templates[t.id] = t;
 
+  // §4.12: Units that begin off the Map, waiting for their Mission-specified
+  // Round/entry Hexes.
+  const reinforcements: ReinforcementUnit[] = [];
+  for (const wave of def.reinforcements ?? []) {
+    for (const u of wave.units) {
+      reinforcements.push({
+        id: u.id,
+        side: wave.side,
+        nation: templates[u.templateId]?.nation ?? wave.side,
+        templateId: u.templateId,
+        facing: u.facing,
+        waveId: wave.id,
+        earliestRound: wave.earliestRound,
+        entryHexIds: wave.entryHexIds,
+      });
+    }
+  }
+
   const footPile: HitPile = makeFootHitPile();
 
   const firstInitiativeSide: SideId = def.firstInitiative ?? 'A';
@@ -93,6 +112,7 @@ export function initGame(def: FirefightDef): GameState {
     hexes,
     // Soft Target (foot) and Armored Target (vehicle) draw piles (§7.5, §15.13).
     hitPiles: { foot: footPile, vehicle: makeArmoredHitPile() },
+    reinforcements,
     missionId: def.id,
     victory: { victoryHexes: def.victoryHexes, vpPerKill: def.vpPerKill },
     log: [],

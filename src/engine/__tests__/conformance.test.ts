@@ -13,7 +13,7 @@ import { MISSION_1 } from '../../data/missions/mission1';
 import type { Action, GameState } from '../types';
 
 const ORDER: Action['type'][] = [
-  'CLOSE_COMBAT', 'FIRE', 'MOVE', 'RALLY', 'PIVOT', 'STALL', 'PASS',
+  'ENTER', 'CLOSE_COMBAT', 'FIRE', 'MOVE', 'RALLY', 'PIVOT', 'STALL', 'PASS',
 ];
 
 function pick(state: GameState): Action {

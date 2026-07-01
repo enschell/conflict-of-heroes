@@ -13,6 +13,7 @@ import { idOf, neighbors, parseHexId } from './hex';
 import { effectiveStats, templateOf } from './hits';
 import { RALLY_AP_COST } from './rally';
 import { directionTo, moveCost, pivotCost } from './movement';
+import { legalEntryHexes } from './reinforcements';
 import type { Action, Facing, GameState, Unit, UnitId } from './types';
 
 /** Cost (incl. Stress) a Spent Unit would have to buy down to 0AP with CAPs. */
@@ -204,12 +205,31 @@ export function legalActionsForUnit(state: GameState, unitId: UnitId): Action[] 
   return actions;
 }
 
-/** All legal actions for the side whose turn it is (units + pass). */
+/**
+ * Legal ENTER actions for one reinforcement Unit right now (§4.12): one action
+ * per legal entry Hex, placing just that Unit (the UI/player may compose a
+ * multi-Unit Group entry itself by combining several `placements`).
+ */
+export function legalActionsForReinforcement(state: GameState, unitId: UnitId): Action[] {
+  const r = state.reinforcements.find((x) => x.id === unitId);
+  if (!r) return [];
+  if (r.side !== state.currentSide) return [];
+  if (state.round < r.earliestRound) return [];
+  return legalEntryHexes(state, r).map((hexId) => ({
+    type: 'ENTER',
+    placements: [{ unitId: r.id, hexId, facing: r.facing }],
+  }));
+}
+
+/** All legal actions for the side whose turn it is (units + reinforcements + pass). */
 export function legalActions(state: GameState): Action[] {
   if (state.phase !== 'playing') return [];
   const actions: Action[] = [];
   for (const unit of Object.values(state.units)) {
     if (unit.side === state.currentSide) actions.push(...legalActionsForUnit(state, unit.id));
+  }
+  for (const r of state.reinforcements) {
+    if (r.side === state.currentSide) actions.push(...legalActionsForReinforcement(state, r.id));
   }
   actions.push({ type: 'PASS' });
   return actions;

@@ -6,8 +6,14 @@ export * from './types';
 
 export { reduce } from './reducer';
 export { initGame, serialize, deserialize } from './state';
-export { legalActions, legalActionsForUnit, modifiedActionCost } from './actions';
+export {
+  legalActions,
+  legalActionsForUnit,
+  legalActionsForReinforcement,
+  modifiedActionCost,
+} from './actions';
 export { groupConnected, groupStress, isValidSupporter } from './groups';
+export { legalEntryHexes } from './reinforcements';
 
 // Selected pure helpers useful to the UI (e.g. previews, LOS overlay):
 export {

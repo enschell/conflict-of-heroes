@@ -155,36 +155,28 @@ interface Store {
 
 const HISTORY_LIMIT = 100;
 
+/** Action types that go through the single-unit CAP-confirm gate below. */
+type GateableAction = Extract<
+  Action,
+  { type: 'MOVE' | 'FIRE' | 'CLOSE_COMBAT' | 'RALLY' | 'PIVOT' }
+>;
+
 export const useGame = create<Store>((set, get) => {
-  /** The unit that performs an action (none for PASS). */
-  const actorOf = (action: Action): UnitId | null => {
-    switch (action.type) {
-      case 'MOVE':
-      case 'PIVOT':
-      case 'RALLY':
-      case 'STALL':
-        return action.unitId;
-      case 'FIRE':
-      case 'CLOSE_COMBAT':
-        return action.attackerId;
-      default:
-        return null;
-    }
-  };
+  /** The unit that performs a gateable action. */
+  const actorOf = (action: GateableAction): UnitId =>
+    action.type === 'FIRE' || action.type === 'CLOSE_COMBAT' ? action.attackerId : action.unitId;
 
   /**
    * Gate any action that would spend CAP behind an explicit confirmation (§3.4).
    * Fresh units never spend CAP and proceed directly. A Spent unit may act only
    * by buying its Action Cost down to 0AP with CAPs — so we show how many CAPs
    * that costs and only proceed (with capCostReduce set) once the player accepts.
+   * (Group Actions, Load/Unload, and Entry are gated differently — see their own
+   * dispatch methods — so this only ever sees the five action types above.)
    */
-  const capGate = (action: Action, proceed: (a: Action) => void) => {
+  const capGate = (action: GateableAction, proceed: (a: GateableAction) => void) => {
     const g = get().game;
     if (!g) return;
-    if (action.type === 'PASS') {
-      proceed(action); // no actor, never spends CAP
-      return;
-    }
     const id = actorOf(action);
     const unit = id ? g.units[id] : null;
     if (!unit || unit.status !== 'spent') {

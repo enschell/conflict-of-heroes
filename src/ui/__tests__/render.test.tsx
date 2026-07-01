@@ -11,6 +11,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { App } from '../../App';
 import { SavesDialog } from '../SavesDialog';
 import { useGame } from '../../state/store';
+import { ARMOR_SANDBOX } from '../../data/missions/sandbox';
 
 function render(): string {
   const el = document.createElement('div');
@@ -54,7 +55,10 @@ describe('UI renders', () => {
   });
 
   it('renders the inspector with actions for a selected unit', () => {
-    useGame.getState().newGame();
+    // Mission 1's German platoon starts as a Round-1 reinforcement (no on-map
+    // Units yet, §4.12) — use the Armor Sandbox, which has both sides on-map
+    // from the start, to exercise the Inspector's per-unit action rendering.
+    useGame.getState().newGame(ARMOR_SANDBOX);
     const g = useGame.getState().game!;
     const own = Object.values(g.units).find((u) => u.side === g.currentSide)!;
     useGame.getState().select(own.id);

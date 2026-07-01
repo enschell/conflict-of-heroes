@@ -150,6 +150,29 @@ export interface Unit {
 }
 
 // ---------------------------------------------------------------------------
+// Reinforcements (§4.12): Units that begin off the Map and enter later.
+// ---------------------------------------------------------------------------
+
+/**
+ * A not-yet-placed Unit waiting to enter the Map (§4.12). Same identity as a
+ * Unit, minus `hexId`/status/hit state (it has none of those until it enters).
+ */
+export interface ReinforcementUnit {
+  id: UnitId;
+  side: SideId;
+  nation: NationId;
+  templateId: string;
+  /** The Mission's suggested facing on entry; an ENTER placement may override it. */
+  facing: Facing;
+  /** Which authored wave this belongs to (for display/grouping only). */
+  waveId: string;
+  /** May enter starting this Round, or any later Round (player's choice, §4.12). */
+  earliestRound: number;
+  /** Full entry Hexes the Mission specifies for this wave (an edge row, a named hex, or an area). */
+  entryHexIds: HexId[];
+}
+
+// ---------------------------------------------------------------------------
 // Hit markers
 // ---------------------------------------------------------------------------
 
@@ -333,6 +356,10 @@ export type Action =
   // a Group Move with a single Group Spent Check for the pair.
   | { type: 'LOAD'; unitId: UnitId; vehicleId: UnitId; capCostReduce?: number }
   | { type: 'UNLOAD'; unitId: UnitId; toHexId: HexId; facing?: Facing; capCostReduce?: number }
+  // Entering the Mission (§4.12): 0AP, never a Spent Check (but the Unit is
+  // Stressed). Reinforcements may enter as a Group — one Action placing several
+  // Units on their entry Hexes at once.
+  | { type: 'ENTER'; placements: { unitId: UnitId; hexId: HexId; facing?: Facing }[] }
   | { type: 'PASS' };
 
 export type ActionType = Action['type'];
@@ -370,6 +397,8 @@ export interface GameState {
   templates: Record<string, UnitTemplate>;
   hexes: Record<HexId, Hex>;
   hitPiles: { foot: HitPile; vehicle: HitPile };
+  /** Units waiting to enter the Map (§4.12); removed here and added to `units` on ENTER. */
+  reinforcements: ReinforcementUnit[];
   missionId: string;
   victory: VictoryConfig;
   log: GameEvent[];
@@ -405,6 +434,17 @@ export interface UnitPlacement {
   facing: Facing;
 }
 
+/** A Mission-authored reinforcement wave: a set of Units + when/where they may enter (§4.12). */
+export interface ReinforcementWaveDef {
+  id: string;
+  side: SideId;
+  /** May enter starting this Round, or any later Round (player's choice). */
+  earliestRound: number;
+  /** Full entry Hexes the Mission specifies (an edge row, a single named hex, or an area). */
+  entryHexIds: HexId[];
+  units: { id: UnitId; templateId: string; facing: Facing }[];
+}
+
 export interface MissionDef {
   id: string;
   name: string;
@@ -421,6 +461,8 @@ export interface MissionDef {
   vpPerKill?: number;
   hexes: MapHexDef[];
   units: UnitPlacement[];
+  /** Units that begin off-Map and enter later (§4.12). */
+  reinforcements?: ReinforcementWaveDef[];
   templates: UnitTemplate[];
   victoryHexes: { hexId: HexId; vp: number }[];
 }

@@ -28,6 +28,7 @@ import {
   otherSide,
   directionTo,
   idOf,
+  legalEntryHexes,
 } from '../src/engine';
 import { lineDraw } from '../src/engine/hex';
 import { TERRAIN } from '../src/data/terrainTypes';
@@ -235,7 +236,13 @@ function chooseAction(state: GameState, style: Style): Action {
     const id = actorId(a);
     return id != null && state.units[id]?.status === 'fresh';
   };
-  const acts = legalActions(state).filter(isFresh);
+  const allActs = legalActions(state);
+  // §4.12: bring reinforcements on as soon as they're eligible — they aren't
+  // "fresh Units" (not on the Map yet), so the isFresh filter doesn't apply.
+  const entries = allActs.filter((a): a is Extract<Action, { type: 'ENTER' }> => a.type === 'ENTER');
+  if (entries.length) return entries[0]!;
+
+  const acts = allActs.filter(isFresh);
 
   const towardScore = (toHexId: string) =>
     enemies.length ? -Math.min(...enemies.map((e) => distance(parseHexId(toHexId), parseHexId(e.hexId)))) : 0;
@@ -476,6 +483,17 @@ function playGame(seed: number, style: Style): GameResult {
         bump('STALL');
         break;
       }
+      case 'ENTER': {
+        // §4.12: 0AP, never a Spent Check, but the Unit(s) are Stressed.
+        for (const p of action.placements) {
+          check(post.units[p.unitId]?.hexId === p.hexId, '4.12', 'entered unit should be at its chosen hex');
+          check(post.units[p.unitId]?.stressed === true, '2.6', 'entry should Stress the unit');
+        }
+        check(parseSpent(res.events) === null, '4.12', 'entry makes no Spent Check');
+        handover(true);
+        bump('ENTER');
+        break;
+      }
       case 'PASS': {
         if (post.phase === 'playing' && post.round === pre.round) {
           check(post.currentSide !== pre.currentSide, '2.7', 'pass should alternate turn');
@@ -542,8 +560,40 @@ function probe(): GameResult {
     if (!cond) violations.push({ section, msg, round: state.round, action: 'probe' });
   };
 
+  // §4.12: Mission 1's German platoon starts as a Round-1 reinforcement (no
+  // on-map Units yet) — enter the whole Group as one Action first, so the rest
+  // of this probe has Side A Units to pivot/stall/move as before.
   const side = state.currentSide;
-  const u = Object.values(state.units).find((x) => x.side === side)!;
+  const waveReinf = state.reinforcements.filter((r) => r.side === side && state.round >= r.earliestRound);
+  if (waveReinf.length) {
+    const placements = waveReinf.map((r) => ({
+      unitId: r.id,
+      hexId: legalEntryHexes(state, r)[0]!,
+      facing: r.facing,
+    }));
+    const re = reduce(state, { type: 'ENTER', placements });
+    if (re.events[0]?.type === 'illegal') {
+      check(false, '4.12', `probe: reinforcement entry rejected (${re.events[0]?.text})`);
+    } else {
+      check(
+        placements.every((p) => re.state.units[p.unitId]?.hexId === p.hexId),
+        '4.12',
+        'probe: entered Units should be placed on their chosen entry Hex',
+      );
+      check(
+        placements.every((p) => re.state.units[p.unitId]?.stressed === true),
+        '2.6',
+        'probe: entry Stresses the Unit',
+      );
+      check(parseSpent(re.events) === null, '4.12', 'probe: entry makes no Spent Check');
+      check(re.state.currentSide !== side, '4.12', 'probe: entry should hand over the turn');
+      bump('ENTER');
+      state = re.state;
+    }
+  }
+
+  // Re-derive whose Turn it is now — entry (if any) already handed it over.
+  const u = Object.values(state.units).find((x) => x.side === state.currentSide)!;
 
   // Pivot (cost 1, sets facing, runs a Spent Check, hands over the turn).
   const turnBefore = state.currentSide;
@@ -554,7 +604,8 @@ function probe(): GameResult {
   } else {
     check(rp.state.units[u.id]?.facing === newFacing, '4.5', 'probe: pivot did not set facing');
     check(rp.state.units[u.id]?.stressed === true, '2.6', 'probe: pivot should Stress the unit');
-    check(parseSpent(rp.events)?.cost === 1, '2.4', 'probe: pivot Spent Check should be cost 1');
+    const pivotCost = 1 + (u.stressed ? 1 : 0);
+    check(parseSpent(rp.events)?.cost === pivotCost, '2.4', `probe: pivot Spent Check should be cost ${pivotCost}`);
     check(rp.state.currentSide !== turnBefore, '2.2', 'probe: pivot should hand over the turn');
     bump('PIVOT');
     state = rp.state;
@@ -567,7 +618,8 @@ function probe(): GameResult {
   if (rs.events[0]?.type === 'illegal') {
     check(false, '2.8', `probe: stall rejected (${rs.events[0]?.text})`);
   } else {
-    check(parseSpent(rs.events)?.cost === 1, '2.8', 'probe: stall Spent Check should be cost 1');
+    const stallCost = 1 + (u2.stressed ? 1 : 0);
+    check(parseSpent(rs.events)?.cost === stallCost, '2.8', `probe: stall Spent Check should be cost ${stallCost}`);
     check(rs.state.units[u2.id]?.stressed === true, '2.8', 'probe: stall should Stress the unit');
     check(rs.state.currentSide !== s2, '2.8', 'probe: stall should hand over the turn');
     bump('STALL');
