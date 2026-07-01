@@ -4,7 +4,7 @@
  * Move/fire are also available by clicking the board. v3: each Action is
  * followed by a Spent Check (§2.5) and Stresses the unit (§2.6).
  */
-import { attackContext, closeCombatContext, effectiveStats, legalActionsForUnit, RALLY_AP_COST, templateOf } from '../engine';
+import { attackContext, closeCombatContext, directionTo, effectiveStats, legalActionsForUnit, RALLY_AP_COST, templateOf } from '../engine';
 import { HIT_MARKERS, hitMarkerEffects } from '../data/hitMarkers';
 import type { Facing } from '../engine/types';
 import { useGame } from '../state/store';
@@ -23,6 +23,8 @@ export function Inspector() {
   const closeCombat = useGame((s) => s.closeCombat);
   const rally = useGame((s) => s.rally);
   const pivot = useGame((s) => s.pivot);
+  const load = useGame((s) => s.load);
+  const unload = useGame((s) => s.unload);
   const movePath = useGame((s) => s.movePath);
   const commitMovePath = useGame((s) => s.commitMovePath);
   const clearMovePath = useGame((s) => s.clearMovePath);
@@ -63,6 +65,11 @@ export function Inspector() {
   const ccActs = acts.filter(
     (a): a is Extract<typeof a, { type: 'CLOSE_COMBAT' }> => a.type === 'CLOSE_COMBAT',
   );
+  // Transport (§15.6–15.10): Load onto an eligible Vehicle, or Unload from the
+  // one carrying this Unit (a foot Unit or a towed, damaged Vehicle).
+  const loadActs = acts.filter((a): a is Extract<typeof a, { type: 'LOAD' }> => a.type === 'LOAD');
+  const unloadActs = acts.filter((a): a is Extract<typeof a, { type: 'UNLOAD' }> => a.type === 'UNLOAD');
+  const carrier = unit.carriedBy ? game.units[unit.carriedBy] : undefined;
 
   return (
     <div className="panel">
@@ -191,6 +198,33 @@ export function Inspector() {
                   {arrow}
                 </button>
               ))}
+            </div>
+          )}
+
+          {loadActs.length > 0 && (
+            <div className="fire-list">
+              <div className="dim">Load onto (§15.7 — or click the amber-outlined hex):</div>
+              {loadActs.map((a) => (
+                <button key={a.vehicleId} onClick={() => load(unit.id, a.vehicleId)}>
+                  🚚 Load onto {a.vehicleId}
+                </button>
+              ))}
+            </div>
+          )}
+
+          {unloadActs.length > 0 && (
+            <div className="fire-list">
+              <div className="dim">Unload (§15.9 — or click the amber-outlined hex):</div>
+              {unloadActs.map((a) => {
+                const sameHex = carrier && a.toHexId === carrier.hexId;
+                const dir = carrier && !sameHex ? directionTo(carrier.hexId, a.toHexId) : -1;
+                const label = sameHex ? 'under Vehicle' : dir >= 0 ? ARROWS[dir] : a.toHexId;
+                return (
+                  <button key={a.toHexId} onClick={() => unload(unit.id, a.toHexId)}>
+                    🚚 Unload {label}
+                  </button>
+                );
+              })}
             </div>
           )}
 

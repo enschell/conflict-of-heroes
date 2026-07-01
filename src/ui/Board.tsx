@@ -54,6 +54,9 @@ export function Board() {
   // Selected unit's legal move/fire highlights (hidden while showing LOS).
   const moveTargets = new Set<string>();
   const fireTargets = new Set<string>();
+  // Load (§15.7) / Unload (§15.9) hexes — highlighted alongside Move so a
+  // player can see where clicking will load onto or unload from a Vehicle.
+  const transportTargets = new Set<string>();
   if (!losActive && selectedUnitId && game.units[selectedUnitId]) {
     for (const a of legalActionsForUnit(game, selectedUnitId)) {
       if (a.type === 'MOVE') moveTargets.add(a.toHexId);
@@ -61,6 +64,11 @@ export function Board() {
         const t = game.units[a.targetId];
         if (t) fireTargets.add(t.hexId);
       }
+      if (a.type === 'LOAD') {
+        const v = game.units[a.vehicleId];
+        if (v) transportTargets.add(v.hexId);
+      }
+      if (a.type === 'UNLOAD') transportTargets.add(a.toHexId);
     }
   }
 
@@ -171,6 +179,7 @@ export function Board() {
                 {visible?.has(id) && <polygon points={pts} fill="#7CFC8C" opacity={0.18} />}
                 {nextSteps.size === 0 && moveTargets.has(id) && <polygon points={pts} fill="#5ad17a" opacity={0.28} stroke="#5ad17a" strokeWidth={2} />}
                 {nextSteps.has(id) && <polygon points={pts} fill="#5ad17a" opacity={0.2} stroke="#5ad17a" strokeWidth={2} strokeDasharray="4 3" />}
+                {transportTargets.has(id) && <polygon points={pts} fill="none" stroke="#e0a83a" strokeWidth={3} strokeDasharray="2 3" />}
                 {pathSet.has(id) && (
                   <>
                     <polygon points={pts} fill="#4aa3ff" opacity={0.32} stroke="#4aa3ff" strokeWidth={2} />

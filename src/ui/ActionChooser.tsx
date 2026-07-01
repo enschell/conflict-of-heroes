@@ -19,6 +19,7 @@ export function ActionChooser() {
   const move = useGame((s) => s.move);
   const fire = useGame((s) => s.fire);
   const closeCombat = useGame((s) => s.closeCombat);
+  const load = useGame((s) => s.load);
   const close = useGame((s) => s.closeChooser);
 
   if (!game || !chooser || !selectedUnitId || !game.units[selectedUnitId]) return null;
@@ -28,10 +29,15 @@ export function ActionChooser() {
   const enemy = Object.values(game.units).find(
     (u) => u.hexId === hexId && u.side !== game.currentSide,
   );
+  const vehicleHere = Object.values(game.units).find(
+    (u) => u.hexId === hexId && u.side === unit.side,
+  );
 
   const moveAct = acts.find((a) => a.type === 'MOVE' && a.toHexId === hexId);
   const fireAct = enemy && acts.find((a) => a.type === 'FIRE' && a.targetId === enemy.id);
   const ccAct = enemy && acts.find((a) => a.type === 'CLOSE_COMBAT' && a.targetId === enemy.id);
+  const loadAct =
+    vehicleHere && acts.find((a) => a.type === 'LOAD' && a.vehicleId === vehicleHere.id);
 
   const moveAp = moveAct ? moveCost(game, unit, hexId).ap : null;
   let fireHit: number | null = null;
@@ -66,6 +72,11 @@ export function ActionChooser() {
       {ccAct && enemy && (
         <button className="unit-picker__row cc-btn" onClick={() => run(() => closeCombat(unit.id, enemy.id))}>
           ⚔ Close combat {enemy.id} ({ccHit}% hit)
+        </button>
+      )}
+      {loadAct && vehicleHere && (
+        <button className="unit-picker__row" onClick={() => run(() => load(unit.id, vehicleHere.id))}>
+          🚚 Load onto {vehicleHere.id} (§15.7)
         </button>
       )}
       <button className="link" onClick={close}>

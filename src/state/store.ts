@@ -117,6 +117,8 @@ interface Store {
   closeCombat: (attackerId: UnitId, targetId: UnitId) => void;
   rally: (unitId: UnitId) => void;
   pivot: (unitId: UnitId, facing: Facing) => void;
+  load: (unitId: UnitId, vehicleId: UnitId) => void;
+  unload: (unitId: UnitId, toHexId: HexId) => void;
 
   toggleGroupMode: () => void;
   toggleGroupMember: (unitId: UnitId) => void;
@@ -425,11 +427,30 @@ export const useGame = create<Store>((set, get) => {
       const sel = selectedUnitId ? game.units[selectedUnitId] : null;
       if (sel && sel.side === game.currentSide) {
         const acts = legalActionsForUnit(game, sel.id);
+
+        // A Transported/Towed Unit (§15.8) has no Move/Fire of its own — a click
+        // on one of its Unload hexes (under or adjacent to its Vehicle) is
+        // unambiguous, so Unload immediately (§15.9).
+        if (sel.carriedBy) {
+          const unloadAct = acts.find((a) => a.type === 'UNLOAD' && a.toHexId === hexId);
+          if (unloadAct) {
+            get().unload(sel.id, hexId);
+            return;
+          }
+        }
+
         const enemy = here.find((u) => u.side !== game.currentSide);
         const canMoveHere = acts.some((a) => a.type === 'MOVE' && a.toHexId === hexId);
         const canFire = !!enemy && acts.some((a) => a.type === 'FIRE' && a.targetId === enemy.id);
         const canCC = !!enemy && acts.some((a) => a.type === 'CLOSE_COMBAT' && a.targetId === enemy.id);
-        const optionCount = Number(canMoveHere) + Number(canFire) + Number(canCC);
+        // Load (§15.7): clicking a hex with an eligible friendly Vehicle (same
+        // hex or adjacent) may mean "just move/stack here" as well as "load onto
+        // it" — offer both via the chooser when ambiguous (§5.4-style choice).
+        const loadVehicleId = here.find(
+          (u) => u.side === sel.side && acts.some((a) => a.type === 'LOAD' && a.vehicleId === u.id),
+        )?.id;
+        const canLoad = !!loadVehicleId;
+        const optionCount = Number(canMoveHere) + Number(canFire) + Number(canCC) + Number(canLoad);
 
         // Several things are possible here (e.g. move INTO an enemy hex vs attack
         // it) → let the player choose (§5.4). Otherwise do the single option.
@@ -447,6 +468,10 @@ export const useGame = create<Store>((set, get) => {
         }
         if (canCC && enemy) {
           get().closeCombat(sel.id, enemy.id);
+          return;
+        }
+        if (canLoad && loadVehicleId) {
+          get().load(sel.id, loadVehicleId);
           return;
         }
         // Click the already-selected unit → deselect.
@@ -529,6 +554,27 @@ export const useGame = create<Store>((set, get) => {
       ),
     pivot: (unitId, facing) =>
       capGate({ type: 'PIVOT', unitId, facing }, (a) => get().dispatch(a)),
+
+    // Load/Unload (§15.7/§15.9) are Group Actions: legalActionsForUnit already
+    // bakes in the right capCostReduce when either the Unit or the Vehicle is
+    // Spent (matching how GROUP_MOVE/GROUP_RALLY/GROUP_ATTACK are dispatched
+    // below), so we look up and dispatch the exact precomputed action.
+    load: (unitId, vehicleId) => {
+      const g = get().game;
+      if (!g) return;
+      const act = legalActionsForUnit(g, unitId).find(
+        (a): a is Extract<Action, { type: 'LOAD' }> => a.type === 'LOAD' && a.vehicleId === vehicleId,
+      );
+      if (act) get().dispatch(act);
+    },
+    unload: (unitId, toHexId) => {
+      const g = get().game;
+      if (!g) return;
+      const act = legalActionsForUnit(g, unitId).find(
+        (a): a is Extract<Action, { type: 'UNLOAD' }> => a.type === 'UNLOAD' && a.toHexId === toHexId,
+      );
+      if (act) get().dispatch(act);
+    },
 
     toggleGroupMode: () =>
       set((s) => ({ groupMode: !s.groupMode, groupSel: [], selectedUnitId: null })),
