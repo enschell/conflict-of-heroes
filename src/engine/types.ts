@@ -126,6 +126,8 @@ export interface Unit {
   /** At most one hit marker (a second hit destroys the unit). */
   hitMarkers: HitType[];
   assignedWeaponCards: CardId[];
+  /** If loaded onto a transport Vehicle (§15.6–15.9): the carrying Vehicle's id. */
+  carriedBy?: UnitId;
 }
 
 // ---------------------------------------------------------------------------
@@ -308,6 +310,10 @@ export type Action =
   // Group Rally (§10.9): same/adjacent Hit Units Rally as one Action — an
   // individual Rally Check per Unit, but a single Group Spent Check at 5AP.
   | { type: 'GROUP_RALLY'; unitIds: UnitId[]; capCostReduce?: number }
+  // Transport (§15.7/§15.9): a foot Unit loads onto / unloads from a Vehicle —
+  // a Group Move with a single Group Spent Check for the pair.
+  | { type: 'LOAD'; unitId: UnitId; vehicleId: UnitId; capCostReduce?: number }
+  | { type: 'UNLOAD'; unitId: UnitId; toHexId: HexId; facing?: Facing; capCostReduce?: number }
   | { type: 'PASS' };
 
 export type ActionType = Action['type'];

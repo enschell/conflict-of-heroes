@@ -141,6 +141,15 @@ export function reduce(state: GameState, action: Action): ReduceResult {
 
   const destroyUnit = (unit: Unit) => {
     for (const hm of unit.hitMarkers) returnMarker(hm);
+    // §15.11: a destroyed transport immediately unloads its passenger into the
+    // hex (free, any facing) rather than dragging it down.
+    const rider = passengerOf(unit.id);
+    if (rider) {
+      delete rider.carriedBy;
+      rider.hexId = unit.hexId;
+    }
+    // If this unit was itself a passenger, free its carrier's slot.
+    if (unit.carriedBy) delete unit.carriedBy;
     const tmpl = templateOf(next, unit);
     const opp = otherSide(unit.side);
     // §9.1: VP to the destroyer (flat per-Mission value if set) + step the no-tie marker.
@@ -174,10 +183,15 @@ export function reduce(state: GameState, action: Action): ReduceResult {
 
   // -- action handlers ------------------------------------------------------
 
+  /** The foot Unit currently loaded on `vehicleId`, if any (§15.6). */
+  const passengerOf = (vehicleId: string): Unit | undefined =>
+    Object.values(next.units).find((u) => u.carriedBy === vehicleId);
+
   const doMove = (a: Extract<Action, { type: 'MOVE' }>): ReduceResult => {
     const unit = next.units[a.unitId];
     if (!unit) return deny('no such unit');
     if (unit.side !== next.currentSide) return deny('not your turn');
+    if (unit.carriedBy) return deny('a transported Unit cannot move on its own (§15.8)');
     const tmpl = templateOf(next, unit);
     const path = a.path && a.path.length ? a.path : [a.toHexId];
 
@@ -211,10 +225,18 @@ export function reduce(state: GameState, action: Action): ReduceResult {
 
     unit.hexId = finalHexId;
     unit.facing = finalFacing;
+    // A transporting Vehicle carries its passenger along (§15.8) and the pair
+    // makes a single Group Spent Check.
+    const passenger = passengerOf(unit.id);
+    if (passenger) {
+      passenger.hexId = finalHexId;
+      passenger.facing = finalFacing;
+    }
     const bonus = path.length > 1 ? ` (+${path.length - 1} bonus)` : '';
     log('move', `${unit.id} -> ${finalHexId}${bonus} (cost ${cost})`, unit.side);
     updateVictoryHexControl(next);
-    afterAction(unit, cost);
+    if (passenger) afterGroupAction([unit, passenger], cost);
+    else afterAction(unit, cost);
     return finish();
   };
 
@@ -222,6 +244,7 @@ export function reduce(state: GameState, action: Action): ReduceResult {
     const unit = next.units[a.unitId];
     if (!unit) return deny('no such unit');
     if (unit.side !== next.currentSide) return deny('not your turn');
+    if (unit.carriedBy) return deny('a transported Unit cannot pivot on its own (§15.8)');
     const eff = effectiveStats(next, unit);
     if (!eff.canPivot) return deny('unit cannot pivot');
     const player = next.players[unit.side];
@@ -241,6 +264,7 @@ export function reduce(state: GameState, action: Action): ReduceResult {
     const target = next.units[a.targetId];
     if (!attacker || !target) return deny('no such unit');
     if (attacker.side !== next.currentSide) return deny('not your turn');
+    if (attacker.carriedBy) return deny('a transported Unit cannot attack (§15.8)');
     const diceMod = clampCapMod(a.capDiceMod ?? 0);
     const ctx = attackContext(next, attacker, target, diceMod);
     if (!ctx.legal) return deny(ctx.reason ?? 'illegal attack');
@@ -281,6 +305,7 @@ export function reduce(state: GameState, action: Action): ReduceResult {
     const target = next.units[a.targetId];
     if (!attacker || !target) return deny('no such unit');
     if (attacker.side !== next.currentSide) return deny('not your turn');
+    if (attacker.carriedBy) return deny('a transported Unit cannot attack (§15.8)');
     const diceMod = clampCapMod(a.capDiceMod ?? 0);
     const ctx = closeCombatContext(next, attacker, target);
     if (!ctx.legal) return deny(ctx.reason ?? 'illegal close combat');
@@ -548,6 +573,96 @@ export function reduce(state: GameState, action: Action): ReduceResult {
     return finish();
   };
 
+  const doLoad = (a: Extract<Action, { type: 'LOAD' }>): ReduceResult => {
+    const unit = next.units[a.unitId];
+    const vehicle = next.units[a.vehicleId];
+    if (!unit || !vehicle) return deny('no such unit');
+    if (unit.side !== next.currentSide || vehicle.side !== unit.side) return deny('not your turn');
+    if (unit.carriedBy) return deny('already loaded');
+    if (templateOf(next, unit).kind === 'vehicle') return deny('a Vehicle cannot be transported (§15.6)');
+    if (templateOf(next, vehicle).kind !== 'vehicle') return deny('not a Vehicle');
+    if (passengerOf(vehicle.id)) return deny('Vehicle already transporting a Unit (§15.6)');
+
+    const sameHex = unit.hexId === vehicle.hexId;
+    if (!sameHex && directionTo(unit.hexId, vehicle.hexId) < 0)
+      return deny("must be in or adjacent to the Vehicle's hex (§15.7)");
+
+    // §15.7: same-hex load ignores Hit Markers and Terrain (but not Stress);
+    // adjacent-hex load pays the full Move Cost into the Vehicle's hex (terrain
+    // and Hit-Marker move deltas included), then loads for free.
+    let base: number;
+    if (sameHex) {
+      base = templateOf(next, unit).move;
+    } else {
+      const mc = moveCost(next, unit, vehicle.hexId);
+      if (mc.ap == null) return deny(mc.reason ?? 'illegal move to the Vehicle');
+      base = mc.ap;
+    }
+
+    const members = [unit, vehicle];
+    const costBeforeReduce = base + groupStress(members);
+    const reduceBy = Math.max(0, Math.trunc(a.capCostReduce ?? 0));
+    const { cost, capsSpent } = reduceActionCost(costBeforeReduce, reduceBy);
+    if (members.some((m) => m.status === 'spent') && cost > 0)
+      return deny('a Spent Unit/Vehicle must reach 0AP with CAPs (§3.4)');
+    const player = next.players[unit.side];
+    if (player.capCurrent < capsSpent) return deny('not enough CAP');
+    player.capCurrent -= capsSpent;
+
+    unit.hexId = vehicle.hexId;
+    unit.facing = vehicle.facing;
+    unit.carriedBy = vehicle.id;
+    log('load', `${unit.id} loads onto ${vehicle.id} (cost ${cost})`, unit.side);
+    afterGroupAction(members, cost); // §15.7 step 3: one Group Spent Check
+    return finish();
+  };
+
+  const doUnload = (a: Extract<Action, { type: 'UNLOAD' }>): ReduceResult => {
+    const unit = next.units[a.unitId];
+    if (!unit) return deny('no such unit');
+    if (unit.side !== next.currentSide) return deny('not your turn');
+    if (!unit.carriedBy) return deny('unit is not loaded');
+    const vehicle = next.units[unit.carriedBy];
+    if (!vehicle) return deny('carrying Vehicle not found');
+    // §15.9: a Stunned Unit cannot Unload.
+    if (unit.hitMarkers.some((h) => HIT_MARKERS[h].onlyRally))
+      return deny('a Stunned Unit cannot Unload (§15.9)');
+
+    const toHexId = a.toHexId;
+    if (!next.hexes[toHexId]) return deny('no such hex');
+    const sameHex = toHexId === vehicle.hexId;
+    if (!sameHex && directionTo(vehicle.hexId, toHexId) < 0)
+      return deny("must unload under the Vehicle or an adjacent hex (§15.9)");
+
+    // §15.9: placing it under the Vehicle enters no new hex (no terrain cost);
+    // an adjacent hex pays the full Move Cost (terrain + Stress apply).
+    let base: number;
+    if (sameHex) {
+      base = effectiveStats(next, unit).move;
+    } else {
+      const mc = moveCost(next, unit, toHexId);
+      if (mc.ap == null) return deny(mc.reason ?? 'illegal unload hex');
+      base = mc.ap;
+    }
+
+    const members = [unit, vehicle];
+    const costBeforeReduce = base + groupStress(members);
+    const reduceBy = Math.max(0, Math.trunc(a.capCostReduce ?? 0));
+    const { cost, capsSpent } = reduceActionCost(costBeforeReduce, reduceBy);
+    if (members.some((m) => m.status === 'spent') && cost > 0)
+      return deny('a Spent Unit/Vehicle must reach 0AP with CAPs (§3.4)');
+    const player = next.players[unit.side];
+    if (player.capCurrent < capsSpent) return deny('not enough CAP');
+    player.capCurrent -= capsSpent;
+
+    delete unit.carriedBy;
+    unit.hexId = toHexId;
+    if (a.facing !== undefined) unit.facing = a.facing; // §15.9: any facing
+    log('unload', `${unit.id} unloads from ${vehicle.id} to ${toHexId} (cost ${cost})`, unit.side);
+    afterGroupAction(members, cost); // §15.9 step 3: one Group Spent Check
+    return finish();
+  };
+
   // -- dispatch -------------------------------------------------------------
 
   switch (action.type) {
@@ -569,6 +684,10 @@ export function reduce(state: GameState, action: Action): ReduceResult {
       return doGroupAttack(action);
     case 'GROUP_RALLY':
       return doGroupRally(action);
+    case 'LOAD':
+      return doLoad(action);
+    case 'UNLOAD':
+      return doUnload(action);
     case 'PASS':
       return doPass();
     default:

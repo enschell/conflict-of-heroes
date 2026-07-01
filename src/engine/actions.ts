@@ -7,11 +7,12 @@
  * act only if it can reduce the Action Cost to 0AP with CAPs (§3.4), i.e. it has
  * at least `cost` CAPs available.
  */
+import { HIT_MARKERS } from '../data/hitMarkers';
 import { attackContext } from './combat';
 import { idOf, neighbors, parseHexId } from './hex';
-import { effectiveStats } from './hits';
+import { effectiveStats, templateOf } from './hits';
 import { RALLY_AP_COST } from './rally';
-import { moveCost, pivotCost } from './movement';
+import { directionTo, moveCost, pivotCost } from './movement';
 import type { Action, Facing, GameState, Unit, UnitId } from './types';
 
 /** Cost (incl. Stress) a Spent Unit would have to buy down to 0AP with CAPs. */
@@ -79,8 +80,11 @@ export function legalActionsForUnit(state: GameState, unitId: UnitId): Action[] 
 
   const actions: Action[] = [];
   const eff = effectiveStats(state, unit);
+  // A Transported Unit rides along with its Vehicle's Move — it may not Move,
+  // Pivot, or Attack on its own, but may still Rally, Stall, or Unload (§15.8).
+  const carried = !!unit.carriedBy;
 
-  if (eff.canMove) {
+  if (eff.canMove && !carried) {
     for (const n of neighbors(parseHexId(unit.hexId))) {
       const toHexId = idOf(n);
       if (!state.hexes[toHexId]) continue;
@@ -91,7 +95,7 @@ export function legalActionsForUnit(state: GameState, unitId: UnitId): Action[] 
     }
   }
 
-  if (eff.canFire && actionable(eff.apToFire)) {
+  if (eff.canFire && !carried && actionable(eff.apToFire)) {
     for (const target of Object.values(state.units)) {
       if (target.side === unit.side) continue;
       // Close combat against an enemy sharing this hex (§7.7.3); otherwise a
@@ -111,14 +115,61 @@ export function legalActionsForUnit(state: GameState, unitId: UnitId): Action[] 
     if (!enemyHere) actions.push({ type: 'RALLY', unitId, ...cr(RALLY_AP_COST) });
   }
 
-  if (eff.canPivot && actionable(pivotCost())) {
+  if (eff.canPivot && !carried) {
     for (let f = 0; f < 6; f++) {
-      if (f !== unit.facing) actions.push({ type: 'PIVOT', unitId, facing: f as Facing, ...cr(pivotCost()) });
+      if (f !== unit.facing && actionable(pivotCost()))
+        actions.push({ type: 'PIVOT', unitId, facing: f as Facing, ...cr(pivotCost()) });
     }
   }
 
   // Stall (§2.8): the Unit does nothing but makes a Spent Check and is Stressed.
   if (actionable(1)) actions.push({ type: 'STALL', unitId, ...cr(1) });
+
+  // Transport (§15.6–15.9): Load onto a friendly Vehicle, or Unload from one.
+  // Cost/affordability is judged for the (Unit, Vehicle) Group, since Load and
+  // Unload are Group Actions with a single Group Spent Check (§15.7/§15.9).
+  const groupActionable = (base: number, vehicle: Unit) => {
+    const groupStress = unit.stressed || vehicle.stressed ? 1 : 0;
+    const cost = base + groupStress;
+    const anySpent = unit.status === 'spent' || vehicle.status === 'spent';
+    return { cost, ok: !anySpent || player.capCurrent >= cost };
+  };
+  const groupCr = (base: number, vehicle: Unit): { capCostReduce?: number } => {
+    const groupStress = unit.stressed || vehicle.stressed ? 1 : 0;
+    const anySpent = unit.status === 'spent' || vehicle.status === 'spent';
+    return anySpent ? { capCostReduce: base + groupStress } : {};
+  };
+
+  if (!carried && templateOf(state, unit).kind !== 'vehicle') {
+    for (const vehicle of Object.values(state.units)) {
+      if (vehicle.side !== unit.side || templateOf(state, vehicle).kind !== 'vehicle') continue;
+      if (Object.values(state.units).some((u) => u.carriedBy === vehicle.id)) continue; // full (§15.6)
+      const sameHex = unit.hexId === vehicle.hexId;
+      if (!sameHex && directionTo(unit.hexId, vehicle.hexId) < 0) continue;
+      const base = sameHex ? templateOf(state, unit).move : moveCost(state, unit, vehicle.hexId).ap;
+      if (base == null) continue;
+      const { ok } = groupActionable(base, vehicle);
+      if (!ok) continue;
+      actions.push({ type: 'LOAD', unitId, vehicleId: vehicle.id, ...groupCr(base, vehicle) });
+    }
+  }
+
+  if (carried) {
+    const vehicle = state.units[unit.carriedBy!];
+    const stunned = unit.hitMarkers.some((h) => HIT_MARKERS[h].onlyRally);
+    if (vehicle && !stunned) {
+      const candidates = [vehicle.hexId, ...neighbors(parseHexId(vehicle.hexId)).map(idOf)];
+      for (const toHexId of candidates) {
+        if (!state.hexes[toHexId]) continue;
+        const sameHex = toHexId === vehicle.hexId;
+        const base = sameHex ? effectiveStats(state, unit).move : moveCost(state, unit, toHexId).ap;
+        if (base == null) continue;
+        const { ok } = groupActionable(base, vehicle);
+        if (!ok) continue;
+        actions.push({ type: 'UNLOAD', unitId, toHexId, ...groupCr(base, vehicle) });
+      }
+    }
+  }
 
   return actions;
 }
