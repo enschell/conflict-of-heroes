@@ -118,14 +118,20 @@ This repo is self-describing: a fresh session needs only the code + these docs.
   `npm run typecheck`, `npm run build`, and `npm run conformance`. All green = known-good baseline.
 - **Run it:** `npm run dev` → http://localhost:5173. Windows: Node 24 is at
   `C:\Program Files\nodejs` (not on Git Bash's PATH; in PowerShell prepend it).
-- **Current status / next:** **v3 cutover DONE (§A.3 steps 1–6)** and **M5 — Group Actions DONE**.
-  The engine runs on 3rd-ed rules: Spent Die/Check, Fresh/Spent + Stress, Pass/Stall, CAP floor 3,
-  AR/DR + Hit Number, v3 initiative + no-tie VP track, and Group Move/Attack/Rally (engine + UI).
-  **Real Mission 1 ("Partisans") is wired** on the authored Map 1 (206 hexes), 7 CAP/side, German
-  Round-1 initiative, Soviets start +1 VP, I06 scores 1 VP/round, 1 VP/kill. The old 2nd-ed
-  `FIREFIGHT_1`/`partisans` scaffold is retired. **Next:** Mission 1 reinforcements / map-edge entry
-  (German R1 south edge, Soviet R2 → R07, German R3 SS — currently stopgap pre-placed), Group close
-  combat, then M6 (vehicles + armored hit deck). A board-rendering polish pass is also pending.
+- **Current status / next:** **v3 cutover DONE (§A.3 steps 1–6)**, **M5 — Group Actions DONE**, and
+  **M6 — Vehicles is mostly built**. The engine runs on 3rd-ed rules: Spent Die/Check, Fresh/Spent +
+  Stress, Pass/Stall, CAP floor 3, AR/DR + Hit Number, v3 initiative + no-tie VP track, Group
+  Move/Attack/Rally (engine + UI), and vehicles — Armored Target hit deck, vehicle movement (wheeled/
+  tracked terrain costs, Bonus Moves §15.2 with click-to-build path UI), vehicle combat specifics
+  (no CC terrain bonus, Vehicle Cover for foot units, §15.14–15.15), and Transport/Towing (Load,
+  ride-along Move, Unload, free-unload-on-destroy, §15.6–15.11). **Real Mission 1 ("Partisans") is
+  wired** on the authored Map 1 (206 hexes), 7 CAP/side, German Round-1 initiative, Soviets start
+  +1 VP, I06 scores 1 VP/round, 1 VP/kill; the old 2nd-ed `FIREFIGHT_1`/`partisans` scaffold is
+  retired. An **Armor Sandbox** test mission (`data/missions/sandbox.ts`) exercises vehicles without
+  touching Mission 1. Board edge rendering (clipped non-playable half-hexes) is done. **Next:**
+  M6 stragglers — Towing damaged/immobilized Vehicles (§15.10), Special Units (turrets/SPGs/open-top/
+  field guns, §16) — then Mission 1 reinforcements / map-edge entry (German R1 south edge, Soviet R2
+  → R07, German R3 SS — currently stopgap pre-placed), Group close combat, then M7 (mortars/OBA/smoke).
 
 ---
 
@@ -139,8 +145,9 @@ at the end wins (the v3 "no-tie" VP track — one side always leads).
 **This build's scope (locked decisions):**
 - **Hotseat first, online later.** Pass-and-play now; keep the engine network-agnostic so an
   authoritative server + WebSocket rooms can be added later with **no engine changes**.
-- **Vertical slice = infantry only, Mission 1 ("Partisans") playable end-to-end.** Vehicles,
-  mortars, OBA, smoke, hidden units, fortifications, mines, hills are **later modules** (roadmap §8).
+- **Vertical slice = infantry + vehicles, Mission 1 ("Partisans") playable end-to-end.** Vehicles
+  (M6) are largely built; mortars, OBA, smoke, hidden units, fortifications, mines, hills remain
+  **later modules** (roadmap §8).
 - **Stack:** Vite + React + TypeScript, **client-only**. SVG hex board. Pure-function rules engine.
   Zustand store. Vitest for tests.
 - **Content:** we author our **own** stats/terrain/scenario data and **original simple graphics**.
@@ -239,9 +246,11 @@ conflict-of-heroes/
 ```
 
 > **Current state:** engine/data/state/ui/scripts compile and pass under **3rd-ed (v3) rules** — the
-> §A cutover is complete and **M5 Group Actions** is built (conformance 0 violations). Data is the
-> real **Mission 1** on **`maps/mission1.ts`** + **`missions/mission1.ts`** (the 2nd-ed
-> `firefights/`/`maps/partisans.ts` are deleted). `rules/` is the committed source of truth.
+> §A cutover is complete, **M5 Group Actions** is built, and **M6 Vehicles** is mostly built
+> (conformance 0 violations). Data is the real **Mission 1** on **`maps/mission1.ts`** +
+> **`missions/mission1.ts`** (the 2nd-ed `firefights/`/`maps/partisans.ts` are deleted), plus the
+> non-canonical **`missions/sandbox.ts`** for exercising vehicles. `rules/` is the committed source
+> of truth.
 
 ---
 
@@ -269,6 +278,7 @@ GameState = {
     stressed: boolean                 // v3: +1AP next Action; cleared by Passing (2.6/2.7)
     hitMarkers: HitMarker[]           // hidden info per 7.5
     assignedWeaponCards: CardId[]
+    carriedBy?: UnitId                // loaded onto a transport Vehicle (15.6-15.9, M6)
   }>
   hexes: Record<HexId, {
     coord: { q: number; r: number }   // axial; label "1-J10" derived for display (1.0)
@@ -276,7 +286,7 @@ GameState = {
     edges: { walls: EdgeFlags; roads: EdgeFlags }
     features: { controlMarker?: SideId; smoke?: 0|1|2; fortification?: …; wire?: boolean; mine?: … }
   }>
-  hitPiles: { soft: Record<HitType, number>; armored: Record<HitType, number> }  // v3: two decks
+  hitPiles: { foot: Record<HitType, number>; vehicle: Record<HitType, number> }  // v3: two decks (15.13)
   missionId: string
   victory: VictoryConfig
   log: GameEvent[]
@@ -309,7 +319,7 @@ When in doubt, open `rules/INDEX.md`. Read the file before implementing; cite `N
 | *(later)* hills / elevation / LOS-over-levels | — | 12.x | `rules/12` |
 | *(later)* mortars / artillery / OBA / drift | — | 13.x | `rules/13` |
 | *(later)* smoke | — | 14.x | `rules/14` |
-| *(later)* vehicles / transport / armored hits | — | 15.x | `rules/15` |
+| **Vehicles**: movement (wheeled/tracked, Bonus Moves), combat specifics, Transport/Towing; *(later)* Towing damaged Vehicles (§15.10) | `movement.ts`, `combat.ts`, `hits.ts`, `reducer.ts` *(M6)* | 15.x | `rules/15` |
 | *(later)* special units (turrets, SPGs, open-top, APCs, field guns) | — | 16.x | `rules/16` |
 | *(later)* fortifications / trenches / bunkers / obstacles / mines | — | 17.x | `rules/17` |
 | *(later)* flamethrowers / pioneers | — | 18.x | `rules/18` |
@@ -337,10 +347,12 @@ When in doubt, open `rules/INDEX.md`. Read the file before implementing; cite `N
 - Cowering ×2 — +2 AP to fire; +1 AP/hex move/pivot; range→1; DR +1; rally 8
 - Berserk ×1 — −1 AP to fire; FP +1; range→1; DR +1; rally 8
 
-**Armored-Target deck (add for vehicles, M6 — `rules/15`):** Stunned ×2 (rally 9), Destroyed ×1,
-Immobilized ×5 (no move/pivot; no rally), Light Damage ×4 (no effect; no rally), Gun Damaged ×2
-(cannot fire; no rally), Panicked ×1 (cannot fire; front DR −4; rally 9), Suppressed ×5 (+1AP;
-red FP −3, blue FP −5; rally 8).
+**Armored-Target deck ✅ built (`data/hitMarkers.ts`, M6 — `rules/15`):** Stunned ×2 (rally 9),
+Destroyed ×1, Immobilized ×5 (no move/pivot; no rally), Light Damage ×4 (no effect; no rally), Gun
+Damaged ×2 (cannot fire; no rally), Panicked ×1 (cannot fire; front DR −4; rally 9), Suppressed ×5
+(+1AP; red FP −3, blue FP −5; rally 8). Drawn from `hitPiles.vehicle`, keyed by `ArmoredHitType`
+(`aStunned`, `aDestroyed`, …) so a marker is self-describing regardless of pile; routed by the
+target's DR colour (blue → vehicle pile, red → foot pile).
 
 ---
 
@@ -349,7 +361,9 @@ red FP −3, blue FP −5; rally 8).
 - **Everything is data-driven.** Adding a nation, unit, card, or mission should be a `data/` edit.
   - **Add a unit:** stat template `{ nation, fp:{red,blue}, dr:{front,flank,color}, move, range,
     apToFire, vp, flags, whiteBoxFp? }` in `data/units.ts`. (v3: `apToFire`/`move` are **Spent-Check
-    thresholds**, not pool spend.)
+    thresholds**, not pool spend.) **Vehicles** (`kind:'vehicle'`) add `propulsion:'wheeled'|'tracked'`
+    and `bonusMoves?: number` (§15.1–15.2); any `kind:'vehicle'` template may Transport one foot Unit
+    (§15.6) — no separate flag needed.
   - **Add a card:** `{ id, type:'action'|'bonus'|'mission'|'artillery', cost:{green?,blue?}, effect }`
     in `data/cards/` (v3 Green/Blue cost, 8.5). Effects are engine actions/modifiers, not UI code.
   - **Add a mission:** new file in `data/missions/` with maps, placements (by hex label), starting
@@ -424,10 +438,20 @@ Spent-Check die instead of a remaining-AP pool)*
   Spent Check. UI: "Group" mode (multi-select, formation-move arrows, rally, click-enemy attack).
   *Deferred:* group **close combat**; Mission 1 **reinforcements/edge entry** (stopgap pre-placed).
 
-- **Later (additive, v3 order):** M6 vehicles + armored hit deck (§15–16) → M7 mortars/OBA/smoke
-  (§13–14) → M8 hidden units (§11) → M9 elevation/hills (§12) → M10 fortifications/obstacles/mines
-  (§17) → M11 flamethrowers/pioneers (§18) → M12 cards (§8) → **M13 online multiplayer** (host the
-  pure engine authoritatively + WebSocket rooms; the client already speaks action objects).
+- **M6 — Vehicles (§15)** mostly ✅: Armored Target hit deck + routing by DR colour; vehicle movement
+  (wheeled/tracked terrain costs, impassable/difficult terrain, roads ignore both, §15.1–15.4); Bonus
+  Moves (§15.2, multi-hex `MOVE.path`, forfeited on a Backwards/Difficult-Terrain first move) with a
+  click-to-build-path UI; vehicle combat specifics (no CC terrain bonus; Vehicle Cover +1DR for
+  co-located foot Units, §15.14–15.15); Transport/Towing (`LOAD`/`UNLOAD`, same-hex vs adjacent-hex
+  cost rules, ride-along Group Move, carried-Unit Move/Pivot/Attack restrictions, free unload on the
+  transport's destruction, §15.6–15.11) — all as Group Actions with one Group Spent Check. `Armor
+  Sandbox` (`data/missions/sandbox.ts`) is a non-canonical test mission (tank + rifle/side on Map 1).
+  *Deferred:* Towing damaged/immobilized Vehicles (§15.10); Special Units (§16, own milestone below).
+- **Later (additive, v3 order):** M7 mortars/OBA/smoke (§13–14) → M8 hidden units (§11) → M9
+  elevation/hills (§12) → M10 fortifications/obstacles/mines (§17) → M11 flamethrowers/pioneers
+  (§18) → M12 special units (turrets/SPGs/open-top/field guns, §16) + cards (§8) → **M13 online
+  multiplayer** (host the pure engine authoritatively + WebSocket rooms; the client already speaks
+  action objects).
 
 ---
 
