@@ -195,3 +195,94 @@ describe('Destroying a Transport (§15.11)', () => {
     expect(res.state.units['R']!.hexId).toBe('0,0'); // placed in the (former) hex
   });
 });
+
+describe('Towing damaged Vehicles (§15.10)', () => {
+  const trackedTow = () => tankTemplate({ id: 'tank', propulsion: 'tracked' });
+  const wheeledTow = () => tankTemplate({ id: 'truck', propulsion: 'wheeled' });
+
+  it('an Immobilized Vehicle may be hooked up (same hex) by a Tracked tower', () => {
+    const s = scene();
+    addTemplate(s, trackedTow());
+    addUnit(s, 'TOW', 'A', 0, 0, 0, 'tank');
+    addUnit(s, 'DMG', 'A', 0, 0, 0, 'apc', ['aImmobilized']);
+    const res = reduce(s, { type: 'LOAD', unitId: 'DMG', vehicleId: 'TOW' });
+    expect(res.events.some((e) => e.type === 'illegal')).toBe(false);
+    expect(res.state.units['DMG']!.carriedBy).toBe('TOW');
+  });
+
+  it('a Stunned Vehicle may also be towed', () => {
+    const s = scene();
+    addTemplate(s, trackedTow());
+    addUnit(s, 'TOW', 'A', 0, 0, 0, 'tank');
+    addUnit(s, 'DMG', 'A', 0, 0, 0, 'apc', ['aStunned']);
+    const res = reduce(s, { type: 'LOAD', unitId: 'DMG', vehicleId: 'TOW' });
+    expect(res.events.some((e) => e.type === 'illegal')).toBe(false);
+  });
+
+  it('rejects towing an undamaged Vehicle — only Immobilized/Stunned qualify', () => {
+    const s = scene();
+    addTemplate(s, trackedTow());
+    addUnit(s, 'TOW', 'A', 0, 0, 0, 'tank');
+    addUnit(s, 'HEALTHY', 'A', 0, 0, 0, 'apc'); // no hit marker
+    const res = reduce(s, { type: 'LOAD', unitId: 'HEALTHY', vehicleId: 'TOW' });
+    expect(res.events[0]?.type).toBe('illegal');
+    expect(legalActionsForUnit(s, 'HEALTHY').some((a) => a.type === 'LOAD')).toBe(false);
+  });
+
+  it('a Tracked damaged Vehicle may only be towed by a Tracked tower', () => {
+    const s = scene();
+    addTemplate(s, wheeledTow());
+    addUnit(s, 'TRUCK', 'A', 0, 0, 0, 'truck');
+    addUnit(s, 'DMG', 'A', 0, 0, 0, 'apc', ['aImmobilized']); // apc is tracked (see tankTemplate)
+    const res = reduce(s, { type: 'LOAD', unitId: 'DMG', vehicleId: 'TRUCK' });
+    expect(res.events[0]?.type).toBe('illegal');
+    expect(legalActionsForUnit(s, 'DMG').some((a) => a.type === 'LOAD' && a.vehicleId === 'TRUCK')).toBe(false);
+  });
+
+  it('a Wheeled damaged Vehicle may be towed by any Vehicle (wheeled or tracked)', () => {
+    const byWheeled = scene();
+    addTemplate(byWheeled, wheeledTow());
+    addUnit(byWheeled, 'TRUCKTOW', 'A', 0, 0, 0, 'truck');
+    addUnit(byWheeled, 'DMG', 'A', 0, 0, 0, 'truck', ['aImmobilized']);
+    expect(
+      reduce(byWheeled, { type: 'LOAD', unitId: 'DMG', vehicleId: 'TRUCKTOW' }).events.some(
+        (e) => e.type === 'illegal',
+      ),
+    ).toBe(false);
+
+    const byTracked = scene();
+    addTemplate(byTracked, wheeledTow());
+    addTemplate(byTracked, trackedTow());
+    addUnit(byTracked, 'TANKTOW', 'A', 0, 0, 0, 'tank');
+    addUnit(byTracked, 'DMG', 'A', 0, 0, 0, 'truck', ['aImmobilized']);
+    expect(
+      reduce(byTracked, { type: 'LOAD', unitId: 'DMG', vehicleId: 'TANKTOW' }).events.some(
+        (e) => e.type === 'illegal',
+      ),
+    ).toBe(false);
+  });
+
+  it('adjacent-hex hookup is impossible — an Immobilized/Stunned Vehicle cannot move to reach it', () => {
+    const s = scene();
+    addTemplate(s, trackedTow());
+    addUnit(s, 'TOW', 'A', 1, 0, 0, 'tank');
+    addUnit(s, 'DMG', 'A', 0, 0, 0, 'apc', ['aImmobilized']);
+    const res = reduce(s, { type: 'LOAD', unitId: 'DMG', vehicleId: 'TOW' });
+    expect(res.events[0]?.type).toBe('illegal');
+  });
+
+  it('the towed Vehicle moves with its tower and may not Fire on its own (§15.10)', () => {
+    const s = scene();
+    addTemplate(s, trackedTow());
+    addUnit(s, 'TOW', 'A', 0, 0, 0, 'tank');
+    addUnit(s, 'DMG', 'A', 0, 0, 0, 'apc', ['aImmobilized']).carriedBy = 'TOW';
+    addUnit(s, 'E', 'B', 2, 0, 3, 'rifle');
+
+    expect(legalActionsForUnit(s, 'DMG').some((a) => a.type === 'FIRE')).toBe(false);
+    expect(reduce(s, { type: 'FIRE', attackerId: 'DMG', targetId: 'E' }).events[0]?.type).toBe('illegal');
+
+    const res = reduce(s, { type: 'MOVE', unitId: 'TOW', toHexId: '1,0' });
+    expect(res.state.units['TOW']!.hexId).toBe('1,0');
+    expect(res.state.units['DMG']!.hexId).toBe('1,0'); // towed along
+  });
+});

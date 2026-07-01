@@ -140,10 +140,22 @@ export function legalActionsForUnit(state: GameState, unitId: UnitId): Action[] 
     return anySpent ? { capCostReduce: base + groupStress } : {};
   };
 
-  if (!carried && templateOf(state, unit).kind !== 'vehicle') {
+  // A foot Unit may always be Loaded (transported, §15.6); a Vehicle only if
+  // it's damaged (Immobilized/Stunned) and thus towable (§15.10).
+  const unitMarker = unit.hitMarkers[0];
+  const towable = unitMarker === 'aImmobilized' || unitMarker === 'aStunned';
+  const loadable = templateOf(state, unit).kind !== 'vehicle' || towable;
+
+  if (!carried && loadable) {
     for (const vehicle of Object.values(state.units)) {
       if (vehicle.side !== unit.side || templateOf(state, vehicle).kind !== 'vehicle') continue;
       if (Object.values(state.units).some((u) => u.carriedBy === vehicle.id)) continue; // full (§15.6)
+      // §15.10: a Tracked Vehicle may only be towed by another Tracked Vehicle.
+      if (towable) {
+        const unitProp = templateOf(state, unit).propulsion ?? 'tracked';
+        const towerProp = templateOf(state, vehicle).propulsion ?? 'tracked';
+        if (unitProp === 'tracked' && towerProp !== 'tracked') continue;
+      }
       const sameHex = unit.hexId === vehicle.hexId;
       if (!sameHex && directionTo(unit.hexId, vehicle.hexId) < 0) continue;
       const base = sameHex ? templateOf(state, unit).move : moveCost(state, unit, vehicle.hexId).ap;

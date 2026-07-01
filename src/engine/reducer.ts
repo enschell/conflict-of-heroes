@@ -579,9 +579,19 @@ export function reduce(state: GameState, action: Action): ReduceResult {
     if (!unit || !vehicle) return deny('no such unit');
     if (unit.side !== next.currentSide || vehicle.side !== unit.side) return deny('not your turn');
     if (unit.carriedBy) return deny('already loaded');
-    if (templateOf(next, unit).kind === 'vehicle') return deny('a Vehicle cannot be transported (§15.6)');
     if (templateOf(next, vehicle).kind !== 'vehicle') return deny('not a Vehicle');
-    if (passengerOf(vehicle.id)) return deny('Vehicle already transporting a Unit (§15.6)');
+    if (passengerOf(vehicle.id)) return deny('Vehicle already transporting/towing a Unit (§15.6)');
+    const unitTmpl = templateOf(next, unit);
+    if (unitTmpl.kind === 'vehicle') {
+      // §15.10: only a damaged (Immobilized/Stunned) Vehicle may be towed, and a
+      // Tracked Vehicle may only be towed by another Tracked Vehicle.
+      const marker = unit.hitMarkers[0];
+      if (marker !== 'aImmobilized' && marker !== 'aStunned')
+        return deny('only an Immobilized or Stunned Vehicle may be towed (§15.10)');
+      const towerProp = templateOf(next, vehicle).propulsion ?? 'tracked';
+      if ((unitTmpl.propulsion ?? 'tracked') === 'tracked' && towerProp !== 'tracked')
+        return deny('a Tracked Vehicle may only be towed by a Tracked Vehicle (§15.10)');
+    }
 
     const sameHex = unit.hexId === vehicle.hexId;
     if (!sameHex && directionTo(unit.hexId, vehicle.hexId) < 0)
@@ -592,7 +602,7 @@ export function reduce(state: GameState, action: Action): ReduceResult {
     // and Hit-Marker move deltas included), then loads for free.
     let base: number;
     if (sameHex) {
-      base = templateOf(next, unit).move;
+      base = unitTmpl.move;
     } else {
       const mc = moveCost(next, unit, vehicle.hexId);
       if (mc.ap == null) return deny(mc.reason ?? 'illegal move to the Vehicle');
