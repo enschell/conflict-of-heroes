@@ -105,6 +105,25 @@ export interface UnitTemplate {
   propulsion?: 'wheeled' | 'tracked';
   /** Vehicle Bonus Move symbols (§15.2): extra hexes per Move Action at no AP. */
   bonusMoves?: number;
+  // -- Special Units (§16) --
+  /** Turreted Vehicle (§16.2): may Attack outside its Arc of Fire (+2AP Attack Cost). */
+  turreted?: boolean;
+  /**
+   * Open-Topped Vehicle (§16.5): vs HE/Flamethrower/red-FP Close Combat/Sniper,
+   * its blue Flank Defense is treated as red and pulls a Soft Target Hit Marker.
+   */
+  openTopped?: boolean;
+  /** APC (§16.6, red-shield icon): a Soft Target it Transports gains +2DR from all flanks. */
+  apcTransport?: boolean;
+  /** Trucks/Wagons (§16.1) cannot take control of a Hex. */
+  cannotControlHex?: boolean;
+  /** Trucks/Wagons (§16.1): destroyed, does not adjust the CAPs Track (still counts for VP). */
+  noCapLossOnDestroy?: boolean;
+  /**
+   * Attack restriction (§16.1): Trucks may only attack in Close Combat; Wagons
+   * may not attack at all. Undefined = normal (ranged + close combat).
+   */
+  attackMode?: 'closeCombatOnly' | 'none';
 }
 
 /** A unit instance on the map. */

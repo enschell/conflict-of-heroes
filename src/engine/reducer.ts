@@ -25,6 +25,7 @@ import { endRound, switchTurn } from './turn';
 import { gainVp, otherSide, updateVictoryHexControl } from './victory';
 import type {
   Action,
+  DRColor,
   Facing,
   GameEvent,
   GameState,
@@ -136,8 +137,6 @@ export function reduce(state: GameState, action: Action): ReduceResult {
     if (isArmoredMarker(type)) next.hitPiles.vehicle = returnHitToPile(next.hitPiles.vehicle, type);
     else next.hitPiles.foot = returnHitToPile(next.hitPiles.foot, type);
   };
-  /** Armored Targets (blue Defense, §15.13) draw from the vehicle pile. */
-  const isArmored = (unit: Unit) => templateOf(next, unit).dr.color === 'blue';
 
   const destroyUnit = (unit: Unit) => {
     for (const hm of unit.hitMarkers) returnMarker(hm);
@@ -155,17 +154,21 @@ export function reduce(state: GameState, action: Action): ReduceResult {
     // §9.1: VP to the destroyer (flat per-Mission value if set) + step the no-tie marker.
     const killVp = next.victory.vpPerKill ?? tmpl.vp;
     gainVp(next, opp, killVp);
-    applyUnitLoss(next.players[unit.side]);
+    // §16.1: destroyed Trucks/Wagons do not adjust the CAPs Track (still count for VP above).
+    if (!tmpl.noCapLossOnDestroy) applyUnitLoss(next.players[unit.side]);
     delete next.units[unit.id];
     log('destroyed', `${unit.id} destroyed (+${killVp} VP to ${opp})`, unit.side);
   };
 
-  const applyHit = (target: Unit, critical: boolean) => {
+  /** `fpColor` is the attack's resolved colour (§16.5 open-topped may override
+   * it to red), so the hit pile is routed by the ATTACK, not just the target's
+   * static template colour. */
+  const applyHit = (target: Unit, critical: boolean, fpColor: DRColor) => {
     if (critical || target.hitMarkers.length > 0) {
       destroyUnit(target);
       return;
     }
-    const armored = isArmored(target);
+    const armored = fpColor === 'blue';
     const pile = armored ? next.hitPiles.vehicle : next.hitPiles.foot;
     const draw = drawHit(next.rng, pile);
     next.rng = draw.rng;
@@ -265,13 +268,19 @@ export function reduce(state: GameState, action: Action): ReduceResult {
     if (!attacker || !target) return deny('no such unit');
     if (attacker.side !== next.currentSide) return deny('not your turn');
     if (attacker.carriedBy) return deny('a transported Unit cannot attack (§15.8)');
+    const attackerTmpl = templateOf(next, attacker);
+    // §16.1: Wagons may not attack at all; Trucks may only attack in Close Combat.
+    if (attackerTmpl.attackMode === 'none' || attackerTmpl.attackMode === 'closeCombatOnly')
+      return deny('this Unit cannot make a ranged Attack (§16.1)');
     const diceMod = clampCapMod(a.capDiceMod ?? 0);
     const ctx = attackContext(next, attacker, target, diceMod);
     if (!ctx.legal) return deny(ctx.reason ?? 'illegal attack');
 
     const player = next.players[attacker.side];
     const eff = effectiveStats(next, attacker);
-    const { cost, capsSpent } = planCost(attacker, eff.apToFire, a.capCostReduce ?? 0);
+    // §16.2: a Turreted Vehicle firing outside its Arc pays a +2AP Attack Cost Penalty.
+    const arcPenalty = ctx.outOfArc && attackerTmpl.turreted ? 2 : 0;
+    const { cost, capsSpent } = planCost(attacker, eff.apToFire + arcPenalty, a.capCostReduce ?? 0);
     if (attacker.status === 'spent' && cost > 0)
       return deny('a Spent unit must spend CAPs to reduce its Action Cost to 0AP (§3.4)');
     const capNeeded = capsSpent + Math.abs(diceMod);
@@ -293,7 +302,7 @@ export function reduce(state: GameState, action: Action): ReduceResult {
       );
       if (roll.hit) {
         const t = next.units[targetId];
-        if (t) applyHit(t, roll.critical);
+        if (t) applyHit(t, roll.critical, roll.fpColor);
       }
     }
     afterAction(attacker, cost);
@@ -306,6 +315,8 @@ export function reduce(state: GameState, action: Action): ReduceResult {
     if (!attacker || !target) return deny('no such unit');
     if (attacker.side !== next.currentSide) return deny('not your turn');
     if (attacker.carriedBy) return deny('a transported Unit cannot attack (§15.8)');
+    // §16.1: Wagons may not attack at all (Trucks may still Close Combat).
+    if (templateOf(next, attacker).attackMode === 'none') return deny('this Unit cannot Attack (§16.1)');
     const diceMod = clampCapMod(a.capDiceMod ?? 0);
     const ctx = closeCombatContext(next, attacker, target);
     if (!ctx.legal) return deny(ctx.reason ?? 'illegal close combat');
@@ -328,7 +339,7 @@ export function reduce(state: GameState, action: Action): ReduceResult {
         `${roll.critical ? 'CRITICAL' : roll.hit ? 'hit' : 'miss'}`,
       attacker.side,
     );
-    if (roll.hit) applyHit(target, roll.critical);
+    if (roll.hit) applyHit(target, roll.critical, roll.fpColor);
     afterAction(attacker, cost);
     return finish();
   };
@@ -476,6 +487,11 @@ export function reduce(state: GameState, action: Action): ReduceResult {
     if (target.side === leader.side) return deny('friendly target');
     // Group close combat is a later increment; support ranged Group Attacks now.
     if (target.hexId === leader.hexId) return deny('group close combat not yet supported');
+    // §16.1: a Group Attack is always ranged fire, so Wagons (no attack) and
+    // Trucks (Close-Combat-only) may not lead one.
+    const leaderTmpl = templateOf(next, leader);
+    if (leaderTmpl.attackMode === 'none' || leaderTmpl.attackMode === 'closeCombatOnly')
+      return deny('this Unit cannot make a ranged Attack (§16.1)');
 
     const capMod = clampCapMod(a.capDiceMod ?? 0);
     const ctx = attackContext(next, leader, target, capMod);
@@ -494,8 +510,10 @@ export function reduce(state: GameState, action: Action): ReduceResult {
     const arBonus = supIds.length; // +1AR per qualifying Supporting Unit (§10.7)
 
     // §10.8: Group Attack cost = the Leader's Attack Cost (+ Group Stress).
+    // §16.2: a Turreted leader firing outside its Arc pays +2AP.
     const eff = effectiveStats(next, leader);
-    const costBeforeReduce = eff.apToFire + groupStress(members);
+    const arcPenalty = ctx.outOfArc && leaderTmpl.turreted ? 2 : 0;
+    const costBeforeReduce = eff.apToFire + arcPenalty + groupStress(members);
     const reduceBy = Math.max(0, Math.trunc(a.capCostReduce ?? 0));
     const { cost, capsSpent } = reduceActionCost(costBeforeReduce, reduceBy);
     if (members.some((u) => u.status === 'spent') && cost > 0)
@@ -519,7 +537,7 @@ export function reduce(state: GameState, action: Action): ReduceResult {
       );
       if (roll.hit) {
         const t = next.units[targetId];
-        if (t) applyHit(t, roll.critical);
+        if (t) applyHit(t, roll.critical, roll.fpColor);
       }
     }
     afterGroupAction(members, cost);

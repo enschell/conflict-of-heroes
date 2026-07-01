@@ -119,19 +119,23 @@ This repo is self-describing: a fresh session needs only the code + these docs.
 - **Run it:** `npm run dev` → http://localhost:5173. Windows: Node 24 is at
   `C:\Program Files\nodejs` (not on Git Bash's PATH; in PowerShell prepend it).
 - **Current status / next:** **v3 cutover DONE (§A.3 steps 1–6)**, **M5 — Group Actions DONE**, and
-  **M6 — Vehicles is mostly built**. The engine runs on 3rd-ed rules: Spent Die/Check, Fresh/Spent +
-  Stress, Pass/Stall, CAP floor 3, AR/DR + Hit Number, v3 initiative + no-tie VP track, Group
-  Move/Attack/Rally (engine + UI), and vehicles — Armored Target hit deck, vehicle movement (wheeled/
+  **M6 — Vehicles + Special Units DONE**. The engine runs on 3rd-ed rules: Spent Die/Check, Fresh/Spent
+  + Stress, Pass/Stall, CAP floor 3, AR/DR + Hit Number, v3 initiative + no-tie VP track, Group
+  Move/Attack/Rally (engine + UI), vehicles — Armored Target hit deck, vehicle movement (wheeled/
   tracked terrain costs, Bonus Moves §15.2 with click-to-build path UI), vehicle combat specifics
-  (no CC terrain bonus, Vehicle Cover for foot units, §15.14–15.15), and Transport/Towing (Load,
-  ride-along Move, Unload, free-unload-on-destroy, §15.6–15.11). **Real Mission 1 ("Partisans") is
-  wired** on the authored Map 1 (206 hexes), 7 CAP/side, German Round-1 initiative, Soviets start
-  +1 VP, I06 scores 1 VP/round, 1 VP/kill; the old 2nd-ed `FIREFIGHT_1`/`partisans` scaffold is
-  retired. An **Armor Sandbox** test mission (`data/missions/sandbox.ts`) exercises vehicles without
-  touching Mission 1. Board edge rendering (clipped non-playable half-hexes) is done. **Next:**
-  M6 stragglers — Towing damaged/immobilized Vehicles (§15.10), Special Units (turrets/SPGs/open-top/
-  field guns, §16) — then Mission 1 reinforcements / map-edge entry (German R1 south edge, Soviet R2
-  → R07, German R3 SS — currently stopgap pre-placed), Group close combat, then M7 (mortars/OBA/smoke).
+  (no CC terrain bonus, Vehicle Cover for foot units, §15.14–15.15), Transport/Towing (Load, ride-along
+  Move, Unload, free-unload-on-destroy, click-to-load/unload UI, towing damaged/immobilized Vehicles,
+  §15.6–15.11) — and Special Units (§16): Turreted Vehicles (fire outside Arc for +2AP), Open-Topped
+  Vehicles (red-FP Close Combat pulls a Soft Target marker), APC Transport Bonus (+2DR for a carried
+  Soft Target), and Trucks/Wagons (no Hex control, no CAP loss on destroy, Close-Combat-only / no
+  attack). **Real Mission 1 ("Partisans") is wired** on the authored Map 1 (206 hexes), 7 CAP/side,
+  German Round-1 initiative, Soviets start +1 VP, I06 scores 1 VP/round, 1 VP/kill; the old 2nd-ed
+  `FIREFIGHT_1`/`partisans` scaffold is retired. An **Armor Sandbox** test mission
+  (`data/missions/sandbox.ts`) exercises vehicles without touching Mission 1. Board edge rendering
+  (clipped non-playable half-hexes) is done. **Next:** Mission 1 reinforcements / map-edge entry
+  (German R1 south edge, Soviet R2 → R07, German R3 SS — currently stopgap pre-placed), Group close
+  combat, §16.4 Mobile Vehicles (combined wheel+track Bonus Moves — deferred, narrow subtype, no
+  authored unit needs it yet), then M7 (mortars/OBA/smoke).
 
 ---
 
@@ -246,7 +250,7 @@ conflict-of-heroes/
 ```
 
 > **Current state:** engine/data/state/ui/scripts compile and pass under **3rd-ed (v3) rules** — the
-> §A cutover is complete, **M5 Group Actions** is built, and **M6 Vehicles** is mostly built
+> §A cutover is complete, **M5 Group Actions** is built, and **M6 Vehicles + Special Units** is built
 > (conformance 0 violations). Data is the real **Mission 1** on **`maps/mission1.ts`** +
 > **`missions/mission1.ts`** (the 2nd-ed `firefights/`/`maps/partisans.ts` are deleted), plus the
 > non-canonical **`missions/sandbox.ts`** for exercising vehicles. `rules/` is the committed source
@@ -320,7 +324,7 @@ When in doubt, open `rules/INDEX.md`. Read the file before implementing; cite `N
 | *(later)* mortars / artillery / OBA / drift | — | 13.x | `rules/13` |
 | *(later)* smoke | — | 14.x | `rules/14` |
 | **Vehicles**: movement (wheeled/tracked, Bonus Moves), combat specifics, Transport/Towing; *(later)* Towing damaged Vehicles (§15.10) | `movement.ts`, `combat.ts`, `hits.ts`, `reducer.ts` *(M6)* | 15.x | `rules/15` |
-| *(later)* special units (turrets, SPGs, open-top, APCs, field guns) | — | 16.x | `rules/16` |
+| **Special units**: Turreted, Open-Topped, APC Transport Bonus, Trucks/Wagons, Field Guns; *(later)* Mobile Vehicles (§16.4) | `combat.ts`, `reducer.ts`, `actions.ts`, `victory.ts` *(M6)* | 16.x | `rules/16` |
 | *(later)* fortifications / trenches / bunkers / obstacles / mines | — | 17.x | `rules/17` |
 | *(later)* flamethrowers / pioneers | — | 18.x | `rules/18` |
 | *(later)* alternate player counts | — | 19.x | `rules/19` |
@@ -363,7 +367,11 @@ target's DR colour (blue → vehicle pile, red → foot pile).
     apToFire, vp, flags, whiteBoxFp? }` in `data/units.ts`. (v3: `apToFire`/`move` are **Spent-Check
     thresholds**, not pool spend.) **Vehicles** (`kind:'vehicle'`) add `propulsion:'wheeled'|'tracked'`
     and `bonusMoves?: number` (§15.1–15.2); any `kind:'vehicle'` template may Transport one foot Unit
-    (§15.6) — no separate flag needed.
+    (§15.6) — no separate flag needed. **Special Units (§16):** `turreted?` (fire outside Arc, +2AP),
+    `openTopped?` (red Flank DR + Soft marker vs red-FP CC), `apcTransport?` (+2DR for a carried Soft
+    Target), `cannotControlHex?`/`noCapLossOnDestroy?`/`attackMode?:'closeCombatOnly'|'none'` (Trucks/
+    Wagons, §16.1). Field Guns (§16.7) are just `kind:'gun'` + `propulsion:'wheeled'` — already towable
+    since Load's damage precondition only applies to `kind:'vehicle'`.
   - **Add a card:** `{ id, type:'action'|'bonus'|'mission'|'artillery', cost:{green?,blue?}, effect }`
     in `data/cards/` (v3 Green/Blue cost, 8.5). Effects are engine actions/modifiers, not UI code.
   - **Add a mission:** new file in `data/missions/` with maps, placements (by hex label), starting
@@ -438,20 +446,26 @@ Spent-Check die instead of a remaining-AP pool)*
   Spent Check. UI: "Group" mode (multi-select, formation-move arrows, rally, click-enemy attack).
   *Deferred:* group **close combat**; Mission 1 **reinforcements/edge entry** (stopgap pre-placed).
 
-- **M6 — Vehicles (§15)** mostly ✅: Armored Target hit deck + routing by DR colour; vehicle movement
-  (wheeled/tracked terrain costs, impassable/difficult terrain, roads ignore both, §15.1–15.4); Bonus
-  Moves (§15.2, multi-hex `MOVE.path`, forfeited on a Backwards/Difficult-Terrain first move) with a
-  click-to-build-path UI; vehicle combat specifics (no CC terrain bonus; Vehicle Cover +1DR for
-  co-located foot Units, §15.14–15.15); Transport/Towing (`LOAD`/`UNLOAD`, same-hex vs adjacent-hex
-  cost rules, ride-along Group Move, carried-Unit Move/Pivot/Attack restrictions, free unload on the
-  transport's destruction, §15.6–15.11) — all as Group Actions with one Group Spent Check. `Armor
-  Sandbox` (`data/missions/sandbox.ts`) is a non-canonical test mission (tank + rifle/side on Map 1).
-  *Deferred:* Towing damaged/immobilized Vehicles (§15.10); Special Units (§16, own milestone below).
+- **M6 — Vehicles + Special Units (§15–16)** ✅: Armored Target hit deck + routing by DR colour;
+  vehicle movement (wheeled/tracked terrain costs, impassable/difficult terrain, roads ignore both,
+  §15.1–15.4); Bonus Moves (§15.2, multi-hex `MOVE.path`, forfeited on a Backwards/Difficult-Terrain
+  first move) with a click-to-build-path UI; vehicle combat specifics (no CC terrain bonus; Vehicle
+  Cover +1DR for co-located foot Units — excluded for a Transported Unit, §15.14–15.15); Transport/
+  Towing (`LOAD`/`UNLOAD`, same-hex vs adjacent-hex cost rules, ride-along Group Move, carried-Unit
+  Move/Pivot/Attack restrictions, free unload on the transport's destruction, click-to-load/unload UI,
+  Towing damaged/immobilized Vehicles by propulsion-compatible tugs, §15.6–15.11) — all as Group
+  Actions with one Group Spent Check. **Special Units (§16):** Turreted Vehicles fire outside their
+  Arc for +2AP (`turreted`); Open-Topped Vehicles treat their Flank DR as red vs red-FP Close Combat,
+  pulling a Soft Target marker (`openTopped`); APC Transport Bonus grants a carried Soft Target +2DR
+  (`apcTransport`); Trucks/Wagons cannot control a Hex, don't reduce the CAPs Track when destroyed,
+  and are Close-Combat-only / no-attack (`cannotControlHex`, `noCapLossOnDestroy`, `attackMode`).
+  `Armor Sandbox` (`data/missions/sandbox.ts`) is a non-canonical test mission (turreted tank + rifle
+  /side on Map 1). *Deferred:* §16.4 Mobile Vehicles (combined wheel+track Bonus Moves — narrow
+  subtype, no authored unit needs it).
 - **Later (additive, v3 order):** M7 mortars/OBA/smoke (§13–14) → M8 hidden units (§11) → M9
-  elevation/hills (§12) → M10 fortifications/obstacles/mines (§17) → M11 flamethrowers/pioneers
-  (§18) → M12 special units (turrets/SPGs/open-top/field guns, §16) + cards (§8) → **M13 online
-  multiplayer** (host the pure engine authoritatively + WebSocket rooms; the client already speaks
-  action objects).
+  elevation/hills (§12) → M10 fortifications/obstacles/mines (§17) → M11 flamethrowers/pioneers (§18)
+  → M12 cards (§8) → **M13 online multiplayer** (host the pure engine authoritatively + WebSocket
+  rooms; the client already speaks action objects).
 
 ---
 

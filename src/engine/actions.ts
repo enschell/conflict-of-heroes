@@ -40,7 +40,15 @@ export function modifiedActionCost(state: GameState, action: Action): number | n
       const u = state.units[action.unitId];
       return u ? pivotCost() + stress(u) : null;
     }
-    case 'FIRE':
+    case 'FIRE': {
+      const u = state.units[action.attackerId];
+      const t = state.units[action.targetId];
+      if (!u || !t) return null;
+      const ctx = attackContext(state, u, t);
+      // §16.2: a Turreted Vehicle firing outside its Arc pays +2AP.
+      const arcPenalty = ctx.legal && ctx.outOfArc && templateOf(state, u).turreted ? 2 : 0;
+      return effectiveStats(state, u).apToFire + arcPenalty + stress(u);
+    }
     case 'CLOSE_COMBAT': {
       const u = state.units[action.attackerId];
       return u ? effectiveStats(state, u).apToFire + stress(u) : null;
@@ -95,15 +103,25 @@ export function legalActionsForUnit(state: GameState, unitId: UnitId): Action[] 
     }
   }
 
-  if (eff.canFire && !carried && actionable(eff.apToFire)) {
+  const tmpl = templateOf(state, unit);
+  // §16.1: Wagons ('none') may not attack at all; Trucks ('closeCombatOnly')
+  // may only attack in Close Combat, never with ranged FIRE.
+  if (eff.canFire && !carried && tmpl.attackMode !== 'none') {
     for (const target of Object.values(state.units)) {
       if (target.side === unit.side) continue;
       // Close combat against an enemy sharing this hex (§7.7.3); otherwise a
       // normal ranged attack if arc/LOS/range allow.
       if (target.hexId === unit.hexId) {
-        actions.push({ type: 'CLOSE_COMBAT', attackerId: unitId, targetId: target.id, ...cr(eff.apToFire) });
-      } else if (attackContext(state, unit, target).legal) {
-        actions.push({ type: 'FIRE', attackerId: unitId, targetId: target.id, ...cr(eff.apToFire) });
+        if (actionable(eff.apToFire)) {
+          actions.push({ type: 'CLOSE_COMBAT', attackerId: unitId, targetId: target.id, ...cr(eff.apToFire) });
+        }
+      } else if (tmpl.attackMode !== 'closeCombatOnly') {
+        const ctx = attackContext(state, unit, target);
+        if (ctx.legal) {
+          // §16.2: a Turreted Vehicle firing outside its Arc pays +2AP.
+          const cost = eff.apToFire + (ctx.outOfArc && tmpl.turreted ? 2 : 0);
+          if (actionable(cost)) actions.push({ type: 'FIRE', attackerId: unitId, targetId: target.id, ...cr(cost) });
+        }
       }
     }
   }

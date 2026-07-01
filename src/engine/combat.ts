@@ -34,9 +34,12 @@ function wallDMForFire(state: GameState, attackerHexId: string, targetHexId: str
 
 /**
  * §15.15 Vehicles as Cover: a foot Unit sharing its hex with a friendly Vehicle
- * gains +1 DR. (Transport is a later module, so "not being transported" is moot.)
+ * gains +1 DR — but NOT while actually being Transported by one (§15.15's own
+ * exclusion; a Transported Unit shares its carrier's hex too, so it must be
+ * excluded here explicitly, or it would double up with the APC Transport Bonus).
  */
 function vehicleCoverBonus(state: GameState, target: Unit): number {
+  if (target.carriedBy) return 0;
   if (templateOf(state, target).kind === 'vehicle') return 0;
   const covered = Object.values(state.units).some(
     (u) =>
@@ -46,6 +49,16 @@ function vehicleCoverBonus(state: GameState, target: Unit): number {
       templateOf(state, u).kind === 'vehicle',
   );
   return covered ? 1 : 0;
+}
+
+/**
+ * §16.6 APC Transport Bonus: a Soft Target being Transported by an APC (marked
+ * `apcTransport`) gains +2DR from all flanks.
+ */
+function apcTransportBonus(state: GameState, target: Unit): number {
+  if (!target.carriedBy) return 0;
+  const carrier = state.units[target.carriedBy];
+  return carrier && templateOf(state, carrier).apcTransport ? 2 : 0;
 }
 
 export interface AttackContext {
@@ -61,6 +74,12 @@ export interface AttackContext {
   hitNumber: number;
   /** True if resolved against the target's flank DR. */
   isFlank: boolean;
+  /**
+   * True if the target is outside the attacker's Arc of Fire. Only reachable
+   * (without denial) for a Turreted Vehicle (§16.2), which pays +2AP for it;
+   * always false for Close Combat (no arc requirement).
+   */
+  outOfArc: boolean;
 }
 
 /**
@@ -90,7 +109,10 @@ export function attackContext(
     Object.values(state.units).some((u) => u.side !== attacker.side && u.hexId === attacker.hexId)
   )
     return fail('enemy in your hex — must close combat', band, fpColor);
-  if (!inArc(attacker.hexId, attacker.facing, target.hexId))
+  // §16.2: a Turreted Vehicle may fire outside its Arc without pivoting (for a
+  // +2AP Attack Cost the caller applies); everyone else is denied out of arc.
+  const outOfArc = !inArc(attacker.hexId, attacker.facing, target.hexId);
+  if (outOfArc && !templateOf(state, attacker).turreted)
     return fail('target out of arc', band, fpColor);
   if (!hasLOS(state, attacker.hexId, target.hexId)) return fail('no line of sight', band, fpColor);
   if (band === 'out') return fail('out of range', band, fpColor);
@@ -102,14 +124,15 @@ export function attackContext(
     defense +
     terrainDM(state, target.hexId) +
     wallDMForFire(state, attacker.hexId, target.hexId) +
-    vehicleCoverBonus(state, target);
+    vehicleCoverBonus(state, target) +
+    apcTransportBonus(state, target);
   const ar = (fpColor === 'red' ? aEff.fp.red : aEff.fp.blue) + fpRangeModifier(band) + arBonus;
 
-  return { legal: true, band, fpColor, ar, dr, hitNumber: dr - ar, isFlank };
+  return { legal: true, band, fpColor, ar, dr, hitNumber: dr - ar, isFlank, outOfArc };
 }
 
 function fail(reason: string, band: RangeBand, fpColor: DRColor): AttackContext {
-  return { legal: false, reason, band, fpColor, ar: 0, dr: 0, hitNumber: 0, isFlank: false };
+  return { legal: false, reason, band, fpColor, ar: 0, dr: 0, hitNumber: 0, isFlank: false, outOfArc: false };
 }
 
 export interface AttackRoll {
@@ -130,6 +153,8 @@ export interface AttackRoll {
   fpColor: DRColor;
   band: RangeBand;
   rng: RngState;
+  /** See AttackContext.outOfArc (§16.2). */
+  outOfArc: boolean;
 }
 
 /**
@@ -159,6 +184,7 @@ export function rollAttack(
       fpColor: ctx.fpColor,
       band: ctx.band,
       rng: state.rng,
+      outOfArc: ctx.outOfArc,
     };
   }
   const { value, dice, rng } = roll2d6(state.rng);
@@ -179,6 +205,7 @@ export function rollAttack(
     fpColor: ctx.fpColor,
     band: ctx.band,
     rng,
+    outOfArc: ctx.outOfArc,
   };
 }
 
@@ -191,7 +218,10 @@ export function rollAttack(
 export function closeCombatContext(state: GameState, attacker: Unit, target: Unit): AttackContext {
   const aEff = effectiveStats(state, attacker);
   const tEff = effectiveStats(state, target);
-  const fpColor = tEff.dr.color;
+  // §16.5: an Open-Topped Vehicle defends Close Combat with its blue Flank
+  // Defense treated as RED (pulls a Soft Target Hit Marker) — infantry can lob
+  // grenades/fire straight into the open top, unlike a closed vehicle.
+  const fpColor = templateOf(state, target).openTopped ? 'red' : tEff.dr.color;
 
   if (!aEff.canFire) return fail('unit cannot fight', 'short', fpColor);
   if (attacker.id === target.id) return fail('cannot close-combat self', 'short', fpColor);
@@ -203,8 +233,8 @@ export function closeCombatContext(state: GameState, attacker: Unit, target: Uni
   // §15.14: Vehicles get NO defensive terrain bonus in close combat (foot do, §6.10).
   const targetIsVehicle = templateOf(state, target).kind === 'vehicle';
   const terrain = targetIsVehicle ? 0 : terrainDM(state, target.hexId);
-  const dr = tEff.dr.flank + terrain + vehicleCoverBonus(state, target);
-  return { legal: true, band: 'short', fpColor, ar, dr, hitNumber: dr - ar, isFlank: true };
+  const dr = tEff.dr.flank + terrain + vehicleCoverBonus(state, target) + apcTransportBonus(state, target);
+  return { legal: true, band: 'short', fpColor, ar, dr, hitNumber: dr - ar, isFlank: true, outOfArc: false };
 }
 
 export function rollCloseCombat(
@@ -229,6 +259,7 @@ export function rollCloseCombat(
       fpColor: ctx.fpColor,
       band: ctx.band,
       rng: state.rng,
+      outOfArc: false,
     };
   }
   const { value, dice, rng } = roll2d6(state.rng);
@@ -248,6 +279,7 @@ export function rollCloseCombat(
     fpColor: ctx.fpColor,
     band: ctx.band,
     rng,
+    outOfArc: false,
   };
 }
 

@@ -7,7 +7,7 @@
  */
 import { HIT_MARKERS } from '../data/hitMarkers';
 import { distance, parseHexId } from './hex';
-import { effectiveStats } from './hits';
+import { effectiveStats, templateOf } from './hits';
 import { hasLOS, inArc } from './los';
 import { rangeBand } from './range';
 import type { GameState, Unit, UnitId } from './types';
@@ -72,6 +72,9 @@ export function isValidSupporter(
   if (hasFirepowerHitMarker(supporter)) return false;
   const eff = effectiveStats(state, supporter);
   if (!eff.canFire) return false;
+  // §16.1: a Group Attack is always ranged fire, so Wagons/Trucks can't support it either.
+  const supMode = templateOf(state, supporter).attackMode;
+  if (supMode === 'none' || supMode === 'closeCombatOnly') return false;
 
   // Close-combat support: only Units sharing the Leader's (= Target's) hex.
   if (target.hexId === leader.hexId) return supporter.hexId === leader.hexId;

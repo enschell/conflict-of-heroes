@@ -1,6 +1,7 @@
 /**
  * Victory points and victory-hex control (rulebook §2.4, §2.5).
  */
+import { templateOf } from './hits';
 import type { GameState, SideId } from './types';
 
 export function otherSide(s: SideId): SideId {
@@ -14,7 +15,10 @@ export function otherSide(s: SideId): SideId {
  */
 export function updateVictoryHexControl(state: GameState): void {
   for (const vh of state.victory.victoryHexes) {
-    const occupants = Object.values(state.units).filter((u) => u.hexId === vh.hexId);
+    // §16.1: Trucks/Wagons cannot take control of a Hex — they don't count.
+    const occupants = Object.values(state.units).filter(
+      (u) => u.hexId === vh.hexId && !templateOf(state, u).cannotControlHex,
+    );
     const sides = new Set(occupants.map((o) => o.side));
     if (sides.size === 1) {
       const hex = state.hexes[vh.hexId];

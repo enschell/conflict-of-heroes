@@ -108,6 +108,43 @@ export const GERMAN_UNITS: UnitTemplate[] = [
     unburdened: false,
     propulsion: 'tracked',
     bonusMoves: 1,
+    turreted: true, // §16.2 — the Pz III's 360° turret can fire outside its Arc for +2AP
+  },
+  {
+    // §16.7 Field Gun: crewed, towable (15.6) rather than self-mobile; green
+    // Wheel Move cost. Stats are ours.
+    id: 'ger-pak40',
+    nation: 'germans',
+    name: 'PaK 40',
+    kind: 'gun',
+    whiteBoxFp: true,
+    fp: { red: 2, blue: 9 },
+    dr: { front: 11, flank: 10, color: 'red' },
+    move: 1,
+    range: 14,
+    apToFire: 3,
+    vp: 2,
+    unburdened: false,
+    propulsion: 'wheeled',
+  },
+  {
+    // §16.5/§16.6 Open-Topped APC: transports a foot Unit with +2DR (apcTransport),
+    // but its own open top pulls a Soft Target marker vs red-FP Close Combat.
+    id: 'ger-sdkfz251',
+    nation: 'germans',
+    name: 'SdKfz 251',
+    kind: 'vehicle',
+    fp: { red: 3, blue: 1 },
+    dr: { front: 11, flank: 10, color: 'blue' },
+    move: 1,
+    range: 6,
+    apToFire: 2,
+    vp: 2,
+    unburdened: false,
+    propulsion: 'tracked',
+    bonusMoves: 2,
+    openTopped: true,
+    apcTransport: true,
   },
 ];
 
@@ -186,6 +223,27 @@ export const SOVIET_UNITS: UnitTemplate[] = [
     unburdened: false,
     propulsion: 'tracked',
     bonusMoves: 2,
+    turreted: true, // §16.2 — the T-34's 360° turret can fire outside its Arc for +2AP
+  },
+  {
+    // §16.1 Truck: Wheeled, cannot control a Hex, destroyed doesn't reduce CAPs
+    // (still counts for VP), and may only attack in Close Combat.
+    id: 'sov-truck',
+    nation: 'soviets',
+    name: 'GAZ-AA Truck',
+    kind: 'vehicle',
+    fp: { red: 0, blue: 0 },
+    dr: { front: 8, flank: 7, color: 'blue' },
+    move: 1,
+    range: 0,
+    apToFire: 2,
+    vp: 1,
+    unburdened: false,
+    propulsion: 'wheeled',
+    bonusMoves: 1,
+    attackMode: 'closeCombatOnly',
+    cannotControlHex: true,
+    noCapLossOnDestroy: true,
   },
 ];
 
