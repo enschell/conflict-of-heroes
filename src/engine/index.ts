@@ -21,7 +21,7 @@ export {
 export { rollRally } from './rally';
 export { effectiveStats, templateOf } from './hits';
 export { hasLOS, inArc, canSightTarget, visibleHexesFrom } from './los';
-export { moveCost, directionTo, pivotCost } from './movement';
+export { moveCost, directionTo, pivotCost, planVehicleMove } from './movement';
 export { rangeBand, fpRangeModifier } from './range';
 export { rallyModifier, RALLY_AP_COST } from './rally';
 export { finalScores, computeWinner, otherSide, vpLeader, vpMargin, gainVp } from './victory';

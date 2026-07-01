@@ -207,6 +207,20 @@ button.link {
 .stats-grid span {
   color: var(--dim);
 }
+.move-path {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.35rem 0.5rem;
+  border: 1px solid rgba(74, 163, 255, 0.5);
+  border-radius: 4px;
+  background: rgba(74, 163, 255, 0.1);
+}
+.move-path__actions {
+  display: flex;
+  gap: 0.4rem;
+}
 .hit-note {
   color: #ff8a8a;
   font-weight: 700;

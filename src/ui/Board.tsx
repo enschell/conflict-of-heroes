@@ -6,7 +6,7 @@
  * Hovering a targetable enemy shows a fire-odds popup; Ctrl+click a stacked hex
  * opens a unit picker. Clicks/hover route through the store.
  */
-import { attackContext, legalActionsForUnit, neighbor, parseHexId, idOf, visibleHexesFrom } from '../engine';
+import { attackContext, legalActionsForUnit, neighbor, neighbors, parseHexId, idOf, planVehicleMove, templateOf, visibleHexesFrom } from '../engine';
 import type { Facing, Unit } from '../engine/types';
 import { useGame } from '../state/store';
 import { artForHex } from '../data/hexArt';
@@ -29,6 +29,7 @@ export function Board() {
   const game = useGame((s) => s.game);
   const selectedUnitId = useGame((s) => s.selectedUnitId);
   const groupSel = useGame((s) => s.groupSel);
+  const movePath = useGame((s) => s.movePath);
   const losMode = useGame((s) => s.losMode);
   const losSource = useGame((s) => s.losSource);
   const shiftHeld = useGame((s) => s.shiftHeld);
@@ -59,6 +60,21 @@ export function Board() {
       if (a.type === 'FIRE') {
         const t = game.units[a.targetId];
         if (t) fireTargets.add(t.hexId);
+      }
+    }
+  }
+
+  // Vehicle Bonus-Move path (§15.2): the chosen steps + the legal next steps.
+  const pathSet = new Set(movePath);
+  const nextSteps = new Set<string>();
+  if (!losActive && selectedUnitId && game.units[selectedUnitId]) {
+    const sel = game.units[selectedUnitId]!;
+    if (templateOf(game, sel).kind === 'vehicle') {
+      const from = movePath.length ? movePath[movePath.length - 1]! : sel.hexId;
+      for (const n of neighbors(parseHexId(from))) {
+        const nid = idOf(n);
+        if (!game.hexes[nid] || pathSet.has(nid)) continue;
+        if (planVehicleMove(game, sel, [...movePath, nid]).ap != null) nextSteps.add(nid);
       }
     }
   }
@@ -153,7 +169,16 @@ export function Board() {
                 )}
                 {losDim && <polygon points={pts} fill="#0b0d08" opacity={0.62} />}
                 {visible?.has(id) && <polygon points={pts} fill="#7CFC8C" opacity={0.18} />}
-                {moveTargets.has(id) && <polygon points={pts} fill="#5ad17a" opacity={0.28} stroke="#5ad17a" strokeWidth={2} />}
+                {nextSteps.size === 0 && moveTargets.has(id) && <polygon points={pts} fill="#5ad17a" opacity={0.28} stroke="#5ad17a" strokeWidth={2} />}
+                {nextSteps.has(id) && <polygon points={pts} fill="#5ad17a" opacity={0.2} stroke="#5ad17a" strokeWidth={2} strokeDasharray="4 3" />}
+                {pathSet.has(id) && (
+                  <>
+                    <polygon points={pts} fill="#4aa3ff" opacity={0.32} stroke="#4aa3ff" strokeWidth={2} />
+                    <text x={c.x} y={c.y} fontSize={HEX_SIZE * 0.5} fill="#fff" textAnchor="middle" dominantBaseline="central" fontWeight={700} pointerEvents="none">
+                      {movePath.indexOf(id) + 1}
+                    </text>
+                  </>
+                )}
                 {fireTargets.has(id) && <polygon points={pts} fill="none" stroke="#ff5a5a" strokeWidth={3} />}
                 {id === losActive && <polygon points={pts} fill="none" stroke="#ffd24a" strokeWidth={3} />}
                 <polygon points={pts} fill="transparent" stroke={HEX_STROKE} strokeWidth={1} />

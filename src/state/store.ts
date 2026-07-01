@@ -16,6 +16,7 @@ import {
   moveCost,
   neighbor,
   parseHexId,
+  planVehicleMove,
   reduce,
   rollCloseCombat,
   rollRally,
@@ -83,6 +84,8 @@ interface Store {
   /** Group Actions (§10): when on, board clicks build/act on a unit Group. */
   groupMode: boolean;
   groupSel: UnitId[];
+  /** In-progress vehicle Bonus-Move path (§15.2): the hex steps chosen so far. */
+  movePath: HexId[];
   losMode: boolean;
   losSource: HexId | null;
   shiftHeld: boolean;
@@ -121,6 +124,10 @@ interface Store {
   groupMove: (dir: Facing) => void;
   groupRally: () => void;
   groupAttack: (targetId: UnitId) => void;
+
+  extendMovePath: (hexId: HexId) => void;
+  commitMovePath: () => void;
+  clearMovePath: () => void;
 
   commitRoll: () => void;
   cancelRoll: () => void;
@@ -210,6 +217,7 @@ export const useGame = create<Store>((set, get) => {
   const resetForLoad = () => ({
     selectedUnitId: null,
     groupSel: [] as UnitId[],
+    movePath: [] as HexId[],
     history: [] as GameState[],
     future: [] as GameState[],
     picker: null,
@@ -311,6 +319,7 @@ export const useGame = create<Store>((set, get) => {
     selectedUnitId: null,
     groupMode: false,
     groupSel: [],
+    movePath: [],
     losMode: false,
     losSource: null,
     shiftHeld: false,
@@ -333,6 +342,7 @@ export const useGame = create<Store>((set, get) => {
         selectedUnitId: null,
         groupMode: false,
         groupSel: [],
+        movePath: [],
         losMode: false,
         losSource: null,
         hover: null,
@@ -357,7 +367,7 @@ export const useGame = create<Store>((set, get) => {
       set({ game: null, ...resetForLoad(), losMode: false });
     },
 
-    select: (unitId) => set({ selectedUnitId: unitId }),
+    select: (unitId) => set({ selectedUnitId: unitId, movePath: [] }),
     setHover: (h) => set({ hover: h }),
     setShift: (down) => set({ shiftHeld: down }),
 
@@ -394,6 +404,12 @@ export const useGame = create<Store>((set, get) => {
               : [...new Set([...sel, ...ownFresh.map((u) => u.id)])],
           });
         }
+        return;
+      }
+
+      // A vehicle Bonus-Move path in progress: clicks extend/commit it (§15.2).
+      if (get().movePath.length > 0) {
+        get().extendMovePath(hexId);
         return;
       }
 
@@ -489,8 +505,16 @@ export const useGame = create<Store>((set, get) => {
       });
     },
 
-    move: (unitId, toHexId) =>
-      capGate({ type: 'MOVE', unitId, toHexId }, (a) => get().dispatch(a)),
+    move: (unitId, toHexId) => {
+      const g = get().game;
+      const u = g?.units[unitId];
+      // Vehicles build a Bonus-Move path (§15.2); foot units move one hex.
+      if (g && u && g.templates[u.templateId]?.kind === 'vehicle') {
+        get().extendMovePath(toHexId);
+        return;
+      }
+      capGate({ type: 'MOVE', unitId, toHexId }, (a) => get().dispatch(a));
+    },
     fire: (attackerId, targetId) =>
       capGate({ type: 'FIRE', attackerId, targetId }, (a) =>
         requestFireRoll(a as Extract<Action, { type: 'FIRE' }>),
@@ -554,6 +578,34 @@ export const useGame = create<Store>((set, get) => {
       get().dispatch({ type: 'GROUP_ATTACK', leaderId, supporterIds, targetId });
       set({ groupSel: [] });
     },
+
+    extendMovePath: (hexId) => {
+      const g = get().game;
+      const sel = get().selectedUnitId;
+      const unit = g && sel ? g.units[sel] : null;
+      if (!g || !unit) return;
+      const path = get().movePath;
+      // Clicking the current end commits the move; a fresh empty path with a
+      // repeat click does nothing.
+      if (path.length && hexId === path[path.length - 1]) {
+        get().commitMovePath();
+        return;
+      }
+      // Accept the step only if the whole extended path is a legal vehicle move.
+      const candidate = [...path, hexId];
+      if (planVehicleMove(g, unit, candidate).ap != null) set({ movePath: candidate });
+    },
+    commitMovePath: () => {
+      const path = get().movePath;
+      const sel = get().selectedUnitId;
+      if (!path.length || !sel) return;
+      set({ movePath: [] });
+      capGate(
+        { type: 'MOVE', unitId: sel, toHexId: path[path.length - 1]!, path },
+        (a) => get().dispatch(a),
+      );
+    },
+    clearMovePath: () => set({ movePath: [] }),
 
     commitRoll: () => {
       const { pendingRoll } = get();

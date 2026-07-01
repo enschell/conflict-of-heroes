@@ -23,6 +23,9 @@ export function Inspector() {
   const closeCombat = useGame((s) => s.closeCombat);
   const rally = useGame((s) => s.rally);
   const pivot = useGame((s) => s.pivot);
+  const movePath = useGame((s) => s.movePath);
+  const commitMovePath = useGame((s) => s.commitMovePath);
+  const clearMovePath = useGame((s) => s.clearMovePath);
 
   if (!game) return null;
   if (!selectedUnitId || !game.units[selectedUnitId]) {
@@ -43,6 +46,7 @@ export function Inspector() {
   const canPivot = acts.some((a) => a.type === 'PIVOT');
   const canRally = acts.some((a) => a.type === 'RALLY');
   const hasMove = acts.some((a) => a.type === 'MOVE');
+  const isVehicle = tmpl.kind === 'vehicle';
   const fireActs = acts.filter((a): a is Extract<typeof a, { type: 'FIRE' }> => a.type === 'FIRE');
   const ccActs = acts.filter(
     (a): a is Extract<typeof a, { type: 'CLOSE_COMBAT' }> => a.type === 'CLOSE_COMBAT',
@@ -107,7 +111,24 @@ export function Inspector() {
             </p>
           )}
           {canRally && <button onClick={() => rally(unit.id)}>Rally (5 AP)</button>}
-          {hasMove && <p className="dim">Move: click a highlighted green hex.</p>}
+          {hasMove && !isVehicle && <p className="dim">Move: click a highlighted green hex.</p>}
+          {hasMove && isVehicle && movePath.length === 0 && (
+            <p className="dim">
+              Move: click hexes to build a path (1 Move + {tmpl.bonusMoves ?? 0} Bonus Move
+              {(tmpl.bonusMoves ?? 0) === 1 ? '' : 's'}, §15.2), then confirm.
+            </p>
+          )}
+          {isVehicle && movePath.length > 0 && (
+            <div className="move-path">
+              <span className="dim">Path: {movePath.length} hex{movePath.length === 1 ? '' : 'es'}</span>
+              <div className="move-path__actions">
+                <button className="primary" onClick={() => commitMovePath()}>
+                  Move
+                </button>
+                <button onClick={() => clearMovePath()}>Cancel</button>
+              </div>
+            </div>
+          )}
 
           {fireActs.length > 0 && (
             <div className="fire-list">
