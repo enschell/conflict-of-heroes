@@ -15,14 +15,14 @@ export const USE_HEX_ART = true;
 
 /** Default artwork per terrain type (our own original tiles). */
 export const TERRAIN_ART: Record<TerrainId, string> = {
-  open: '/assets/terrain/open.svg',
-  road: '/assets/terrain/road.svg',
+  open: '/assets/terrain/open.png',
+  road: '/assets/terrain/road.png',
   plowed: '/assets/terrain/plowed.svg',
   water: '/assets/terrain/water.svg',
-  woodsLight: '/assets/terrain/woodsLight.svg',
-  woodsHeavy: '/assets/terrain/woodsHeavy.svg',
-  buildingWood: '/assets/terrain/buildingWood.svg',
-  buildingStone: '/assets/terrain/buildingStone.svg',
+  woodsLight: '/assets/terrain/lightwoodsv2.png',
+  woodsHeavy: '/assets/terrain/woodsHeavyv2.png',
+  buildingWood: '/assets/terrain/buildingWood.png',
+  buildingStone: '/assets/terrain/buildingStone.png',
 };
 
 /**
