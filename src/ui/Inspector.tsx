@@ -4,7 +4,7 @@
  * Move/fire are also available by clicking the board. v3: each Action is
  * followed by a Spent Check (§2.5) and Stresses the unit (§2.6).
  */
-import { attackContext, closeCombatContext, effectiveStats, legalActionsForUnit, templateOf } from '../engine';
+import { attackContext, closeCombatContext, effectiveStats, legalActionsForUnit, RALLY_AP_COST, templateOf } from '../engine';
 import { HIT_MARKERS, hitMarkerEffects } from '../data/hitMarkers';
 import type { Facing } from '../engine/types';
 import { useGame } from '../state/store';
@@ -40,13 +40,25 @@ export function Inspector() {
   const unit = game.units[selectedUnitId]!;
   const tmpl = templateOf(game, unit);
   const eff = effectiveStats(game, unit);
+  const player = game.players[unit.side];
   const yours = unit.side === game.currentSide;
   const acts = yours ? legalActionsForUnit(game, unit.id) : [];
 
   const canPivot = acts.some((a) => a.type === 'PIVOT');
-  const canRally = acts.some((a) => a.type === 'RALLY');
   const hasMove = acts.some((a) => a.type === 'MOVE');
   const isVehicle = tmpl.kind === 'vehicle';
+
+  // Rally eligibility (§7.6–7.10). A Hit Unit may Rally unless its marker is
+  // "No Rally" or it shares a hex with an enemy (§7.9). A Spent Hit Unit may
+  // still Rally by spending CAPs to reach 0AP (§3.4 — see the §7.10 red box).
+  const marker = unit.hitMarkers[0];
+  const enemyHere = Object.values(game.units).some(
+    (u) => u.side !== unit.side && u.hexId === unit.hexId,
+  );
+  const rallyable = !!marker && HIT_MARKERS[marker].rally > 0 && !enemyHere;
+  const rallyCost = RALLY_AP_COST + (unit.stressed ? 1 : 0); // AP (Fresh) or CAP-to-0AP (Spent)
+  const spentRally = unit.status === 'spent';
+  const rallyAffordable = !spentRally || player.capCurrent >= rallyCost;
   const fireActs = acts.filter((a): a is Extract<typeof a, { type: 'FIRE' }> => a.type === 'FIRE');
   const ccActs = acts.filter(
     (a): a is Extract<typeof a, { type: 'CLOSE_COMBAT' }> => a.type === 'CLOSE_COMBAT',
@@ -110,7 +122,17 @@ export function Inspector() {
               cost to 0AP (§3.4).
             </p>
           )}
-          {canRally && <button onClick={() => rally(unit.id)}>Rally (5 AP)</button>}
+          {rallyable && !spentRally && (
+            <button onClick={() => rally(unit.id)}>Rally ({rallyCost} AP)</button>
+          )}
+          {rallyable && spentRally && rallyAffordable && (
+            <button onClick={() => rally(unit.id)}>Rally — spend {rallyCost} CAP → 0AP (§3.4)</button>
+          )}
+          {rallyable && spentRally && !rallyAffordable && (
+            <button disabled title="Not enough CAP to reach 0AP">
+              Rally needs {rallyCost} CAP (have {player.capCurrent})
+            </button>
+          )}
           {hasMove && !isVehicle && <p className="dim">Move: click a highlighted green hex.</p>}
           {hasMove && isVehicle && movePath.length === 0 && (
             <p className="dim">
