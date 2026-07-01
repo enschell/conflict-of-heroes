@@ -687,6 +687,14 @@ export const useGame = create<Store>((set, get) => {
         history: history.slice(0, -1),
         future: [game, ...get().future],
         selectedUnitId: null,
+        // Time-travel invalidates any in-progress action assembly (an
+        // uncommitted vehicle Bonus-Move path, a Group-mode selection) — both
+        // reference units/state from the pre-undo timeline, so keeping them
+        // stale either silently swallows every board click afterward (movePath
+        // routes clicks to extendMovePath, which no-ops without a selection) or
+        // crashes a Group action on a member id that may no longer exist.
+        movePath: [],
+        groupSel: [],
         pendingRoll: null,
         pendingConfirm: null,
         chooser: null,
@@ -705,6 +713,8 @@ export const useGame = create<Store>((set, get) => {
         future: future.slice(1),
         history: [...get().history, game].slice(-HISTORY_LIMIT),
         selectedUnitId: null,
+        movePath: [], // see undo() — stale in-progress action state must not survive time-travel
+        groupSel: [],
         pendingRoll: null,
         pendingConfirm: null,
         chooser: null,
