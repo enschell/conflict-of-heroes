@@ -170,6 +170,8 @@ export interface ReinforcementUnit {
   earliestRound: number;
   /** Full entry Hexes the Mission specifies for this wave (an edge row, a named hex, or an area). */
   entryHexIds: HexId[];
+  /** Human-readable entry condition for display, e.g. "Road Hex R07" (authored, not derived). */
+  entryDescription: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -442,6 +444,8 @@ export interface ReinforcementWaveDef {
   earliestRound: number;
   /** Full entry Hexes the Mission specifies (an edge row, a single named hex, or an area). */
   entryHexIds: HexId[];
+  /** Human-readable entry condition for display, e.g. "Road Hex R07" (authored, not derived). */
+  entryDescription: string;
   units: { id: UnitId; templateId: string; facing: Facing }[];
 }
 

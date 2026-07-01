@@ -12,6 +12,7 @@ import {
   initGame,
   isValidSupporter,
   legalActionsForUnit,
+  legalEntryHexes,
   modifiedActionCost,
   moveCost,
   neighbor,
@@ -119,6 +120,8 @@ interface Store {
   pivot: (unitId: UnitId, facing: Facing) => void;
   load: (unitId: UnitId, vehicleId: UnitId) => void;
   unload: (unitId: UnitId, toHexId: HexId) => void;
+  /** Enter every eligible Unit of one reinforcement wave as a single Group Action (§4.12). */
+  enterWave: (waveId: string) => void;
 
   toggleGroupMode: () => void;
   toggleGroupMember: (unitId: UnitId) => void;
@@ -566,6 +569,25 @@ export const useGame = create<Store>((set, get) => {
         (a): a is Extract<Action, { type: 'UNLOAD' }> => a.type === 'UNLOAD' && a.toHexId === toHexId,
       );
       if (act) get().dispatch(act);
+    },
+
+    enterWave: (waveId) => {
+      const g = get().game;
+      if (!g) return;
+      const units = g.reinforcements.filter(
+        (r) => r.waveId === waveId && r.side === g.currentSide && g.round >= r.earliestRound,
+      );
+      if (units.length === 0) return;
+      // §4.12: Group entry — one Action places every eligible Unit of the wave.
+      // Spread them across distinct legal entry hexes when there are enough
+      // (e.g. a whole platoon along a 12-hex edge row); only stack (§4.3) when
+      // the wave has fewer legal hexes than Units (e.g. a single named hex).
+      const placements = units.map((r, i) => {
+        const legal = legalEntryHexes(g, r);
+        const hexId = legal.length ? legal[i % legal.length]! : r.entryHexIds[0]!;
+        return { unitId: r.id, hexId, facing: r.facing };
+      });
+      get().dispatch({ type: 'ENTER', placements });
     },
 
     toggleGroupMode: () =>

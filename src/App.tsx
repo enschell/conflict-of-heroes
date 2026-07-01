@@ -16,6 +16,7 @@ import { GroupPanel } from './ui/GroupPanel';
 import { HoverPanel } from './ui/HoverPanel';
 import { Inspector } from './ui/Inspector';
 import { Log } from './ui/Log';
+import { ReinforcementsPanel } from './ui/ReinforcementsPanel';
 import { SetupScreen } from './ui/SetupScreen';
 import { TrackSheet } from './ui/TrackSheet';
 import { TurnBanner } from './ui/TurnBanner';
@@ -110,7 +111,9 @@ export function App() {
 
       <aside className="left">
         <TrackSheet side="A" />
+        <ReinforcementsPanel side="A" />
         <TrackSheet side="B" />
+        <ReinforcementsPanel side="B" />
       </aside>
 
       <main className="center">

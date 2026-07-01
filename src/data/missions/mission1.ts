@@ -62,6 +62,7 @@ const REINFORCEMENTS: ReinforcementWaveDef[] = [
     side: 'A',
     earliestRound: 1,
     entryHexIds: SOUTH_EDGE,
+    entryDescription: 'any full Hex along the south edge (B01–B12)',
     units: [
       { id: 'G-mg34-1', templateId: 'ger-lmg', facing: 1 },
       { id: 'G-rifle-1', templateId: 'ger-rifle', facing: 1 },
@@ -74,6 +75,7 @@ const REINFORCEMENTS: ReinforcementWaveDef[] = [
     side: 'A',
     earliestRound: 3,
     entryHexIds: withinPlayable(at('R01'), 2),
+    entryDescription: 'within 2 Hexes of Hex R01',
     units: [{ id: 'G-ss-pioneer', templateId: 'ger-pioneer', facing: 1 }],
   },
   {
@@ -81,6 +83,7 @@ const REINFORCEMENTS: ReinforcementWaveDef[] = [
     side: 'B',
     earliestRound: 2,
     entryHexIds: [at('R07')],
+    entryDescription: 'Road Hex R07 (or any later Round, your option)',
     units: [
       { id: 'S-r2-rifle-1', templateId: 'sov-rifle', facing: 5 },
       { id: 'S-r2-rifle-2', templateId: 'sov-rifle', facing: 5 },

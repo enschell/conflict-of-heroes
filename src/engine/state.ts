@@ -83,6 +83,7 @@ export function initGame(def: FirefightDef): GameState {
         waveId: wave.id,
         earliestRound: wave.earliestRound,
         entryHexIds: wave.entryHexIds,
+        entryDescription: wave.entryDescription,
       });
     }
   }

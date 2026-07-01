@@ -23,6 +23,7 @@ function reinforcement(over: Partial<ReinforcementUnit> = {}): ReinforcementUnit
     waveId: 'wave1',
     earliestRound: 1,
     entryHexIds: ['0,0', '1,0'],
+    entryDescription: 'test entry area',
     ...over,
   };
 }

@@ -129,13 +129,20 @@ This repo is self-describing: a fresh session needs only the code + these docs.
   Vehicles (red-FP Close Combat pulls a Soft Target marker), APC Transport Bonus (+2DR for a carried
   Soft Target), and Trucks/Wagons (no Hex control, no CAP loss on destroy, Close-Combat-only / no
   attack). **Real Mission 1 ("Partisans") is wired** on the authored Map 1 (206 hexes), 7 CAP/side,
-  German Round-1 initiative, Soviets start +1 VP, I06 scores 1 VP/round, 1 VP/kill; the old 2nd-ed
+  German Round-1 initiative, Soviets start +1 VP, I06 scores 1 VP/round, 1 VP/kill. **Reinforcements
+  (§4.12) are real, not stopgap-placed:** Units wait off-Map in `GameState.reinforcements` until an
+  `ENTER` action (0AP, never a Spent Check, but Stressed; may enter as a Group in one Action) places
+  them on a Mission-specified entry Hex, with a within-2-hexes fallback if every entry Hex is
+  enemy-occupied. Mission 1: German Round 1 platoon (2 Rifles + 2 MG34) via the south edge (B01–B12),
+  German Round 3 SS Tracker (1 Pioneer) within 2 hexes of R01, Soviet Round 2+ reinforcements
+  (2 Rifles) at Road Hex R07 — composition/timing verified against the Mission Book's Commander's
+  Forces panels. A `ReinforcementsPanel` per side shows each pending wave's units (graphical badge +
+  name) and entry condition, with a one-click "Enter now" once eligible. The old 2nd-ed
   `FIREFIGHT_1`/`partisans` scaffold is retired. An **Armor Sandbox** test mission
   (`data/missions/sandbox.ts`) exercises vehicles without touching Mission 1. Board edge rendering
-  (clipped non-playable half-hexes) is done. **Next:** Mission 1 reinforcements / map-edge entry
-  (German R1 south edge, Soviet R2 → R07, German R3 SS — currently stopgap pre-placed), Group close
-  combat, §16.4 Mobile Vehicles (combined wheel+track Bonus Moves — deferred, narrow subtype, no
-  authored unit needs it yet), then M7 (mortars/OBA/smoke).
+  (clipped non-playable half-hexes) is done. **Next:** Group close combat, §16.4 Mobile Vehicles
+  (combined wheel+track Bonus Moves — deferred, narrow subtype, no authored unit needs it yet), then
+  M7 (mortars/OBA/smoke).
 
 ---
 
@@ -312,7 +319,7 @@ When in doubt, open `rules/INDEX.md`. Read the file before implementing; cite `N
 | Components, setup, hex labels, counter layout | `data/`, `state.ts` | 1.0–1.1 | `rules/01` |
 | Turn loop, **Spent Check**, **Stress**, Pass, Stall | `turn.ts`, `spent.ts`, `stress.ts`, `actions.ts` | 2.0–2.8 | `rules/02` |
 | CAPs (reduce cost, ±1 d6, 0AP, floor 3, loss) | `cap.ts` | 3.0–3.4, 7.12–7.13 | `rules/03` |
-| Position, facing, stacking, movement, terrain cost, roads, entering | `movement.ts`, `terrain.ts` | 4.0–4.12 | `rules/04` |
+| Position, facing, stacking, movement, terrain cost, roads, **entering the Mission (reinforcements)** | `movement.ts`, `terrain.ts`, `reinforcements.ts`, `reducer.ts` (`ENTER`) | 4.0–4.12 | `rules/04` |
 | Fire Zone: arc, LOS, range | `los.ts`, `range.ts`, `hex.ts` | 5.0–5.3 | `rules/05` |
 | Combat: DR/AR, soft/armored, flank, terrain, walls, **HN=DR−AR**, stacked, close combat, crewed | `combat.ts` | 6.0–6.12 | `rules/06` |
 | Hits, hit markers, critical (+4), 2nd hit, rally, destroyed, CAP loss | `hits.ts`, `rally.ts`, `cap.ts` | 7.0–7.13 | `rules/07` |
@@ -444,7 +451,7 @@ Spent-Check die instead of a remaining-AP pool)*
   move; **group attack** = leader **+1AR per qualifying supporter** (adjacent, target in Fire Zone +
   Normal Range, no FP-affecting hit marker); **group rally** = per-unit Rally Checks, one group
   Spent Check. UI: "Group" mode (multi-select, formation-move arrows, rally, click-enemy attack).
-  *Deferred:* group **close combat**; Mission 1 **reinforcements/edge entry** (stopgap pre-placed).
+  *Deferred:* group **close combat**.
 
 - **M6 — Vehicles + Special Units (§15–16)** ✅: Armored Target hit deck + routing by DR colour;
   vehicle movement (wheeled/tracked terrain costs, impassable/difficult terrain, roads ignore both,

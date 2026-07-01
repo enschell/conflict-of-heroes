@@ -10,7 +10,8 @@ import { NATIONS } from '../data/nations';
 import { SIDE_COLOR } from './theme';
 import { facingVector, type Pt } from './hexgeo';
 
-function code(name: string): string {
+/** Short 3-letter counter code for a unit name, e.g. "Rifles Squad" → "RIF". */
+export function code(name: string): string {
   const n = name.toUpperCase();
   if (n.startsWith('RIFLE')) return 'RIF';
   if (n.startsWith('SMG')) return 'SMG';

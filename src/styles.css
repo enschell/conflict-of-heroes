@@ -198,6 +198,53 @@ button.link {
   margin-left: 0.35rem;
 }
 
+/* ---- reinforcements panel ---- */
+.reinforce__wave {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 0.4rem 0.5rem;
+  margin-bottom: 0.4rem;
+}
+.reinforce__wave:last-child {
+  margin-bottom: 0;
+}
+.reinforce__wave.is-eligible {
+  border-color: #d8b24a;
+}
+.reinforce__cond {
+  font-size: 0.82rem;
+  margin-bottom: 0.35rem;
+}
+.reinforce__units {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+.reinforce__unit {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.85rem;
+}
+.reinforce__badge {
+  flex: 0 0 auto;
+  font-size: 0.65rem;
+  font-weight: 700;
+  color: #1b1b1b;
+  border: 1px solid #0006;
+  border-radius: 3px;
+  padding: 0.05rem 0.3rem;
+  min-width: 2.4em;
+  text-align: center;
+}
+.reinforce__name {
+  color: var(--dim);
+}
+.reinforce__enter {
+  margin-top: 0.4rem;
+  width: 100%;
+}
+
 .stats-grid {
   display: grid;
   grid-template-columns: auto 1fr;
