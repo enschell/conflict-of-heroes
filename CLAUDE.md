@@ -137,11 +137,14 @@ This repo is self-describing: a fresh session needs only the code + these docs.
   German Round 3 SS Tracker (1 Pioneer) within 2 hexes of R01, Soviet Round 2+ reinforcements
   (2 Rifles) at Road Hex R07 — composition/timing verified against the Mission Book's Commander's
   Forces panels. A `ReinforcementsPanel` per side shows each pending wave's units (graphical badge +
-  name) and entry condition, with a one-click "Enter now" once eligible. The old 2nd-ed
-  `FIREFIGHT_1`/`partisans` scaffold is retired. An **Armor Sandbox** test mission
-  (`data/missions/sandbox.ts`) exercises vehicles without touching Mission 1. Board edge rendering
-  (clipped non-playable half-hexes) is done. **Next:** Group close combat, §16.4 Mobile Vehicles
-  (combined wheel+track Bonus Moves — deferred, narrow subtype, no authored unit needs it yet), then
+  name) and entry condition, with a one-click "Enter now" that auto-spreads the whole wave across
+  distinct legal entry hexes. *Future refinement:* manual per-hex placement (click one entry hex at a
+  time per Unit, like Load/Unload's click-to-place) instead of only the auto-spread "enter whole wave"
+  button — not yet built. The old 2nd-ed `FIREFIGHT_1`/`partisans` scaffold is retired. An **Armor
+  Sandbox** test mission (`data/missions/sandbox.ts`) exercises vehicles without touching Mission 1.
+  Board edge rendering (clipped non-playable half-hexes) is done. **Next:** manual per-hex
+  reinforcement placement UI, Group close combat, §16.4 Mobile Vehicles (combined wheel+track Bonus
+  Moves — deferred, narrow subtype, no authored unit needs it yet), then
   M7 (mortars/OBA/smoke).
 
 ---
@@ -243,16 +246,18 @@ conflict-of-heroes/
       actions.ts            # action defs + getLegalActions()  [drop ACTIVATE/MARK_SPENT]
       reducer.ts            # central reduce(state, action) → { state, events }
       groups.ts             # ✅ Group Actions §10: connectivity, support, one Spent Check/group
+      reinforcements.ts     # ✅ M2.5/§4.12: legalEntryHexes (off-Map Units, ENTER)
       cards.ts              # (deferred) Battle/Weapon cards §8
       index.ts              # public engine API surface
       __tests__/            # Vitest
     data/                   # authored content (no logic)
       nations.ts terrainTypes.ts hitMarkers.ts units.ts hexArt.ts
-      maps/mission1.ts   missions/mission1.ts   # Mission 1 "Partisans": Map 1 board + setup
+      maps/mission1.ts   missions/mission1.ts   # Mission 1 "Partisans": Map 1 board + setup + reinforcement waves
+      missions/sandbox.ts   # non-canonical Armor Sandbox test mission (M6)
       cards/                # deferred to the cards milestone
       __tests__/
     state/  store.ts persistence.ts             # Zustand + localStorage saves
-    ui/     …                                   # React + SVG (see §7)
+    ui/     …  ReinforcementsPanel.tsx  …        # React + SVG (see §7)
   scripts/  play.ts conformance.ts              # terminal driver + v3 conformance audit
 ```
 
@@ -270,16 +275,17 @@ conflict-of-heroes/
 ```ts
 GameState = {
   rng: RngState                       // seed + counter; advanced on every roll (incl. Spent Die)
-  phase: 'setup'|'playing'|'roundEnd'|'gameOver'
+  phase: 'setup'|'playing'|'gameOver'
   round: number; roundsTotal: number
-  vpLeader: SideId                    // who currently holds VP Advantage (no-tie track, 9.2)
-  initiativeSide: SideId; currentSide: SideId; consecutivePasses: number
+  vpMarker: number                    // no-tie track (9.2): signed from A's view; >0 A leads, <0 B leads; never 0
+  initiativeSide: SideId; firstInitiativeSide: SideId; currentSide: SideId; consecutivePasses: number
   players: Record<SideId, {
     side: SideId
     nations: NationId[]
     capStart: number; capCurrent: number; unitLosses: number   // capCurrent floored at 3 (7.13)
     vp: number
     hand: CardId[]                    // (cards deferred)
+    passed: boolean
     // NOTE v3: no `activatedUnitId`, no `ap` pool.
   }>
   units: Record<UnitId, {
@@ -287,23 +293,25 @@ GameState = {
     hexId: HexId; facing: 0|1|2|3|4|5
     status: 'fresh'|'spent'           // v3: no 'active'
     stressed: boolean                 // v3: +1AP next Action; cleared by Passing (2.6/2.7)
-    hitMarkers: HitMarker[]           // hidden info per 7.5
+    hitMarkers: HitType[]             // hidden info per 7.5
     assignedWeaponCards: CardId[]
     carriedBy?: UnitId                // loaded onto a transport Vehicle (15.6-15.9, M6)
   }>
   hexes: Record<HexId, {
-    coord: { q: number; r: number }   // axial; label "1-J10" derived for display (1.0)
-    terrainType: TerrainId; elevation: number
-    edges: { walls: EdgeFlags; roads: EdgeFlags }
-    features: { controlMarker?: SideId; smoke?: 0|1|2; fortification?: …; wire?: boolean; mine?: … }
+    coord: { q: number; r: number }   // axial; label "B05"/"I06" derived for display (1.0)
+    terrain: TerrainId; elevation: number; label?: string
+    walls: boolean[]; road: boolean
+    features: { control?: SideId; smoke?: 1|2 }
   }>
   hitPiles: { foot: Record<HitType, number>; vehicle: Record<HitType, number> }  // v3: two decks (15.13)
+  reinforcements: ReinforcementUnit[] // off-Map Units awaiting an ENTER Action (4.12, real from Mission 1)
   missionId: string
   victory: VictoryConfig
   log: GameEvent[]
-  history: { past: GameState[]; future: GameState[] }
+  winner?: SideId | null
 }
 ```
+(`history`/`future` — the undo/redo stacks — live in the Zustand store, not `GameState` itself.)
 
 **Hex coordinates:** internal math is **axial (q,r)**; the rulebook addresses hexes as
 `(Map#)-(ColumnLetter)(Row#)`, e.g. `1-E05` (1.0). Keep a label↔axial mapping in `hex.ts`/map data.
@@ -383,10 +391,12 @@ target's DR colour (blue → vehicle pile, red → foot pile).
     in `data/cards/` (v3 Green/Blue cost, 8.5). Effects are engine actions/modifiers, not UI code.
   - **Add a mission:** new file in `data/missions/` with maps, placements (by hex label), starting
     CAPs per side, rounds, victory config, deck, hidden-unit slots.
-- **Actions** are plain serializable objects: `{ type:'MOVE', unitId, toHexId, capCostReduce? }`,
-  `{ type:'FIRE', attackerId, targetHexId, capDiceMod? }`, `{ type:'RALLY', unitId, capDiceMod? }`,
-  `{ type:'PASS' }`, `{ type:'STALL', unitId }`, `{ type:'GROUP_ACTION', leaderId, memberIds, … }`,
-  `{ type:'PLAY_CARD', cardId, targetUnitIds }`.
+- **Actions** are plain serializable objects (see `engine/types.ts`'s `Action` union for the exact
+  shapes): `MOVE` (unitId, toHexId, optional vehicle `path`, `capCostReduce?`), `PIVOT`, `FIRE`/
+  `CLOSE_COMBAT` (attackerId, targetId, `capDiceMod?`, `capCostReduce?`), `RALLY`, `STALL`, `PASS`;
+  Group Actions `GROUP_MOVE`/`GROUP_ATTACK`/`GROUP_RALLY` (§10); Transport `LOAD`/`UNLOAD` (§15.7/
+  §15.9); reinforcement `ENTER` (`{ placements: {unitId, hexId, facing?}[] }`, §4.12). Cards
+  (`PLAY_CARD`) are deferred, not yet a real action type.
   **Removed in v3:** `ACTIVATE_UNIT`, `MARK_SPENT` (no activation/pool).
 - **Tests:** colocate in `__tests__/`. **Reproduce the v3 red-box examples** from `rules/NN-*.md` as
   fixtures — they are worked rule implementations (Spent Checks, Stress, combat HN, rally, OBA drift,
@@ -432,7 +442,9 @@ Spent-Check die instead of a remaining-AP pool)*
   `missions/mission1.ts` ("Partisans": 5 rounds, 7 CAP/side, German Round-1 initiative, Soviets +1
   VP, objective **I06** = 1 VP/round, 1 VP/kill). Mission 1 is a **Section-1 teaching Mission played
   before cards**, so it uses **no cards** (card subsystem deferred). *(Replaced the earlier invented
-  2nd-ed firefight + `maps/partisans.ts`.)*
+  2nd-ed firefight + `maps/partisans.ts`.)* **M2.5 — Reinforcements (§4.12)** ✅ added later: the
+  German Round-1 platoon, German Round-3 SS Tracker, and Soviet Round-2 reinforcements all enter via
+  the real `ENTER` action (`reinforcements.ts`, `ReinforcementsPanel.tsx`) instead of being pre-placed.
 - **M3 — UI** ✅ Zustand + React/SVG board, counters, inspector, LOS overlay, animated dice + SFX,
   log, setup/victory screens.
 - **M3.1–M3.2 — UX** ✅ per-hex art; stacked-unit picker; SFX; right-sidebar hover panel; hold-Shift
