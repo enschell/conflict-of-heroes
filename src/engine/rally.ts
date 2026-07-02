@@ -5,6 +5,7 @@
  */
 import { HIT_MARKERS } from '../data/hitMarkers';
 import { roll2d6 } from './rng';
+import { smokeRallyBonus } from './smoke';
 import { isCover } from './terrain';
 import type { GameState, RngState, Unit } from './types';
 
@@ -13,6 +14,7 @@ export const RALLY_AP_COST = 5;
 export function rallyModifier(state: GameState, unit: Unit): number {
   let mod = 0;
   if (isCover(state, unit.hexId)) mod += 1;
+  mod += smokeRallyBonus(state, unit.hexId); // §7.8/§14.3
   for (const u of Object.values(state.units)) {
     if (u.id !== unit.id && u.side === unit.side && u.hexId === unit.hexId && u.hitMarkers.length === 0) {
       mod += 1;

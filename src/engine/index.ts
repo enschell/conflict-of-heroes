@@ -30,6 +30,14 @@ export { hasLOS, inArc, canSightTarget, visibleHexesFrom } from './los';
 export { moveCost, directionTo, pivotCost, planVehicleMove } from './movement';
 export { rangeBand, fpRangeModifier } from './range';
 export { rallyModifier, RALLY_AP_COST } from './rally';
+export {
+  bestSpotterFor,
+  directFireZone,
+  indirectFireZone,
+  isValidSpotterHex,
+  rollIndirectFire,
+} from './mortar';
+export { smokeAttackPenalty, smokeDefenseBonus, smokeLosDrBonus, smokeRallyBonus } from './smoke';
 export { finalScores, computeWinner, otherSide, vpLeader, vpMargin, gainVp } from './victory';
 export {
   AXIAL_DIRECTIONS,

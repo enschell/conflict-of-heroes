@@ -11,6 +11,7 @@ import { HIT_MARKERS } from '../data/hitMarkers';
 import { attackContext } from './combat';
 import { idOf, neighbors, parseHexId } from './hex';
 import { effectiveStats, templateOf } from './hits';
+import { bestSpotterFor, directFireZone, indirectFireZone } from './mortar';
 import { RALLY_AP_COST } from './rally';
 import { directionTo, moveCost, pivotCost } from './movement';
 import { legalEntryHexes } from './reinforcements';
@@ -61,6 +62,21 @@ export function modifiedActionCost(state: GameState, action: Action): number | n
     case 'STALL': {
       const u = state.units[action.unitId];
       return u ? 1 + stress(u) : null;
+    }
+    case 'INDIRECT_FIRE': {
+      const u = state.units[action.attackerId];
+      if (!u) return null;
+      const base = templateOf(state, u).indirectApToFire ?? effectiveStats(state, u).apToFire;
+      return base + stress(u);
+    }
+    case 'FIRE_SMOKE': {
+      const u = state.units[action.unitId];
+      if (!u) return null;
+      const tmpl = templateOf(state, u);
+      const base = action.spotterHexId
+        ? (tmpl.indirectApToFire ?? effectiveStats(state, u).apToFire)
+        : effectiveStats(state, u).apToFire;
+      return base + stress(u);
     }
     default:
       return null;
@@ -122,6 +138,48 @@ export function legalActionsForUnit(state: GameState, unitId: UnitId): Action[] 
           // §16.2: a Turreted Vehicle firing outside its Arc pays +2AP.
           const cost = eff.apToFire + (ctx.outOfArc && tmpl.turreted ? 2 : 0);
           if (actionable(cost)) actions.push({ type: 'FIRE', attackerId: unitId, targetId: target.id, ...cr(cost) });
+        }
+      }
+    }
+  }
+
+  // Mortar Indirect Attack (§13.2): one action per enemy-occupied Hex (an
+  // Attack needs something to attack).
+  if (eff.canFire && !carried && tmpl.attackMode !== 'none' && tmpl.kind === 'mortar') {
+    const enemyHexIds = new Set(
+      Object.values(state.units)
+        .filter((u) => u.side !== unit.side && u.hexId !== unit.hexId)
+        .map((u) => u.hexId),
+    );
+    for (const targetHexId of enemyHexIds) {
+      const spotterHexId = bestSpotterFor(state, unit, targetHexId);
+      if (!spotterHexId) continue;
+      const zone = indirectFireZone(state, unit, targetHexId, spotterHexId, tmpl.minRange ?? 0);
+      if (!zone.legal) continue;
+      const cost = tmpl.indirectApToFire ?? eff.apToFire;
+      if (actionable(cost)) {
+        actions.push({ type: 'INDIRECT_FIRE', attackerId: unitId, targetHexId, spotterHexId, ...cr(cost) });
+      }
+    }
+  }
+
+  // Fire Smoke (§14.0): unlike an Attack, this targets terrain, not a Unit —
+  // "any Hex except Water," occupied or not (e.g. to screen your own advance).
+  if (eff.canFire && !carried && tmpl.attackMode !== 'none' && tmpl.canFireSmoke) {
+    for (const targetHexId of Object.keys(state.hexes)) {
+      if (state.hexes[targetHexId]!.terrain === 'water') continue;
+      const dz = directFireZone(state, unit, targetHexId, tmpl.minRange ?? 0);
+      if (dz.legal) {
+        if (actionable(eff.apToFire))
+          actions.push({ type: 'FIRE_SMOKE', unitId, targetHexId, ...cr(eff.apToFire) });
+        continue;
+      }
+      if (tmpl.kind === 'mortar') {
+        const spotterHexId = bestSpotterFor(state, unit, targetHexId);
+        if (spotterHexId && indirectFireZone(state, unit, targetHexId, spotterHexId, tmpl.minRange ?? 0).legal) {
+          const cost = tmpl.indirectApToFire ?? eff.apToFire;
+          if (actionable(cost))
+            actions.push({ type: 'FIRE_SMOKE', unitId, targetHexId, spotterHexId, ...cr(cost) });
         }
       }
     }

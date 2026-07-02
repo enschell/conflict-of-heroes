@@ -3,6 +3,7 @@ import { useGame } from '../state/store';
 import { hasAuto } from '../state/persistence';
 import { MISSION_1 } from '../data/missions/mission1';
 import { ARMOR_SANDBOX } from '../data/missions/sandbox';
+import { FIRE_SUPPORT_SANDBOX } from '../data/missions/fireSupportSandbox';
 
 export function SetupScreen() {
   const newGame = useGame((s) => s.newGame);
@@ -25,6 +26,7 @@ export function SetupScreen() {
             Start Mission 1
           </button>
           <button onClick={() => newGame(ARMOR_SANDBOX)}>Armor Sandbox (test)</button>
+          <button onClick={() => newGame(FIRE_SUPPORT_SANDBOX)}>Fire Support Sandbox (test)</button>
           {canResume && (
             <button onClick={resume}>Resume autosave</button>
           )}

@@ -239,6 +239,16 @@ button.link {
 }
 .reinforce__name {
   color: var(--dim);
+  flex: 1 1 auto;
+}
+.reinforce__place {
+  flex: 0 0 auto;
+  font-size: 0.72rem;
+  padding: 0.1rem 0.4rem;
+}
+.reinforce__place.is-active {
+  border-color: #c77dff;
+  color: #c77dff;
 }
 .reinforce__enter {
   margin-top: 0.4rem;

@@ -13,14 +13,7 @@
 Mortar Units are teams of 2–6 men that fire High Explosive
 shells. Some are able to fire indirectly at Targets they
 cannot see.
-Attack Cost
-Direct
-Indirect
-High 10
-Explosive
-3-16 13
-Minimum Range
-Range
+[IMAGE: unit and stats not OCR'd — see source PDF p.25, left column]
 A Mortar Unit is a specialized Unit that may:
 • Make a Direct Attack on a Target Hex that is in its LOS
 using its Direct Attack Cost.
@@ -58,12 +51,7 @@ Spotters had to be relatively nearby to signal or call
 instructions to the mortar team, since very few teams had
 radios at that time.
 
-Artillery
-Spotter 40
-Hex
-Indirect
-LOS
-3 - 3
+[IMAGE: map and units not OCR'd - illustrates Spotter Hex and Indirect LOS possibilities — see source PDF p.25, right column]
 Mortar Attack
 A Soviet Mortar is positioned on a L0 Ground Hex behind
 a L2 Hill and wishes to fire indirectly at the German HMG.
@@ -76,11 +64,9 @@ and the Target, so the Target is not in a Blind Spot.
 The Target Hex is 7 Hexes away from the Mortar, which is
 not closer than its 3 Hex Minimum Range or further than its
 Long Range.
-BBlliinndd
-SSppoottss
-SSppootttteerr
-HHeexx
-1 3-18 13
+
+[IMAGE: map and units OCR'd - illustrates Spotter Hex and Blind Spots — see source PDF p.25, right column]
+
 The Mortar rounds are High Explosive (13.9) , so the MG34’s
 Flank Defense is attacked:
 10 Flank Def = 10DR
@@ -96,18 +82,13 @@ It rolls a 2, becomes Spent, and is Stressed.
 ## 13.4 Off-Board Artillery
 
 Off-Board Artillery (OBA) is represented
-Divisional Artillery
-by Artillery Weapon Cards that are 10,5cm Howitzer 18
+[IMAGE: card on right of text not OCR'd -- illustrates Divisional Artillery card and what it does — see source PDF p.26, left column]
+by Artillery Weapon Cards that are 
 available to players in specific Missions.
 The Mission will specify during which
 Rounds each player may use OBA. OBA is
-planned during the Pre-Round Sequence Plan artillery strike
-during this pre-round
-and resolved in a later Round. sequence. Fire for effect
-(9.4) during next pre-round sequence.
-Artillery affects target hex and
-6 surrounding hexes.
-AYG 5011
+planned during the Pre-Round Sequence (9.4)
+and resolved in a later Round. 
 
 ## 13.5 Plan an OBA Strike
 
@@ -185,14 +166,16 @@ based on the Elevation of its Spotter Hex (rather than |
 the Elevation of its own Hex).
 ill
 • High Explosive (HE) Bonus: Mortar and Artillery e
-Attacks are always resolved against soft and armored y
+Attacks are always resolved against soft and armored 
 Target Flank Defenses.
 • Air Bursts: Units with red Flank Defense do not
 receive a Heavy Woods +2DR Defensive Terrain Bonus
 when attacked by High Explosive Mortar or Artillery.
+
 When artillery shells hit dense tree cover, the shells would
 burst in the air, sending shell and tree fragments raining
 down upon soldiers, causing devastating damage.
+[Example:
 Artillery Strike
 Both players have Passed consecutively and Round 2 ends.
 They proceed through Round 3’s Pre-Round Sequence.
@@ -203,24 +186,20 @@ plan an OBA Strike now, for execution in Round 4. They
 declare they are planning a Strike and secretly write down
 Target Hex 4-J08 A , predicting that this is the area the
 Soviet convoy will occupy at the end of the Round 3.
-11 21 2 - -
+[IMAGE: map with units not OCR'd -- illustrates possible hexes artillery could drift to and Target Hex A — see source PDF p.27, left column]
 o At the end of the Round 3, the Soviet
-m 1
-S convoy has reached the predicted Hex A .
+[IMAGE: Drift counter not OCR'd -- illustrates Artillery Marker with possible direction of drift on a die 6 roll — see source PDF p.27, left column]
+convoy has reached the predicted Hex A.
 During Round 4's Pre-Round Sequence, the
-41 Germans reveal that they targeted Hex J08 5 3
-and place the Artillery Marker on this Hex. 4
+Germans reveal that they targeted Hex J08
+and place the Artillery Marker on this Hex. 
 The Germans then resolve a 1d6 Drift Check to determine
 if they hit the Target Hex. They need a 3 or higher to strike
 on target and roll a 2, resulting in the OBA Strike missing
 and drifting 2 Hexes from the Target Hex.
 Note, the Germans could have spent 2CAPs to lower their
 Drift Check Number to 1, guaranteeing an on-Target hit.
-1 B
--2 11
--2 5 0 11 3
--2 11
--2 3 0 11 11
+[IMAGE: map with units and Artillery Markers not OCR'd -- illustrates possible hexes artillery could drift to, predicted Hex A and drift hex B — see source PDF p.27, left column]
 Next, the Germans roll a Direction Check and again roll a
 2. The #2 on the Artillery Marker directs the Strike to drift
 northeast two Hexes B , striking their own HMG!
@@ -233,7 +212,7 @@ The Germans decide to spend 2 CAPs to increase their
 Hit Number to 7 to reduce the probability of scoring a hit
 against their own Unit. They roll a 3 – a miss, and breathe
 a sigh of relief!
-
+]
 
 ---
 
@@ -246,7 +225,7 @@ a sigh of relief!
 
 ## Example (red box) — Indirect Mortar Attack
 
-A Soviet Mortar on L0 behind an L2 Hill fires indirectly at a German HMG. **Spotter Hex (A)** is on the L2 hilltop (within 2 hexes, clear LOS); being on L2 it sees **over** the intervening L1 Woods, and an Open hex past the Woods keeps the target **out of a Blind Spot**. Target is **7 hexes** away — past the 3-hex Minimum, within Range. Mortar rounds are **HE, so the HMG's Flank Defense applies (13.9)** → `10 Flank = 10DR`. AR = `3 FP + 1AR (Spotter on high ground, 13.3) = 4AR`. `10 − 4 = 6`; roll 8 → Hit, HMG draws a Hit Marker. Then a **4AP Indirect** Spent Check; roll 2 → Spent, Stressed.
+A Soviet Mortar on L0 behind an L2 Hill fires indirectly at a German HMG. **Spotter Hex (A)** is on the L2 hilltop (within 2 hexes of mortar, clear LOS); being on L2 it sees **over** the intervening L1 Woods, and an Open hex past the Woods keeps the target **out of a Blind Spot**. Target is **7 hexes** away — past the 3-hex Minimum, within Range. Mortar rounds are **HE, so the HMG's Flank Defense applies (13.9)** → `10 Flank = 10DR`. AR = `3 FP + 1AR (Spotter on high ground, 13.3) = 4AR`. `10 − 4 = 6`; roll 8 → Hit, HMG draws a Hit Marker. Then a **4AP Indirect** Spent Check; roll 2 → Spent, Stressed.
 
 ### Off-Board Artillery (OBA)
 - **13.4:** OBA = **Artillery Weapon Cards** available in specific Missions; planned in the **Pre-Round Sequence (9.4)** and resolved a Round later.

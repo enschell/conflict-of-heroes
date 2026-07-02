@@ -6,6 +6,9 @@ import { fileURLToPath, URL } from 'node:url';
 // https://vite.dev/config/ — defineConfig from vitest/config also types the `test` field
 export default defineConfig({
   plugins: [react()],
+  server: {
+    port: process.env.PORT ? Number(process.env.PORT) : 5173,
+  },
   resolve: {
     alias: {
       '@engine': fileURLToPath(new URL('./src/engine', import.meta.url)),

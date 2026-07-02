@@ -128,6 +128,27 @@ export const GERMAN_UNITS: UnitTemplate[] = [
     propulsion: 'wheeled',
   },
   {
+    // M7 (§13, §14): 8cm Granatwerfer 34. Crew-served (whiteBoxFp: −2AR in CC,
+    // §13.1). Direct Attack Cost = `apToFire`; Indirect = `indirectApToFire`.
+    // Min Range 2 (§13.1/§13.2). Stats are ours — the printed rulebook table
+    // (rules/13, p.25) was OCR-garbled beyond reliable transcription.
+    id: 'ger-mortar',
+    nation: 'germans',
+    name: '8cm Mortar',
+    kind: 'mortar',
+    whiteBoxFp: true,
+    fp: { red: 4, blue: 0 },
+    dr: { front: 11, flank: 10, color: 'red' },
+    move: 1,
+    range: 12,
+    minRange: 2,
+    apToFire: 3,
+    indirectApToFire: 4,
+    vp: 2,
+    unburdened: false,
+    canFireSmoke: true,
+  },
+  {
     // §16.5/§16.6 Open-Topped APC: transports a foot Unit with +2DR (apcTransport),
     // but its own open top pulls a Soft Target marker vs red-FP Close Combat.
     id: 'ger-sdkfz251',
@@ -224,6 +245,25 @@ export const SOVIET_UNITS: UnitTemplate[] = [
     propulsion: 'tracked',
     bonusMoves: 2,
     turreted: true, // §16.2 — the T-34's 360° turret can fire outside its Arc for +2AP
+  },
+  {
+    // M7 (§13, §14): 82mm mortar. Crew-served (whiteBoxFp: −2AR in CC, §13.1).
+    // Stats are ours — see the ger-mortar note above.
+    id: 'sov-mortar',
+    nation: 'soviets',
+    name: '82mm Mortar',
+    kind: 'mortar',
+    whiteBoxFp: true,
+    fp: { red: 5, blue: 0 },
+    dr: { front: 11, flank: 10, color: 'red' },
+    move: 1,
+    range: 14,
+    minRange: 2,
+    apToFire: 3,
+    indirectApToFire: 4,
+    vp: 2,
+    unburdened: false,
+    canFireSmoke: true,
   },
   {
     // §16.1 Truck: Wheeled, cannot control a Hex, destroyed doesn't reduce CAPs

@@ -36,7 +36,7 @@ the engine hangs off. Everything below is the plan we cut over by.
 | **CAPs** | supplement AP / CAP action / ≤2 dice mod / track loss | reduce Action Cost **before** a Spent Check (**any number, −1 each**); 0AP ⇒ **no check**; ±1 d6 (≤2); lost on death; **floor of 3** | 3.0–3.4, 7.12, 7.13 |
 | **Combat math** | `AV = FP + 2d6 + CAP ≥ DV`, crit at `+4` | `Hit Number = DR − AR`; `2d6 ≥ Hit Number`; crit by 4 | 6.0, 6.8 |
 | **Initiative** | both sides roll 2d6, higher first (reroll ties) | **only the side WITHOUT VP Advantage** rolls 2d6; **≥ 7 ⇒ goes first**, else opponent does | 9.11 |
-| **Round reset** | flip spent→fresh; CAP = start − losses | adds: **CAP floor 3**, clear Stress, (later) smoke dissipation + artillery steps | 9.4–9.7 |
+| **Round reset** | flip spent→fresh; CAP = start − losses | adds: **CAP floor 3**, clear Stress, **Smoke dissipation** (M7), (later) OBA resolution | 9.4–9.7 |
 | **Groups** | planned as "shared activation / 7AP firegroup" (**not built**) | **Group Actions**: one Action, **one** Spent Check for the group; group move cost = **highest** member; group attack = leader **+1AR per supporter** | 10.0–10.12 |
 
 > **Algebra note (good news):** v2's `AV = FP + 2d6 ≥ DV` is identical to v3's `2d6 ≥ DR − AR`
@@ -138,14 +138,69 @@ This repo is self-describing: a fresh session needs only the code + these docs.
   (2 Rifles) at Road Hex R07 — composition/timing verified against the Mission Book's Commander's
   Forces panels. A `ReinforcementsPanel` per side shows each pending wave's units (graphical badge +
   name) and entry condition, with a one-click "Enter now" that auto-spreads the whole wave across
-  distinct legal entry hexes. *Future refinement:* manual per-hex placement (click one entry hex at a
-  time per Unit, like Load/Unload's click-to-place) instead of only the auto-spread "enter whole wave"
-  button — not yet built. The old 2nd-ed `FIREFIGHT_1`/`partisans` scaffold is retired. An **Armor
-  Sandbox** test mission (`data/missions/sandbox.ts`) exercises vehicles without touching Mission 1.
-  Board edge rendering (clipped non-playable half-hexes) is done. **Next:** manual per-hex
-  reinforcement placement UI, Group close combat, §16.4 Mobile Vehicles (combined wheel+track Bonus
-  Moves — deferred, narrow subtype, no authored unit needs it yet), then
-  M7 (mortars/OBA/smoke).
+  distinct legal entry hexes, **or** a one-Unit-at-a-time manual placement (a "Place" button per
+  pending Unit arms placement mode; the board highlights that Unit's legal entry Hexes in purple;
+  clicking one commits a single-Unit `ENTER` there, matching Load/Unload's click-to-place feel;
+  "Cancel" or any click on a non-highlighted Hex aborts without side effects). The old 2nd-ed
+  `FIREFIGHT_1`/`partisans` scaffold is retired. An **Armor Sandbox** test mission
+  (`data/missions/sandbox.ts`) exercises vehicles without touching Mission 1. Board edge rendering
+  (clipped non-playable half-hexes) is done.
+
+  **M7 — Mortars + Smoke (§13–14) — engine DONE, UI partial:** `kind: 'mortar'` templates
+  (`minRange`, `indirectApToFire`, `canFireSmoke`) fire High Explosive (`combat.ts`'s shared
+  `attackContext` forces Flank DR for any mortar, §13.9), enforce Minimum Range, and apply the Air
+  Burst exception (a red-Flank target loses the Heavy Woods +2DR bonus vs HE). Direct Attacks reuse
+  the existing `FIRE` action/UI as-is. **Indirect Attacks** are a new `mortar.ts` module + `INDIRECT_FIRE`
+  action (§13.2–§13.3): a Spotter Hex (within 2, clear LOS of the Mortar) supplies LOS to a Target
+  Hex the Mortar can't see itself, while Arc/Min/Max Range stay keyed to the Mortar's own Hex; Elevation
+  Combat Bonus from the Spotter is deferred to 0 pending Hills (M9), same as `movement.ts`'s existing
+  deferral. **Smoke** (`smoke.ts`) is a real Hex feature: Heavy (+2DR defend / −2AR attack, blocks LOS
+  outright) and Light (+1/−1, doesn't block alone but 2+ Light Hexes on a LOS path do, and a single one
+  adds +1DR); a Rally +1 bonus (§7.8); dissipation each Pre-Round Sequence (Heavy→Light, Light→removed,
+  wired into `turn.ts`). A new `FIRE_SMOKE` action places Heavy Smoke instead of attacking (Direct or
+  Indirect targeting, §14.1) — targets **any non-Water Hex, occupied or not** (§14.0: it's terrain,
+  not a Unit, so screening your own empty advance route is a legal target, not just an enemy Hex).
+  A non-canonical **Fire Support Sandbox** test mission
+  (`data/missions/fireSupportSandbox.ts`) gives each side a Mortar+Rifle pair separated by Heavy Woods,
+  so Indirect Attacks are exercised (not just theoretically legal) without touching Mission 1. Covered
+  by `mortar.test.ts`, `smoke.test.ts`, `fire-smoke-indirect.test.ts` (236 tests total, 0 conformance
+  violations). **UI ✅:** clicking an enemy Hex a Mortar can reach only indirectly (or that it can
+  Smoke) offers `⤳ Indirect Fire` / `☁ Fire Smoke` in the same `ActionChooser` popup used for the
+  Move-vs-Attack ambiguity (§5.4-style), auto-picks its Spotter Hex the same way `legalActionsForUnit`
+  already does (the first legal one via `bestSpotterFor`), then runs the normal CAP-confirm gate +
+  dice-roll flow (Fire Smoke skips the roll — it just places the Marker). The Board outlines any Hex a
+  Mortar can reach — Fire, Indirect Fire, or Fire Smoke alike — with the same solid red `#ff5a5a`
+  stroke as a normal Fire target (a dashed orange/grey variant per action type was tried first and
+  found too hard to see; solid + one shared color won). It also renders an actual Smoke Marker overlay
+  on any Hex that has one (translucent haze, denser for Heavy) — `HoverPanel` reports a Hex's Smoke
+  level too. **The
+  auto-picked Spotter Hex is the locked final design, not a stopgap** — §13.3 places no requirement on
+  *which* legal Spotter Hex is used (only that one exists), so there's no player choice to expose; a
+  manual picker was considered and deliberately rejected. If no legal Spotter Hex exists (within 2 of
+  the Mortar, clear LOS to the Mortar, clear LOS to the Target), the Hex simply isn't a legal Indirect
+  target — `bestSpotterFor` returns `undefined` and no action is offered. Min/Max Range and Arc of
+  Fire are always measured from the **Mortar's own Hex**, never the Spotter's — verified line-by-line
+  in `mortar.ts`'s `indirectFireZone`/`bestSpotterFor`.
+  **OBA (§13.4–13.9) is explicitly deferred**, not attempted: it's specified as "Artillery
+  Weapon Cards," and building a parallel non-card OBA planning/drift mechanic now would likely be
+  thrown away once the real Cards subsystem (§8, M12) lands — OBA should be built together with cards,
+  not ahead of them. **Group Close Combat (§10.6) is done**, closing the M5 gap: `GROUP_ATTACK` now
+  branches on `target.hexId === leader.hexId` — Close Combat resolves via `closeCombatContext`/
+  `rollCloseCombat` (now `arBonus`-aware) against the one chosen target, not a hex-wide stacked shot;
+  `isValidSupporter` restricts Close-Combat support to Units sharing the Leader's hex (a Truck,
+  `closeCombatOnly`, may lead or support one — only a Wagon, `attackMode:'none'`, still can't). A live
+  click-through of it then surfaced two real `store.ts` bugs (now fixed, see §8's Group Close Combat
+  entry for the detail): `groupAttack` used to dispatch instantly with no dice-roll preview and no
+  CAP-confirm, and the board-click Group-selection logic couldn't add a Spent Unit to a Group at all
+  (not just missing a confirm — fully unreachable), which is why Group Move looked "not implemented."
+  Both fixed via a new `groupCapGate`/`requestGroupAttackRoll` (mirroring the single-unit `capGate`/
+  roll-preview flow) and a `confirmPrecomputedCap` helper for Load/Unload. **M8 Hidden Units (§11) is
+  deliberately deferred to online play** (locked decision) — it's secret per-side information, which a
+  shared hotseat screen fundamentally can't enforce; see §8's M8 entry. The Mortar's auto-picked
+  Spotter Hex is likewise a **locked design decision, not a gap** — no manual picker; §13.3 places no
+  requirement on which valid Spotter Hex is used, and Min/Max Range/Arc always come from the Mortar's
+  own Hex regardless. **Next:** §16.4 Mobile Vehicles (deferred, narrow subtype), then M9+ per the
+  roadmap below.
 
 ---
 
@@ -247,13 +302,16 @@ conflict-of-heroes/
       reducer.ts            # central reduce(state, action) → { state, events }
       groups.ts             # ✅ Group Actions §10: connectivity, support, one Spent Check/group
       reinforcements.ts     # ✅ M2.5/§4.12: legalEntryHexes (off-Map Units, ENTER)
-      cards.ts              # (deferred) Battle/Weapon cards §8
+      mortar.ts             # ✅ M7/§13: Direct/Indirect Attack fire zones, Spotter Hex, rollIndirectFire
+      smoke.ts              # ✅ M7/§14: Heavy/Light DR/AR, LOS-path bonus, Rally bonus, dissipation
+      cards.ts              # (deferred) Battle/Weapon cards §8; OBA (§13.4-13.9) waits on this too
       index.ts              # public engine API surface
       __tests__/            # Vitest
     data/                   # authored content (no logic)
       nations.ts terrainTypes.ts hitMarkers.ts units.ts hexArt.ts
       maps/mission1.ts   missions/mission1.ts   # Mission 1 "Partisans": Map 1 board + setup + reinforcement waves
       missions/sandbox.ts   # non-canonical Armor Sandbox test mission (M6)
+      missions/fireSupportSandbox.ts  # non-canonical Fire Support Sandbox test mission (M7)
       cards/                # deferred to the cards milestone
       __tests__/
     state/  store.ts persistence.ts             # Zustand + localStorage saves
@@ -262,10 +320,11 @@ conflict-of-heroes/
 ```
 
 > **Current state:** engine/data/state/ui/scripts compile and pass under **3rd-ed (v3) rules** — the
-> §A cutover is complete, **M5 Group Actions** is built, and **M6 Vehicles + Special Units** is built
-> (conformance 0 violations). Data is the real **Mission 1** on **`maps/mission1.ts`** +
-> **`missions/mission1.ts`** (the 2nd-ed `firefights/`/`maps/partisans.ts` are deleted), plus the
-> non-canonical **`missions/sandbox.ts`** for exercising vehicles. `rules/` is the committed source
+> §A cutover is complete, **M5 Group Actions** is built, **M6 Vehicles + Special Units** is built, and
+> **M7 Mortars + Smoke engine** is built (conformance 0 violations). Data is the real **Mission 1** on
+> **`maps/mission1.ts`** + **`missions/mission1.ts`** (the 2nd-ed `firefights/`/`maps/partisans.ts` are
+> deleted), plus the non-canonical **`missions/sandbox.ts`** (vehicles) and
+> **`missions/fireSupportSandbox.ts`** (mortars/smoke) test missions. `rules/` is the committed source
 > of truth.
 
 ---
@@ -336,8 +395,8 @@ When in doubt, open `rules/INDEX.md`. Read the file before implementing; cite `N
 | **Group Actions** (one Spent Check; group move = highest; attack = leader +1AR/supporter) | `groups.ts` *(M5)* | 10.0–10.12 | `rules/10` |
 | *(later)* hidden units | — | 11.x | `rules/11` |
 | *(later)* hills / elevation / LOS-over-levels | — | 12.x | `rules/12` |
-| *(later)* mortars / artillery / OBA / drift | — | 13.x | `rules/13` |
-| *(later)* smoke | — | 14.x | `rules/14` |
+| Mortars: Direct/Indirect Attack, Spotter Hex, HE/Air Burst; *(later)* OBA/drift (pending Cards, M12) | `combat.ts`, `mortar.ts` *(M7)* | 13.0–13.3, 13.9 | `rules/13` |
+| Smoke: DR/AR, LOS blocking, Rally bonus, dissipation | `smoke.ts`, `los.ts`, `turn.ts`, `rally.ts` *(M7)* | 14.x | `rules/14` |
 | **Vehicles**: movement (wheeled/tracked, Bonus Moves), combat specifics, Transport/Towing; *(later)* Towing damaged Vehicles (§15.10) | `movement.ts`, `combat.ts`, `hits.ts`, `reducer.ts` *(M6)* | 15.x | `rules/15` |
 | **Special units**: Turreted, Open-Topped, APC Transport Bonus, Trucks/Wagons, Field Guns; *(later)* Mobile Vehicles (§16.4) | `combat.ts`, `reducer.ts`, `actions.ts`, `victory.ts` *(M6)* | 16.x | `rules/16` |
 | *(later)* fortifications / trenches / bunkers / obstacles / mines | — | 17.x | `rules/17` |
@@ -386,7 +445,11 @@ target's DR colour (blue → vehicle pile, red → foot pile).
     `openTopped?` (red Flank DR + Soft marker vs red-FP CC), `apcTransport?` (+2DR for a carried Soft
     Target), `cannotControlHex?`/`noCapLossOnDestroy?`/`attackMode?:'closeCombatOnly'|'none'` (Trucks/
     Wagons, §16.1). Field Guns (§16.7) are just `kind:'gun'` + `propulsion:'wheeled'` — already towable
-    since Load's damage precondition only applies to `kind:'vehicle'`.
+    since Load's damage precondition only applies to `kind:'vehicle'`. **Mortars (§13, M7):**
+    `kind:'mortar'` templates add `minRange?` (Minimum Range) and `indirectApToFire?` (Indirect Attack
+    Cost, separate from `apToFire`'s Direct cost); every `kind:'mortar'` automatically fires HE (always
+    vs Flank DR, Air Burst exception) via `combat.ts`, no extra flag needed. `canFireSmoke?` (any kind)
+    marks a Unit that may `FIRE_SMOKE` (§14.0: 80mm+ mortars, Artillery Cards, Pioneers, some Tanks).
   - **Add a card:** `{ id, type:'action'|'bonus'|'mission'|'artillery', cost:{green?,blue?}, effect }`
     in `data/cards/` (v3 Green/Blue cost, 8.5). Effects are engine actions/modifiers, not UI code.
   - **Add a mission:** new file in `data/missions/` with maps, placements (by hex label), starting
@@ -395,8 +458,10 @@ target's DR colour (blue → vehicle pile, red → foot pile).
   shapes): `MOVE` (unitId, toHexId, optional vehicle `path`, `capCostReduce?`), `PIVOT`, `FIRE`/
   `CLOSE_COMBAT` (attackerId, targetId, `capDiceMod?`, `capCostReduce?`), `RALLY`, `STALL`, `PASS`;
   Group Actions `GROUP_MOVE`/`GROUP_ATTACK`/`GROUP_RALLY` (§10); Transport `LOAD`/`UNLOAD` (§15.7/
-  §15.9); reinforcement `ENTER` (`{ placements: {unitId, hexId, facing?}[] }`, §4.12). Cards
-  (`PLAY_CARD`) are deferred, not yet a real action type.
+  §15.9); reinforcement `ENTER` (`{ placements: {unitId, hexId, facing?}[] }`, §4.12); Mortar
+  `INDIRECT_FIRE` (attackerId, targetHexId, spotterHexId, §13.2) and `FIRE_SMOKE` (unitId, targetHexId,
+  optional spotterHexId for Indirect, §14.1). Cards (`PLAY_CARD`) are deferred, not yet a real action
+  type.
   **Removed in v3:** `ACTIVATE_UNIT`, `MARK_SPENT` (no activation/pool).
 - **Tests:** colocate in `__tests__/`. **Reproduce the v3 red-box examples** from `rules/NN-*.md` as
   fixtures — they are worked rule implementations (Spent Checks, Stress, combat HN, rally, OBA drift,
@@ -463,7 +528,7 @@ Spent-Check die instead of a remaining-AP pool)*
   move; **group attack** = leader **+1AR per qualifying supporter** (adjacent, target in Fire Zone +
   Normal Range, no FP-affecting hit marker); **group rally** = per-unit Rally Checks, one group
   Spent Check. UI: "Group" mode (multi-select, formation-move arrows, rally, click-enemy attack).
-  *Deferred:* group **close combat**.
+  **Group Close Combat (§10.6)** landed later (see M7's entry below) — `GROUP_ATTACK` now covers both.
 
 - **M6 — Vehicles + Special Units (§15–16)** ✅: Armored Target hit deck + routing by DR colour;
   vehicle movement (wheeled/tracked terrain costs, impassable/difficult terrain, roads ignore both,
@@ -479,12 +544,72 @@ Spent-Check die instead of a remaining-AP pool)*
   (`apcTransport`); Trucks/Wagons cannot control a Hex, don't reduce the CAPs Track when destroyed,
   and are Close-Combat-only / no-attack (`cannotControlHex`, `noCapLossOnDestroy`, `attackMode`).
   `Armor Sandbox` (`data/missions/sandbox.ts`) is a non-canonical test mission (turreted tank + rifle
-  /side on Map 1). *Deferred:* §16.4 Mobile Vehicles (combined wheel+track Bonus Moves — narrow
-  subtype, no authored unit needs it).
-- **Later (additive, v3 order):** M7 mortars/OBA/smoke (§13–14) → M8 hidden units (§11) → M9
-  elevation/hills (§12) → M10 fortifications/obstacles/mines (§17) → M11 flamethrowers/pioneers (§18)
-  → M12 cards (§8) → **M13 online multiplayer** (host the pure engine authoritatively + WebSocket
-  rooms; the client already speaks action objects).
+  /side on Map 1; two extra German rifles were added later, each one Hex from the Soviet rifle, for a
+  quick Group Close Combat click-through — see §10.6 below). *Deferred:* §16.4 Mobile Vehicles
+  (combined wheel+track Bonus Moves — narrow subtype, no authored unit needs it).
+
+- **M7 — Mortars + Smoke (§13–14) — engine + UI ✅ (Spotter picker deferred):** `mortar.ts` — Direct
+  Attacks reuse `FIRE` (min-range denial + HE-always-Flank-DR + Air Burst folded into `combat.ts`'s
+  `attackContext` for any `kind: 'mortar'`); Indirect Attacks are a new `INDIRECT_FIRE` action resolved
+  via a Spotter Hex (within 2, clear LOS of the Mortar) that supplies LOS while Arc/Range stay keyed to
+  the Mortar's own Hex (Spotter Elevation Bonus deferred to 0 pending Hills, M9). `smoke.ts` — Heavy/
+  Light DR/AR modifiers, LOS blocking (Heavy always; 2+ Light Hexes on a path; a lone Light Hex adds
+  +1DR instead), a Rally +1 bonus, and Pre-Round dissipation (`turn.ts`); a new `FIRE_SMOKE` action
+  (Direct or Indirect) places Heavy Smoke instead of attacking — legal on any non-Water Hex whether or
+  not a Unit occupies it (§14.0: it targets terrain, so screening an empty advance route is legal, not
+  just enemy Hexes — `legalActionsForUnit` enumerates every reachable non-Water Hex, not just
+  enemy-occupied ones). UI: `ActionChooser` offers `⤳ Indirect Fire`/`☁ Fire Smoke` alongside Move/
+  Fire/Close-Combat when a clicked Hex affords them, auto-picking a
+  Spotter Hex (`bestSpotterFor`) through the normal CAP-gate + dice-roll flow; the Board outlines every
+  Hex a Mortar can reach — Fire, Indirect Fire, or Fire Smoke — in the same solid red as a normal Fire
+  target (a per-action dashed color coding was tried first and wasn't visible enough), and renders an
+  actual haze overlay on Hexes that currently have Smoke (`HoverPanel` reports the level too). `Fire
+  Support Sandbox`
+  (`data/missions/fireSupportSandbox.ts`) is a non-canonical test mission (Mortar+Rifle/side, separated
+  by Heavy Woods so Indirect Fire is actually exercised) — both flows verified end-to-end in-browser.
+  *Deferred, on purpose:* **OBA (§13.4–13.9)** — it's specified as Artillery Weapon Cards, so it waits
+  for the real Cards subsystem (§8, M12) rather than getting a throwaway parallel mechanic now. The
+  auto-picked Spotter Hex (locked decision — no manual picker; §13.3 doesn't care which valid Spotter
+  Hex is used) always measures Min/Max Range and Arc from the Mortar's own Hex, never the Spotter's.
+
+- **Group Close Combat (§10.6)** ✅ closes the M5 gap: `GROUP_ATTACK` branches on
+  `target.hexId === leader.hexId` — Close Combat resolves via `closeCombatContext`/`rollCloseCombat`
+  (both gained an `arBonus` param) against the ONE chosen target (not a hex-wide stacked shot, unlike
+  ranged Group Attack). `isValidSupporter` (`groups.ts`) restricts Close-Combat support to Units
+  sharing the Leader's hex (§10.6); a Truck (`attackMode:'closeCombatOnly'`) may lead or support one
+  (only `attackMode:'none'`, Wagons, still can't) — the old blanket "Trucks can't support any Group
+  Attack" exclusion only ever applied to the *ranged* case. Covered by 4 new tests in `groups.test.ts`.
+  Reused the two extra German rifles now in `Armor Sandbox` (see below) for a live click-through.
+
+  **That click-through surfaced two real store.ts bugs, since fixed (§3.4/§10.1):** (1) `groupAttack`
+  used to `dispatch` a `GROUP_ATTACK` straight away with **no dice-roll preview and no CAP-confirm** —
+  unlike single-unit Fire/Close Combat, it just resolved instantly with no chance to see odds or
+  cancel. Fixed with `requestGroupAttackRoll` (branches ranged/CC, mirrors `requestFireRoll`/
+  `requestCcRoll`) and a new `groupCapGate` helper (mirrors `capGate` but for a member list). (2) The
+  board-click Group-selection logic (`hexClick`'s `groupMode` branch) filtered to `status==='fresh'`
+  only, so a Spent Unit could never even be **added** to a Group at all — not a missing confirm, fully
+  unreachable, which is why the user's Group Move test "didn't seem implemented." Broadened to accept
+  Spent Units too; `groupMove`/`groupRally` now route through `groupCapGate` as well, and `load`/
+  `unload` (which already baked the right `capCostReduce` into their precomputed action) gained a
+  matching `confirmPrecomputedCap` step. Both fixes verified live (Armor Sandbox: Group Close Combat
+  showed the roll dialog; a two-Spent-member Group Move showed "Spend 3 CAP... CAP 7 → 4" and resolved
+  correctly at 0AP). Test coverage stayed at the engine layer (reducer already had this right) — these
+  were pure `store.ts`/UI-wiring bugs, not rules bugs.
+- **M8 — Hidden Units (§11) — DEFERRED to online play, on purpose, locked decision:** Hidden Units
+  are fundamentally secret-information state — one side's Unit positions must not be visible to the
+  other — and this build is hotseat: both sides share one screen and one `GameState`, unlike every
+  other mechanic so far (CAPs, VP, even off-Map reinforcements, all fully visible to both sides
+  simultaneously). There's no "look away" enforcement possible in a single browser tab short of a
+  genuine per-player view, which this architecture doesn't have until a real second client exists.
+  Build it once M13 (online multiplayer, authoritative server + WebSocket rooms) lands — a server can
+  actually withhold a Hidden Unit's Hex from the other client's payload; a shared hotseat screen can't.
+  Do not attempt a hotseat-only approximation (e.g. hiding enemy Hidden Units from the board render by
+  `currentSide`) — it's trivially defeated by anyone glancing at devtools/state and would need
+  rebuilding anyway once the real per-client model exists.
+- **Later (additive, v3 order):** §16.4 Mobile Vehicles (deferred, narrow subtype) → M9 elevation/hills
+  (§12) → M10 fortifications/obstacles/mines (§17) → M11 flamethrowers/pioneers (§18) → M12 cards
+  (§8, incl. OBA) → **M13 online multiplayer** (host the pure engine authoritatively + WebSocket rooms;
+  the client already speaks action objects) → **M8 Hidden Units** (§11, now buildable for real).
 
 ---
 

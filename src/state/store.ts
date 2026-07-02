@@ -8,6 +8,8 @@ import { create } from 'zustand';
 import {
   attackContext,
   closeCombatContext,
+  effectiveStats,
+  groupStress,
   idOf,
   initGame,
   isValidSupporter,
@@ -18,13 +20,16 @@ import {
   neighbor,
   parseHexId,
   planVehicleMove,
+  RALLY_AP_COST,
   reduce,
   rollCloseCombat,
+  rollIndirectFire,
   rollRally,
   rollStackFire,
   serialize,
+  templateOf,
 } from '../engine';
-import type { Action, Facing, GameEvent, GameState, HexId, MissionDef, UnitId } from '../engine/types';
+import type { Action, Facing, GameEvent, GameState, HexId, MissionDef, Unit, UnitId } from '../engine/types';
 import { MISSION_1 } from '../data/missions/mission1';
 import { playFire, playMove } from '../ui/sound';
 import {
@@ -87,6 +92,9 @@ interface Store {
   groupSel: UnitId[];
   /** In-progress vehicle Bonus-Move path (§15.2): the hex steps chosen so far. */
   movePath: HexId[];
+  /** Manual reinforcement placement (§4.12): the reinforcement Unit awaiting a
+   *  click on one of its highlighted legal entry Hexes. */
+  placingReinforcementId: UnitId | null;
   losMode: boolean;
   losSource: HexId | null;
   shiftHeld: boolean;
@@ -120,8 +128,21 @@ interface Store {
   pivot: (unitId: UnitId, facing: Facing) => void;
   load: (unitId: UnitId, vehicleId: UnitId) => void;
   unload: (unitId: UnitId, toHexId: HexId) => void;
+  /** Mortar Indirect Attack (§13.2): a Spotter Hex is picked automatically —
+   *  the first legal one, via `legalActionsForUnit`/`bestSpotterFor` (§13.3
+   *  places no requirement on WHICH legal Spotter Hex is used, so there's no
+   *  player choice to expose here; if no legal Spotter Hex exists, this Hex
+   *  just isn't a legal Indirect target). */
+  indirectFire: (attackerId: UnitId, targetHexId: HexId) => void;
+  /** Fire Smoke (§14.1): Direct if the Unit has its own LOS/arc, else Indirect
+   *  via the same auto-picked Spotter Hex as `indirectFire`. */
+  fireSmoke: (unitId: UnitId, targetHexId: HexId) => void;
   /** Enter every eligible Unit of one reinforcement wave as a single Group Action (§4.12). */
   enterWave: (waveId: string) => void;
+  /** Manual per-Unit entry (§4.12): arm placement mode, then a board click on a
+   *  highlighted Hex commits a single-Unit ENTER there. */
+  startPlaceReinforcement: (unitId: UnitId) => void;
+  cancelPlaceReinforcement: () => void;
 
   toggleGroupMode: () => void;
   toggleGroupMember: (unitId: UnitId) => void;
@@ -161,13 +182,15 @@ const HISTORY_LIMIT = 100;
 /** Action types that go through the single-unit CAP-confirm gate below. */
 type GateableAction = Extract<
   Action,
-  { type: 'MOVE' | 'FIRE' | 'CLOSE_COMBAT' | 'RALLY' | 'PIVOT' }
+  { type: 'MOVE' | 'FIRE' | 'CLOSE_COMBAT' | 'RALLY' | 'PIVOT' | 'INDIRECT_FIRE' | 'FIRE_SMOKE' }
 >;
 
 export const useGame = create<Store>((set, get) => {
   /** The unit that performs a gateable action. */
   const actorOf = (action: GateableAction): UnitId =>
-    action.type === 'FIRE' || action.type === 'CLOSE_COMBAT' ? action.attackerId : action.unitId;
+    action.type === 'FIRE' || action.type === 'CLOSE_COMBAT' || action.type === 'INDIRECT_FIRE'
+      ? action.attackerId
+      : action.unitId;
 
   /**
    * Gate any action that would spend CAP behind an explicit confirmation (§3.4).
@@ -210,11 +233,80 @@ export const useGame = create<Store>((set, get) => {
     });
   };
 
+  /**
+   * Like `capGate`, but for a Group Action (§10.1/§10.10): if ANY member is
+   * Spent, the whole Group may act only by paying CAPs down to a 0AP Group
+   * cost — so show that confirmation before proceeding, same as the
+   * single-unit flow. `costBeforeCap` is the Group Action Cost (already
+   * including Group Stress, §10.11) before any CAP reduction.
+   */
+  const groupCapGate = (
+    members: Unit[],
+    costBeforeCap: number,
+    onProceed: (capCostReduce: number) => void,
+  ) => {
+    const g = get().game;
+    if (!g) return;
+    if (!members.some((u) => u.status === 'spent')) {
+      onProceed(0); // every member Fresh — no CAP spent.
+      return;
+    }
+    const side = members[0]!.side;
+    const cap = g.players[side].capCurrent;
+    if (cap < costBeforeCap) {
+      set({
+        lastEvents: [
+          {
+            type: 'illegal',
+            round: g.round,
+            text: `Group has a Spent Unit and needs ${costBeforeCap} CAP (only ${cap} left)`,
+          },
+        ],
+      });
+      return;
+    }
+    set({
+      pendingConfirm: {
+        message:
+          `A Spent Unit is in this Group. Spend ${costBeforeCap} CAP to take this Action at 0AP ` +
+          `(§10.1/§3.4)? CAP ${cap} → ${cap - costBeforeCap}.`,
+        proceed: () => onProceed(costBeforeCap),
+      },
+    });
+  };
+
+  /**
+   * Load/Unload (§15.7/§15.9) look up an already-precomputed action from
+   * `legalActionsForUnit`, which bakes in the exact `capCostReduce` needed
+   * when either member is Spent — this only adds the missing "spend N CAP?"
+   * confirm before dispatching it (CAPs must never be spent silently).
+   */
+  const confirmPrecomputedCap = (
+    action: Action & { capCostReduce?: number },
+    label: string,
+    proceed: () => void,
+  ) => {
+    const g = get().game;
+    if (!g || !action.capCostReduce) {
+      proceed();
+      return;
+    }
+    const cap = g.players[g.currentSide].capCurrent;
+    const cost = action.capCostReduce;
+    set({
+      pendingConfirm: {
+        message: `A Spent Unit/Vehicle is involved. Spend ${cost} CAP to ${label} at 0AP (§3.4)? CAP ${cap} → ${cap - cost}.`,
+        proceed,
+      },
+    });
+  };
+
   /** Common UI reset when a whole new GameState is loaded/imported. */
   const resetForLoad = () => ({
     selectedUnitId: null,
     groupSel: [] as UnitId[],
     movePath: [] as HexId[],
+    placingReinforcementId: null,
     history: [] as GameState[],
     future: [] as GameState[],
     picker: null,
@@ -254,6 +346,25 @@ export const useGame = create<Store>((set, get) => {
     set({ pendingRoll: { action, kind: 'fire', steps } });
   };
 
+  const requestIndirectFireRoll = (action: Extract<Action, { type: 'INDIRECT_FIRE' }>) => {
+    const g = get().game;
+    if (!g) return;
+    const attacker = g.units[action.attackerId];
+    if (!attacker) return;
+    // §13.2: resolves against every enemy in the Target Hex (like §7.5.1 Stacked
+    // Fire), one roll per Unit — `rollIndirectFire` itself re-validates legality.
+    const result = rollIndirectFire(g, attacker, action.targetHexId, action.spotterHexId);
+    if (!result.rolls.length) return;
+    const steps: RollStep[] = result.rolls.map((roll) => ({
+      dice: roll.dice,
+      success: roll.hit,
+      headline: roll.critical ? 'CRITICAL HIT' : roll.hit ? 'HIT' : 'MISS',
+      detail: `Indirect (HE) · AR ${roll.ar} vs flank DR ${roll.dr} — 2d6 ≥ ${roll.hitNumber}`,
+      label: `${action.attackerId} ⇒ ${roll.targetId}`,
+    }));
+    set({ pendingRoll: { action, kind: 'fire', steps } });
+  };
+
   const requestCcRoll = (action: Extract<Action, { type: 'CLOSE_COMBAT' }>) => {
     const g = get().game;
     if (!g) return;
@@ -281,6 +392,70 @@ export const useGame = create<Store>((set, get) => {
         ],
       },
     });
+  };
+
+  /**
+   * Group Attack (§10.5–§10.8), ranged OR Close Combat (§10.6, when the Leader
+   * shares the Target's hex) — previews the roll the same way single-unit Fire/
+   * Close Combat do, instead of resolving instantly with no confirmation.
+   */
+  const requestGroupAttackRoll = (
+    leaderId: UnitId,
+    supporterIds: UnitId[],
+    targetId: UnitId,
+    capCostReduce: number,
+  ) => {
+    const g = get().game;
+    if (!g) return;
+    const leader = g.units[leaderId];
+    const target = g.units[targetId];
+    if (!leader || !target) return;
+    const arBonus = supporterIds.length;
+    const isCloseCombat = target.hexId === leader.hexId;
+    const action: Action = { type: 'GROUP_ATTACK', leaderId, supporterIds, targetId, capCostReduce };
+    const label = `[${[leaderId, ...supporterIds].join('+')}]`;
+
+    if (isCloseCombat) {
+      const ctx = closeCombatContext(g, leader, target, arBonus);
+      if (!ctx.legal) {
+        set({ lastEvents: [{ type: 'illegal', round: g.round, text: ctx.reason ?? 'illegal' }] });
+        return;
+      }
+      const roll = rollCloseCombat(g, leader, target, 0, arBonus);
+      set({
+        pendingRoll: {
+          action,
+          kind: 'fire',
+          steps: [
+            {
+              dice: roll.dice,
+              success: roll.hit,
+              headline: roll.critical ? 'CRITICAL HIT' : roll.hit ? 'HIT' : 'MISS',
+              detail: `Group close combat · AR ${roll.ar} vs flank DR ${roll.dr} — 2d6 ≥ ${roll.hitNumber}`,
+              label: `${label} ⚔ ${targetId}`,
+            },
+          ],
+        },
+      });
+      return;
+    }
+
+    const ctx = attackContext(g, leader, target, 0, arBonus);
+    if (!ctx.legal) {
+      set({ lastEvents: [{ type: 'illegal', round: g.round, text: ctx.reason ?? 'illegal' }] });
+      return;
+    }
+    // §7.5.1: one shot at the target's hex resolves against every enemy stacked there.
+    const stack = rollStackFire(g, leader, target.hexId, 0, arBonus);
+    if (!stack.rolls.length) return;
+    const steps: RollStep[] = stack.rolls.map(({ targetId: tid, roll }) => ({
+      dice: roll.dice,
+      success: roll.hit,
+      headline: roll.critical ? 'CRITICAL HIT' : roll.hit ? 'HIT' : 'MISS',
+      detail: `Group AR ${roll.ar} vs DR ${roll.dr} — 2d6 ≥ ${roll.hitNumber}${roll.isFlank ? ' (flank)' : ''}`,
+      label: `${label} → ${tid}`,
+    }));
+    set({ pendingRoll: { action, kind: 'fire', steps } });
   };
 
   const requestRallyRoll = (action: Extract<Action, { type: 'RALLY' }>) => {
@@ -317,6 +492,7 @@ export const useGame = create<Store>((set, get) => {
     groupMode: false,
     groupSel: [],
     movePath: [],
+    placingReinforcementId: null,
     losMode: false,
     losSource: null,
     shiftHeld: false,
@@ -340,6 +516,7 @@ export const useGame = create<Store>((set, get) => {
         groupMode: false,
         groupSel: [],
         movePath: [],
+        placingReinforcementId: null,
         losMode: false,
         losSource: null,
         hover: null,
@@ -378,6 +555,18 @@ export const useGame = create<Store>((set, get) => {
         return;
       }
 
+      // Manual reinforcement placement (§4.12): the click commits this Unit to
+      // a legal entry Hex; any other click is ignored (Cancel clears the mode).
+      const placingId = get().placingReinforcementId;
+      if (placingId) {
+        const r = game.reinforcements.find((x) => x.id === placingId);
+        if (r && legalEntryHexes(game, r).includes(hexId)) {
+          get().dispatch({ type: 'ENTER', placements: [{ unitId: placingId, hexId, facing: r.facing }] });
+          set({ placingReinforcementId: null });
+        }
+        return;
+      }
+
       if (losMode) {
         set({ losSource: hexId });
         return;
@@ -391,14 +580,17 @@ export const useGame = create<Store>((set, get) => {
           get().groupAttack(enemy.id);
           return;
         }
-        const ownFresh = hereU.filter((u) => u.side === game.currentSide && u.status === 'fresh');
-        if (ownFresh.length) {
+        // §10.1: a Spent Unit may join a Group too (only the resulting Group
+        // Action Cost matters — see `groupCapGate`), so don't filter them out
+        // of the click-to-add here, or a Spent Unit could never join a Group.
+        const ownHere = hereU.filter((u) => u.side === game.currentSide);
+        if (ownHere.length) {
           const sel = get().groupSel;
-          const allIn = ownFresh.every((u) => sel.includes(u.id));
+          const allIn = ownHere.every((u) => sel.includes(u.id));
           set({
             groupSel: allIn
-              ? sel.filter((id) => !ownFresh.some((u) => u.id === id))
-              : [...new Set([...sel, ...ownFresh.map((u) => u.id)])],
+              ? sel.filter((id) => !ownHere.some((u) => u.id === id))
+              : [...new Set([...sel, ...ownHere.map((u) => u.id)])],
           });
         }
         return;
@@ -438,6 +630,14 @@ export const useGame = create<Store>((set, get) => {
         const canMoveHere = acts.some((a) => a.type === 'MOVE' && a.toHexId === hexId);
         const canFire = !!enemy && acts.some((a) => a.type === 'FIRE' && a.targetId === enemy.id);
         const canCC = !!enemy && acts.some((a) => a.type === 'CLOSE_COMBAT' && a.targetId === enemy.id);
+        // Mortar Indirect Attack (§13.2) — an Attack, so only vs an enemy-
+        // occupied Hex (an alternative to normal Fire, e.g. when it's out of
+        // the Mortar's own LOS but a Spotter Hex can still see it).
+        const canIndirectFire =
+          !!enemy && acts.some((a) => a.type === 'INDIRECT_FIRE' && a.targetHexId === hexId);
+        // Fire Smoke (§14.0) targets terrain, not a Unit — legal on ANY Hex a
+        // Mortar can reach (occupied or not, e.g. to screen your own advance).
+        const canFireSmoke = acts.some((a) => a.type === 'FIRE_SMOKE' && a.targetHexId === hexId);
         // Load (§15.7): clicking a hex with an eligible friendly Vehicle (same
         // hex or adjacent) may mean "just move/stack here" as well as "load onto
         // it" — offer both via the chooser when ambiguous (§5.4-style choice).
@@ -445,7 +645,13 @@ export const useGame = create<Store>((set, get) => {
           (u) => u.side === sel.side && acts.some((a) => a.type === 'LOAD' && a.vehicleId === u.id),
         )?.id;
         const canLoad = !!loadVehicleId;
-        const optionCount = Number(canMoveHere) + Number(canFire) + Number(canCC) + Number(canLoad);
+        const optionCount =
+          Number(canMoveHere) +
+          Number(canFire) +
+          Number(canCC) +
+          Number(canIndirectFire) +
+          Number(canFireSmoke) +
+          Number(canLoad);
 
         // Several things are possible here (e.g. move INTO an enemy hex vs attack
         // it) → let the player choose (§5.4). Otherwise do the single option.
@@ -463,6 +669,14 @@ export const useGame = create<Store>((set, get) => {
         }
         if (canCC && enemy) {
           get().closeCombat(sel.id, enemy.id);
+          return;
+        }
+        if (canIndirectFire) {
+          get().indirectFire(sel.id, hexId);
+          return;
+        }
+        if (canFireSmoke) {
+          get().fireSmoke(sel.id, hexId);
           return;
         }
         if (canLoad && loadVehicleId) {
@@ -560,7 +774,7 @@ export const useGame = create<Store>((set, get) => {
       const act = legalActionsForUnit(g, unitId).find(
         (a): a is Extract<Action, { type: 'LOAD' }> => a.type === 'LOAD' && a.vehicleId === vehicleId,
       );
-      if (act) get().dispatch(act);
+      if (act) confirmPrecomputedCap(act, `Load onto ${vehicleId} (§15.7)`, () => get().dispatch(act));
     },
     unload: (unitId, toHexId) => {
       const g = get().game;
@@ -568,7 +782,31 @@ export const useGame = create<Store>((set, get) => {
       const act = legalActionsForUnit(g, unitId).find(
         (a): a is Extract<Action, { type: 'UNLOAD' }> => a.type === 'UNLOAD' && a.toHexId === toHexId,
       );
-      if (act) get().dispatch(act);
+      if (act) confirmPrecomputedCap(act, `Unload to ${toHexId} (§15.9)`, () => get().dispatch(act));
+    },
+
+    // Indirect Fire/Fire Smoke (§13.2/§14.1) look up the exact precomputed
+    // action `legalActionsForUnit` already offers for this Target Hex — which
+    // picks a Spotter Hex via `bestSpotterFor` (the first legal one) — then run
+    // it through the same CAP-confirm gate as FIRE/CLOSE_COMBAT. An explicit
+    // "let the player choose a different Spotter Hex" picker is a follow-up.
+    indirectFire: (attackerId, targetHexId) => {
+      const g = get().game;
+      if (!g) return;
+      const act = legalActionsForUnit(g, attackerId).find(
+        (a): a is Extract<Action, { type: 'INDIRECT_FIRE' }> =>
+          a.type === 'INDIRECT_FIRE' && a.targetHexId === targetHexId,
+      );
+      if (act) capGate(act, (a) => requestIndirectFireRoll(a as Extract<Action, { type: 'INDIRECT_FIRE' }>));
+    },
+    fireSmoke: (unitId, targetHexId) => {
+      const g = get().game;
+      if (!g) return;
+      const act = legalActionsForUnit(g, unitId).find(
+        (a): a is Extract<Action, { type: 'FIRE_SMOKE' }> =>
+          a.type === 'FIRE_SMOKE' && a.targetHexId === targetHexId,
+      );
+      if (act) capGate(act, (a) => get().dispatch(a));
     },
 
     enterWave: (waveId) => {
@@ -590,6 +828,21 @@ export const useGame = create<Store>((set, get) => {
       get().dispatch({ type: 'ENTER', placements });
     },
 
+    startPlaceReinforcement: (unitId) => {
+      const g = get().game;
+      if (!g) return;
+      const r = g.reinforcements.find((x) => x.id === unitId);
+      if (!r || r.side !== g.currentSide || g.round < r.earliestRound) return;
+      set({
+        placingReinforcementId: unitId,
+        selectedUnitId: null,
+        groupMode: false,
+        groupSel: [],
+        movePath: [],
+      });
+    },
+    cancelPlaceReinforcement: () => set({ placingReinforcementId: null }),
+
     toggleGroupMode: () =>
       set((s) => ({ groupMode: !s.groupMode, groupSel: [], selectedUnitId: null })),
     clearGroup: () => set({ groupSel: [] }),
@@ -597,10 +850,15 @@ export const useGame = create<Store>((set, get) => {
       const { game, groupSel } = get();
       if (!game) return;
       const u = game.units[unitId];
-      // A Group is built from your own Fresh Units (§10.1).
-      if (!u || u.side !== game.currentSide || u.status !== 'fresh') return;
+      if (!u || u.side !== game.currentSide) return;
+      const already = groupSel.includes(unitId);
+      // Removing an existing member (the panel's ✕ chip) is always allowed,
+      // even if it's Spent; adding one THIS way stays Fresh-only (a Spent Unit
+      // still joins fine via a board click alongside Fresh ones, §10.1) so a
+      // stray click here can't silently pull a CAP-costing Unit into the Group.
+      if (!already && u.status !== 'fresh') return;
       set({
-        groupSel: groupSel.includes(unitId)
+        groupSel: already
           ? groupSel.filter((id) => id !== unitId)
           : [...groupSel, unitId],
       });
@@ -608,6 +866,7 @@ export const useGame = create<Store>((set, get) => {
     groupMove: (dir) => {
       const { game, groupSel } = get();
       if (!game || groupSel.length === 0) return;
+      const members = groupSel.map((id) => game.units[id]!);
       // Formation move: each member steps one hex in `dir` if legal, else stays (§10.2).
       const moves = groupSel.map((id) => {
         const u = game.units[id]!;
@@ -615,14 +874,28 @@ export const useGame = create<Store>((set, get) => {
         if (game.hexes[to] && moveCost(game, u, to).ap != null) return { unitId: id, toHexId: to };
         return { unitId: id };
       });
-      get().dispatch({ type: 'GROUP_MOVE', moves });
+      // §10.4: Group Move cost = the highest individual mover's Move Cost.
+      let maxMove = 0;
+      for (const m of moves) {
+        if (m.toHexId == null) continue;
+        const mc = moveCost(game, game.units[m.unitId]!, m.toHexId);
+        if (mc.ap != null) maxMove = Math.max(maxMove, mc.ap);
+      }
+      const costBeforeCap = maxMove + groupStress(members); // §10.11
       set({ groupSel: [] });
+      groupCapGate(members, costBeforeCap, (capCostReduce) =>
+        get().dispatch({ type: 'GROUP_MOVE', moves, capCostReduce }),
+      );
     },
     groupRally: () => {
-      const { groupSel } = get();
-      if (groupSel.length === 0) return;
-      get().dispatch({ type: 'GROUP_RALLY', unitIds: groupSel });
+      const { game, groupSel } = get();
+      if (!game || groupSel.length === 0) return;
+      const members = groupSel.map((id) => game.units[id]!);
+      const costBeforeCap = RALLY_AP_COST + groupStress(members); // §10.9/§10.11
       set({ groupSel: [] });
+      groupCapGate(members, costBeforeCap, (capCostReduce) =>
+        get().dispatch({ type: 'GROUP_RALLY', unitIds: groupSel, capCostReduce }),
+      );
     },
     groupAttack: (targetId) => {
       const { game, groupSel } = get();
@@ -635,8 +908,20 @@ export const useGame = create<Store>((set, get) => {
       const supporterIds = groupSel
         .slice(1)
         .filter((id) => isValidSupporter(game, leader, game.units[id]!, target));
-      get().dispatch({ type: 'GROUP_ATTACK', leaderId, supporterIds, targetId });
+      const members = [leader, ...supporterIds.map((id) => game.units[id]!)];
+      const isCloseCombat = target.hexId === leader.hexId;
+      const arBonus = supporterIds.length;
+      const ctx = isCloseCombat
+        ? closeCombatContext(game, leader, target, arBonus)
+        : attackContext(game, leader, target, 0, arBonus);
+      const eff = effectiveStats(game, leader);
+      // §16.2: a Turreted leader firing outside its Arc pays +2AP (ranged only).
+      const arcPenalty = !isCloseCombat && ctx.legal && ctx.outOfArc && templateOf(game, leader).turreted ? 2 : 0;
+      const costBeforeCap = eff.apToFire + arcPenalty + groupStress(members);
       set({ groupSel: [] });
+      groupCapGate(members, costBeforeCap, (capCostReduce) =>
+        requestGroupAttackRoll(leaderId, supporterIds, targetId, capCostReduce),
+      );
     },
 
     extendMovePath: (hexId) => {
@@ -709,6 +994,7 @@ export const useGame = create<Store>((set, get) => {
         // crashes a Group action on a member id that may no longer exist.
         movePath: [],
         groupSel: [],
+        placingReinforcementId: null,
         pendingRoll: null,
         pendingConfirm: null,
         chooser: null,
@@ -729,6 +1015,7 @@ export const useGame = create<Store>((set, get) => {
         selectedUnitId: null,
         movePath: [], // see undo() — stale in-progress action state must not survive time-travel
         groupSel: [],
+        placingReinforcementId: null,
         pendingRoll: null,
         pendingConfirm: null,
         chooser: null,

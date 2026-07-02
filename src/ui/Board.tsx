@@ -6,7 +6,7 @@
  * Hovering a targetable enemy shows a fire-odds popup; Ctrl+click a stacked hex
  * opens a unit picker. Clicks/hover route through the store.
  */
-import { attackContext, legalActionsForUnit, neighbor, neighbors, parseHexId, idOf, planVehicleMove, templateOf, visibleHexesFrom } from '../engine';
+import { attackContext, legalActionsForUnit, legalEntryHexes, neighbor, neighbors, parseHexId, idOf, planVehicleMove, templateOf, visibleHexesFrom } from '../engine';
 import type { Facing, Unit } from '../engine/types';
 import { useGame } from '../state/store';
 import { artForHex } from '../data/hexArt';
@@ -30,6 +30,7 @@ export function Board() {
   const selectedUnitId = useGame((s) => s.selectedUnitId);
   const groupSel = useGame((s) => s.groupSel);
   const movePath = useGame((s) => s.movePath);
+  const placingReinforcementId = useGame((s) => s.placingReinforcementId);
   const losMode = useGame((s) => s.losMode);
   const losSource = useGame((s) => s.losSource);
   const shiftHeld = useGame((s) => s.shiftHeld);
@@ -54,6 +55,9 @@ export function Board() {
   // Selected unit's legal move/fire highlights (hidden while showing LOS).
   const moveTargets = new Set<string>();
   const fireTargets = new Set<string>();
+  // Mortar Indirect Attack (§13.2) / Fire Smoke (§14.1) target Hexes.
+  const indirectFireTargets = new Set<string>();
+  const smokeTargets = new Set<string>();
   // Load (§15.7) / Unload (§15.9) hexes — highlighted alongside Move so a
   // player can see where clicking will load onto or unload from a Vehicle.
   const transportTargets = new Set<string>();
@@ -64,6 +68,8 @@ export function Board() {
         const t = game.units[a.targetId];
         if (t) fireTargets.add(t.hexId);
       }
+      if (a.type === 'INDIRECT_FIRE') indirectFireTargets.add(a.targetHexId);
+      if (a.type === 'FIRE_SMOKE') smokeTargets.add(a.targetHexId);
       if (a.type === 'LOAD') {
         const v = game.units[a.vehicleId];
         if (v) transportTargets.add(v.hexId);
@@ -85,6 +91,13 @@ export function Board() {
         if (planVehicleMove(game, sel, [...movePath, nid]).ap != null) nextSteps.add(nid);
       }
     }
+  }
+
+  // Manual reinforcement placement (§4.12): this Unit's legal entry Hexes.
+  const entryTargets = new Set<string>();
+  if (placingReinforcementId) {
+    const r = game.reinforcements.find((x) => x.id === placingReinforcementId);
+    if (r) for (const h of legalEntryHexes(game, r)) entryTargets.add(h);
   }
 
   let visible: Set<string> | null = null;
@@ -175,11 +188,19 @@ export function Board() {
                     <image href={art} x={-artW / 2} y={-HEX_SIZE} width={artW} height={2 * HEX_SIZE} preserveAspectRatio="xMidYMid slice" />
                   </g>
                 )}
+                {/* Smoke (§14): Heavy is denser/whiter than Light, both block/haze the hex. */}
+                {hex.features.smoke === 2 && (
+                  <polygon points={pts} fill="#e8ecef" opacity={0.72} pointerEvents="none" />
+                )}
+                {hex.features.smoke === 1 && (
+                  <polygon points={pts} fill="#e8ecef" opacity={0.4} pointerEvents="none" />
+                )}
                 {losDim && <polygon points={pts} fill="#0b0d08" opacity={0.62} />}
                 {visible?.has(id) && <polygon points={pts} fill="#7CFC8C" opacity={0.18} />}
                 {nextSteps.size === 0 && moveTargets.has(id) && <polygon points={pts} fill="#5ad17a" opacity={0.28} stroke="#5ad17a" strokeWidth={2} />}
                 {nextSteps.has(id) && <polygon points={pts} fill="#5ad17a" opacity={0.2} stroke="#5ad17a" strokeWidth={2} strokeDasharray="4 3" />}
                 {transportTargets.has(id) && <polygon points={pts} fill="none" stroke="#e0a83a" strokeWidth={3} strokeDasharray="2 3" />}
+                {entryTargets.has(id) && <polygon points={pts} fill="#c77dff" opacity={0.3} stroke="#c77dff" strokeWidth={2} strokeDasharray="4 3" />}
                 {pathSet.has(id) && (
                   <>
                     <polygon points={pts} fill="#4aa3ff" opacity={0.32} stroke="#4aa3ff" strokeWidth={2} />
@@ -188,7 +209,9 @@ export function Board() {
                     </text>
                   </>
                 )}
-                {fireTargets.has(id) && <polygon points={pts} fill="none" stroke="#ff5a5a" strokeWidth={3} />}
+                {(fireTargets.has(id) || indirectFireTargets.has(id) || smokeTargets.has(id)) && (
+                  <polygon points={pts} fill="none" stroke="#ff5a5a" strokeWidth={3} />
+                )}
                 {id === losActive && <polygon points={pts} fill="none" stroke="#ffd24a" strokeWidth={3} />}
                 <polygon points={pts} fill="transparent" stroke={HEX_STROKE} strokeWidth={1} />
                 <polygon

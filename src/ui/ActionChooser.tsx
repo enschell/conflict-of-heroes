@@ -20,6 +20,8 @@ export function ActionChooser() {
   const fire = useGame((s) => s.fire);
   const closeCombat = useGame((s) => s.closeCombat);
   const load = useGame((s) => s.load);
+  const indirectFire = useGame((s) => s.indirectFire);
+  const fireSmoke = useGame((s) => s.fireSmoke);
   const close = useGame((s) => s.closeChooser);
 
   if (!game || !chooser || !selectedUnitId || !game.units[selectedUnitId]) return null;
@@ -36,6 +38,8 @@ export function ActionChooser() {
   const moveAct = acts.find((a) => a.type === 'MOVE' && a.toHexId === hexId);
   const fireAct = enemy && acts.find((a) => a.type === 'FIRE' && a.targetId === enemy.id);
   const ccAct = enemy && acts.find((a) => a.type === 'CLOSE_COMBAT' && a.targetId === enemy.id);
+  const indirectAct = acts.find((a) => a.type === 'INDIRECT_FIRE' && a.targetHexId === hexId);
+  const smokeAct = acts.find((a) => a.type === 'FIRE_SMOKE' && a.targetHexId === hexId);
   const loadAct =
     vehicleHere && acts.find((a) => a.type === 'LOAD' && a.vehicleId === vehicleHere.id);
 
@@ -72,6 +76,16 @@ export function ActionChooser() {
       {ccAct && enemy && (
         <button className="unit-picker__row cc-btn" onClick={() => run(() => closeCombat(unit.id, enemy.id))}>
           ⚔ Close combat {enemy.id} ({ccHit}% hit)
+        </button>
+      )}
+      {indirectAct && enemy && (
+        <button className="unit-picker__row" onClick={() => run(() => indirectFire(unit.id, hexId))}>
+          ⤳ Indirect Fire at {enemy.id} (§13.2)
+        </button>
+      )}
+      {smokeAct && (
+        <button className="unit-picker__row" onClick={() => run(() => fireSmoke(unit.id, hexId))}>
+          ☁ Fire Smoke onto {hexId} (§14.1)
         </button>
       )}
       {loadAct && vehicleHere && (

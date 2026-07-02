@@ -3,6 +3,7 @@
  */
 import { capCeiling } from './cap';
 import { roll2d6 } from './rng';
+import { dissipateSmoke } from './smoke';
 import type { GameState, SideId } from './types';
 import { computeWinner, gainVp, otherSide, updateVictoryHexControl, vpLeader } from './victory';
 
@@ -11,11 +12,12 @@ const SIDES: SideId[] = ['A', 'B'];
 /**
  * Pre-Round Sequence (infantry subset, §9.4) + Initiative. Mutates `state`.
  * Flips Spent units Fresh keeping markers + facing (§9.6), clears Stress, resets
- * CAP to ceiling (floor 3, §7.13), then sets Initiative (§9.11):
+ * CAP to ceiling (floor 3, §7.13), dissipates Smoke (§14.4: Heavy → Light,
+ * Light → removed), then sets Initiative (§9.11):
  *  - Round 1: the mission-defined side goes first (§2.0).
  *  - Later Rounds: only the side WITHOUT VP Advantage rolls 2d6; on **7+** it
  *    takes the first Turn, otherwise the VP leader does.
- * (Smoke, cards, reinforcements, and artillery steps are later modules.)
+ * (Cards and OBA planning/resolution are later modules.)
  */
 export function startRound(state: GameState): void {
   for (const u of Object.values(state.units)) {
@@ -27,6 +29,7 @@ export function startRound(state: GameState): void {
     p.passed = false;
     p.capCurrent = capCeiling(p); // §7.13: at least 3 CAPs at round start
   }
+  dissipateSmoke(state);
   state.consecutivePasses = 0;
 
   if (state.round === 1) {

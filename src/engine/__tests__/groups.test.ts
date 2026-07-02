@@ -148,6 +148,67 @@ describe('Group Attack (§10.5–§10.8 red box)', () => {
   });
 });
 
+/** Leader + a same-hex supporter + an enemy, all stacked; plus a merely-adjacent
+ *  friendly that would qualify to support a RANGED Group Attack but not a Close
+ *  Combat one (§10.6: only same-hex Units may support Close Combat). */
+function groupCloseCombatScene(seed = 1): GameState {
+  const s = baseState(seed);
+  addTemplate(s, rifleTemplate({ id: 'rifle' }));
+  addTemplate(s, rifleTemplate({ id: 'truck', attackMode: 'closeCombatOnly' }));
+  addTemplate(s, rifleTemplate({ id: 'wagon', attackMode: 'none' }));
+  addHex(s, 0, 0);
+  addHex(s, 1, 0);
+  addUnit(s, 'L', 'A', 0, 0, 0, 'rifle'); // leader
+  addUnit(s, 'S1', 'A', 0, 0, 0, 'rifle'); // same-hex supporter — qualifies
+  addUnit(s, 'ADJ', 'A', 1, 0, 0, 'rifle'); // adjacent only — does NOT qualify for CC
+  addUnit(s, 'T', 'B', 0, 0, 3, 'rifle'); // enemy sharing the Leader's hex
+  return s;
+}
+
+describe('Group Close Combat (§10.6)', () => {
+  it('resolves as Close Combat (flank DR, +4 CC mod) with +1AR per same-hex supporter', () => {
+    const res = reduce(groupCloseCombatScene(1), {
+      type: 'GROUP_ATTACK',
+      leaderId: 'L',
+      supporterIds: ['S1'],
+      targetId: 'T',
+    });
+    expect(res.events.some((e) => e.type === 'illegal')).toBe(false);
+    const cc = res.events.find((e) => e.type === 'groupCc');
+    // AR = 3 FP + 4 CC mod + 1 supporter = 8; DR = 11 flank; Hit# = 3.
+    expect(cc?.text).toMatch(/AR 8 /);
+    expect(cc?.text).toMatch(/DR 11\)/);
+    expect(cc?.text).toMatch(/Hit# 3 /);
+    const checks = res.events.filter((e) => e.type === 'spent');
+    expect(checks).toHaveLength(1);
+    expect(checks[0]!.text).toMatch(/Group Spent Check/);
+    for (const id of ['L', 'S1']) expect(res.state.units[id]?.stressed).toBe(true);
+  });
+
+  it('rejects a supporter that is merely adjacent, not sharing the Leader/Target hex', () => {
+    const s = groupCloseCombatScene();
+    expect(isValidSupporter(s, s.units['L']!, s.units['ADJ']!, s.units['T']!)).toBe(false);
+    const res = reduce(s, { type: 'GROUP_ATTACK', leaderId: 'L', supporterIds: ['ADJ'], targetId: 'T' });
+    expect(res.events[0]?.type).toBe('illegal');
+    expect(res.state).toBe(s);
+  });
+
+  it('lets a Truck (closeCombatOnly) lead or support a Group Close Combat', () => {
+    const s = groupCloseCombatScene();
+    s.units['L']!.templateId = 'truck';
+    const res = reduce(s, { type: 'GROUP_ATTACK', leaderId: 'L', supporterIds: ['S1'], targetId: 'T' });
+    expect(res.events.some((e) => e.type === 'illegal')).toBe(false);
+    expect(res.events.some((e) => e.type === 'groupCc')).toBe(true);
+  });
+
+  it('still refuses a Wagon (attackMode none) as Close-Combat leader (§16.1)', () => {
+    const s = groupCloseCombatScene();
+    s.units['L']!.templateId = 'wagon';
+    const res = reduce(s, { type: 'GROUP_ATTACK', leaderId: 'L', supporterIds: ['S1'], targetId: 'T' });
+    expect(res.events[0]?.type).toBe('illegal');
+  });
+});
+
 describe('Group Rally (§10.9)', () => {
   /** Two adjacent hit rifles rallying together. */
   function rallyScene(seed = 1): GameState {

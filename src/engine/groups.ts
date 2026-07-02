@@ -72,14 +72,18 @@ export function isValidSupporter(
   if (hasFirepowerHitMarker(supporter)) return false;
   const eff = effectiveStats(state, supporter);
   if (!eff.canFire) return false;
-  // §16.1: a Group Attack is always ranged fire, so Wagons/Trucks can't support it either.
+  // §16.1: Wagons (attackMode 'none') never attack, so can never support either.
   const supMode = templateOf(state, supporter).attackMode;
-  if (supMode === 'none' || supMode === 'closeCombatOnly') return false;
+  if (supMode === 'none') return false;
 
-  // Close-combat support: only Units sharing the Leader's (= Target's) hex.
+  // Close-combat support (§10.6): only Units sharing the Leader's (= Target's)
+  // hex — a Truck (closeCombatOnly) CAN support here, since Close Combat is
+  // exactly the attack mode it has.
   if (target.hexId === leader.hexId) return supporter.hexId === leader.hexId;
 
-  // Ranged support: adjacency to the Leader, then the supporter's own Fire Zone.
+  // Ranged support: a Truck has no ranged fire to contribute; then adjacency
+  // to the Leader, then the supporter's own Fire Zone.
+  if (supMode === 'closeCombatOnly') return false;
   if (distance(parseHexId(leader.hexId), parseHexId(supporter.hexId)) > 1) return false;
   if (!inArc(supporter.hexId, supporter.facing, target.hexId)) return false;
   if (!hasLOS(state, supporter.hexId, target.hexId)) return false;

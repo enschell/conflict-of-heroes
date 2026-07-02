@@ -124,6 +124,17 @@ export interface UnitTemplate {
    * may not attack at all. Undefined = normal (ranged + close combat).
    */
   attackMode?: 'closeCombatOnly' | 'none';
+  // -- Mortars & Smoke (§13.0–§13.3, §14.0) --
+  /**
+   * Minimum Range (§13.1/§13.2, mortars): a Direct or Indirect Attack may not
+   * target a Hex closer than this. `kind: 'mortar'` also always resolves its
+   * FIRE/INDIRECT_FIRE Attacks vs the target's Flank Defense (HE, §13.9).
+   */
+  minRange?: number;
+  /** Indirect Attack Cost (§13.0), separate from `apToFire`'s Direct Attack Cost. */
+  indirectApToFire?: number;
+  /** May Fire Smoke (§14.0: mortars 80mm+, Artillery Cards, Pioneers, some Tanks). */
+  canFireSmoke?: boolean;
 }
 
 /** A unit instance on the map. */
@@ -333,6 +344,27 @@ export type Action =
     }
   | { type: 'RALLY'; unitId: UnitId; capDiceMod?: number; capCostReduce?: number }
   | { type: 'STALL'; unitId: UnitId; capCostReduce?: number }
+  // Mortar Indirect Attack (§13.2–§13.3): targets a Hex the Mortar can't see
+  // itself, using a Spotter Hex (within 2 Hexes and clear LOS of the Mortar)
+  // for LOS instead. Resolves like Stacked Fire (§7.5.1) against every enemy
+  // in the Target Hex — always vs Flank Defense (HE, §13.9).
+  | {
+      type: 'INDIRECT_FIRE';
+      attackerId: UnitId;
+      targetHexId: HexId;
+      spotterHexId: HexId;
+      capDiceMod?: number;
+      capCostReduce?: number;
+    }
+  // Fire Smoke (§14.1): instead of an Attack, a Mortar places a Heavy Smoke
+  // Marker on the Target Hex — Direct (own LOS) or Indirect (via a Spotter Hex).
+  | {
+      type: 'FIRE_SMOKE';
+      unitId: UnitId;
+      targetHexId: HexId;
+      spotterHexId?: HexId;
+      capCostReduce?: number;
+    }
   // Group Move (§10.2–§10.4): one Action for a continuously-adjacent Group; each
   // member may move to an adjacent hex and/or pivot, or stay. Cost = the highest
   // member move cost; one Spent Check for the Group.

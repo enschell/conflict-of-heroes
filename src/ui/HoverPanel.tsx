@@ -59,6 +59,12 @@ export function HoverPanel() {
             <b>{t.blocksLOS ? 'Yes' : 'No'}</b>
             <span>Cover terrain</span>
             <b>{t.isCover ? 'Yes' : 'No'}</b>
+            {hex.features.smoke && (
+              <>
+                <span>Smoke (§14)</span>
+                <b>{hex.features.smoke === 2 ? 'Heavy (+2DR / −2AR, blocks LOS)' : 'Light (+1DR / −1AR)'}</b>
+              </>
+            )}
           </div>
           <div className="hover-units">
             <div className="dim">Units here: {units.length || 'none'}</div>

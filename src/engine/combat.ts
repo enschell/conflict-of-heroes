@@ -15,12 +15,13 @@ import { effectiveStats, templateOf } from './hits';
 import { hasLOS, inArc } from './los';
 import { fpRangeModifier, rangeBand, type RangeBand } from './range';
 import { roll2d6 } from './rng';
-import { terrainDM } from './terrain';
+import { smokeAttackPenalty, smokeDefenseBonus, smokeLosDrBonus } from './smoke';
+import { terrainDM, terrainOf } from './terrain';
 import { directionTo } from './movement';
 import type { DRColor, GameState, RngState, SideId, Unit, UnitId } from './types';
 
 /** +1 DM if the shot crosses a wall in/bordering the target hex (§5.0.2). */
-function wallDMForFire(state: GameState, attackerHexId: string, targetHexId: string): number {
+export function wallDMForFire(state: GameState, attackerHexId: string, targetHexId: string): number {
   const line = lineDraw(parseHexId(attackerHexId), parseHexId(targetHexId));
   if (line.length < 2) return 0;
   const prev = idOf(line[line.length - 2]!); // hex the shot enters the target from
@@ -61,6 +62,19 @@ function apcTransportBonus(state: GameState, target: Unit): number {
   return carrier && templateOf(state, carrier).apcTransport ? 2 : 0;
 }
 
+/**
+ * §13.9 Air Burst: a red-Flank (soft) target loses the Heavy Woods +2DR
+ * Defensive Terrain Bonus when hit by a High Explosive (Mortar/Artillery)
+ * Attack — the tree-burst rains fragments down instead of the woods shielding
+ * it. Every other terrain DM (and armored targets) is unaffected.
+ */
+function terrainDMForAttack(state: GameState, hexId: string, fpColor: DRColor, isHE: boolean): number {
+  const hex = state.hexes[hexId];
+  if (!hex) return 0;
+  if (isHE && fpColor === 'red' && hex.terrain === 'woodsHeavy') return 0;
+  return terrainOf(hex).dm;
+}
+
 export interface AttackContext {
   legal: boolean;
   reason?: string;
@@ -98,6 +112,12 @@ export function attackContext(
   const dist = distance(parseHexId(attacker.hexId), parseHexId(target.hexId));
   const band = rangeBand(dist, aEff.range);
   const fpColor = tEff.dr.color;
+  // §13.0/§13.9: Mortars fire High Explosive — always vs the target's Flank
+  // Defense (both Direct and Indirect Attacks), with the Air Burst exception
+  // above; they also may not fire closer than their Minimum Range (§13.1).
+  const attackerTmpl = templateOf(state, attacker);
+  const isHE = attackerTmpl.kind === 'mortar';
+  const minRange = attackerTmpl.minRange ?? 0;
 
   if (!aEff.canFire) return fail('unit cannot fire', band, fpColor);
   if (attacker.id === target.id) return fail('cannot fire at self', band, fpColor);
@@ -109,24 +129,33 @@ export function attackContext(
     Object.values(state.units).some((u) => u.side !== attacker.side && u.hexId === attacker.hexId)
   )
     return fail('enemy in your hex — must close combat', band, fpColor);
+  if (dist < minRange) return fail('inside Minimum Range (§13.1)', band, fpColor);
   // §16.2: a Turreted Vehicle may fire outside its Arc without pivoting (for a
   // +2AP Attack Cost the caller applies); everyone else is denied out of arc.
   const outOfArc = !inArc(attacker.hexId, attacker.facing, target.hexId);
-  if (outOfArc && !templateOf(state, attacker).turreted)
-    return fail('target out of arc', band, fpColor);
+  if (outOfArc && !attackerTmpl.turreted) return fail('target out of arc', band, fpColor);
   if (!hasLOS(state, attacker.hexId, target.hexId)) return fail('no line of sight', band, fpColor);
   if (band === 'out') return fail('out of range', band, fpColor);
 
-  const attackerInTargetFront = inArc(target.hexId, target.facing, attacker.hexId);
+  const attackerInTargetFront = !isHE && inArc(target.hexId, target.facing, attacker.hexId);
   const isFlank = !attackerInTargetFront;
   const defense = attackerInTargetFront ? tEff.dr.front : tEff.dr.flank;
+  const smokeDr = Math.min(
+    2,
+    smokeDefenseBonus(state, target.hexId) + smokeLosDrBonus(state, attacker.hexId, target.hexId),
+  ); // §14.3 stacking cap
   const dr =
     defense +
-    terrainDM(state, target.hexId) +
+    terrainDMForAttack(state, target.hexId, fpColor, isHE) +
     wallDMForFire(state, attacker.hexId, target.hexId) +
     vehicleCoverBonus(state, target) +
-    apcTransportBonus(state, target);
-  const ar = (fpColor === 'red' ? aEff.fp.red : aEff.fp.blue) + fpRangeModifier(band) + arBonus;
+    apcTransportBonus(state, target) +
+    smokeDr;
+  const ar =
+    (fpColor === 'red' ? aEff.fp.red : aEff.fp.blue) +
+    fpRangeModifier(band) +
+    arBonus +
+    smokeAttackPenalty(state, attacker.hexId);
 
   return { legal: true, band, fpColor, ar, dr, hitNumber: dr - ar, isFlank, outOfArc };
 }
@@ -215,7 +244,16 @@ export function rollAttack(
 // resolved against the target's flank DR plus terrain DMs.
 // ---------------------------------------------------------------------------
 
-export function closeCombatContext(state: GameState, attacker: Unit, target: Unit): AttackContext {
+/**
+ * `arBonus` is the Group Support Bonus (+1AR per Supporting Unit, §10.7) for a
+ * Group Close Combat (§10.6: only same-hex Units may support one).
+ */
+export function closeCombatContext(
+  state: GameState,
+  attacker: Unit,
+  target: Unit,
+  arBonus = 0,
+): AttackContext {
   const aEff = effectiveStats(state, attacker);
   const tEff = effectiveStats(state, target);
   // §16.5: an Open-Topped Vehicle defends Close Combat with its blue Flank
@@ -229,11 +267,19 @@ export function closeCombatContext(state: GameState, attacker: Unit, target: Uni
   if (attacker.hexId !== target.hexId) return fail('not in the same hex', 'short', fpColor);
 
   const ccMod = templateOf(state, attacker).whiteBoxFp ? -2 : 4;
-  const ar = (fpColor === 'red' ? aEff.fp.red : aEff.fp.blue) + ccMod;
+  // Close Combat shares one hex, so its Smoke both penalizes the attacker and
+  // shields the defender at once (§14.3) — there's no separate LOS path to walk.
+  const ar =
+    (fpColor === 'red' ? aEff.fp.red : aEff.fp.blue) + ccMod + smokeAttackPenalty(state, attacker.hexId) + arBonus;
   // §15.14: Vehicles get NO defensive terrain bonus in close combat (foot do, §6.10).
   const targetIsVehicle = templateOf(state, target).kind === 'vehicle';
   const terrain = targetIsVehicle ? 0 : terrainDM(state, target.hexId);
-  const dr = tEff.dr.flank + terrain + vehicleCoverBonus(state, target) + apcTransportBonus(state, target);
+  const dr =
+    tEff.dr.flank +
+    terrain +
+    vehicleCoverBonus(state, target) +
+    apcTransportBonus(state, target) +
+    smokeDefenseBonus(state, target.hexId);
   return { legal: true, band: 'short', fpColor, ar, dr, hitNumber: dr - ar, isFlank: true, outOfArc: false };
 }
 
@@ -242,8 +288,9 @@ export function rollCloseCombat(
   attacker: Unit,
   target: Unit,
   capMod = 0,
+  arBonus = 0,
 ): AttackRoll {
-  const ctx = closeCombatContext(state, attacker, target);
+  const ctx = closeCombatContext(state, attacker, target, arBonus);
   if (!ctx.legal) {
     return {
       legal: false,

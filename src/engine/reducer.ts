@@ -18,6 +18,7 @@ import { attackContext, closeCombatContext, rollCloseCombat, rollStackFire } fro
 import { isInFrontArc, parseHexId } from './hex';
 import { drawHit, effectiveStats, returnHitToPile, templateOf } from './hits';
 import { groupConnected, groupStress, isValidSupporter } from './groups';
+import { directFireZone, indirectFireZone, rollIndirectFire } from './mortar';
 import { directionTo, moveCost, pivotCost, planVehicleMove } from './movement';
 import { RALLY_AP_COST, rollRally } from './rally';
 import { legalEntryHexes } from './reinforcements';
@@ -345,6 +346,77 @@ export function reduce(state: GameState, action: Action): ReduceResult {
     return finish();
   };
 
+  const doIndirectFire = (a: Extract<Action, { type: 'INDIRECT_FIRE' }>): ReduceResult => {
+    const attacker = next.units[a.attackerId];
+    if (!attacker) return deny('no such unit');
+    if (attacker.side !== next.currentSide) return deny('not your turn');
+    if (attacker.carriedBy) return deny('a transported Unit cannot attack (§15.8)');
+    if (templateOf(next, attacker).kind !== 'mortar') return deny('only Mortars may fire indirectly (§13.2)');
+    const minRange = templateOf(next, attacker).minRange ?? 0;
+    const zone = indirectFireZone(next, attacker, a.targetHexId, a.spotterHexId, minRange);
+    if (!zone.legal) return deny(zone.reason ?? 'illegal indirect attack');
+
+    const diceMod = clampCapMod(a.capDiceMod ?? 0);
+    const player = next.players[attacker.side];
+    const indirectCost = templateOf(next, attacker).indirectApToFire ?? effectiveStats(next, attacker).apToFire;
+    const { cost, capsSpent } = planCost(attacker, indirectCost, a.capCostReduce ?? 0);
+    if (attacker.status === 'spent' && cost > 0)
+      return deny('a Spent unit must spend CAPs to reduce its Action Cost to 0AP (§3.4)');
+    const capNeeded = capsSpent + Math.abs(diceMod);
+    if (player.capCurrent < capNeeded) return deny('not enough CAP to fire indirectly');
+    player.capCurrent -= capNeeded;
+
+    const result = rollIndirectFire(next, attacker, a.targetHexId, a.spotterHexId, diceMod);
+    next.rng = result.rng;
+    for (const roll of result.rolls) {
+      log(
+        'indirectFire',
+        `${attacker.id} fires indirectly (spotter ${a.spotterHexId}) at ${roll.targetId}: rolled ` +
+          `${roll.dice[0]}+${roll.dice[1]}=${roll.total} vs Hit# ${roll.hitNumber} (AR ${roll.ar} / DR ${roll.dr}) ` +
+          `-> ${roll.critical ? 'CRITICAL' : roll.hit ? 'hit' : 'miss'}`,
+        attacker.side,
+      );
+      if (roll.hit) {
+        const t = next.units[roll.targetId];
+        if (t) applyHit(t, roll.critical, roll.fpColor);
+      }
+    }
+    afterAction(attacker, cost);
+    return finish();
+  };
+
+  const doFireSmoke = (a: Extract<Action, { type: 'FIRE_SMOKE' }>): ReduceResult => {
+    const unit = next.units[a.unitId];
+    if (!unit) return deny('no such unit');
+    if (unit.side !== next.currentSide) return deny('not your turn');
+    if (unit.carriedBy) return deny('a transported Unit cannot attack (§15.8)');
+    const tmpl = templateOf(next, unit);
+    if (!tmpl.canFireSmoke) return deny('this Unit cannot Fire Smoke (§14.0)');
+    const minRange = tmpl.minRange ?? 0;
+    const indirect = a.spotterHexId != null;
+    const zone = indirect
+      ? indirectFireZone(next, unit, a.targetHexId, a.spotterHexId!, minRange)
+      : directFireZone(next, unit, a.targetHexId, minRange);
+    if (!zone.legal) return deny(zone.reason ?? 'illegal Fire Smoke');
+
+    const player = next.players[unit.side];
+    const base = indirect ? (tmpl.indirectApToFire ?? tmpl.apToFire) : effectiveStats(next, unit).apToFire;
+    const { cost, capsSpent } = planCost(unit, base, a.capCostReduce ?? 0);
+    if (unit.status === 'spent' && cost > 0)
+      return deny('a Spent unit must spend CAPs to reduce its Action Cost to 0AP (§3.4)');
+    if (player.capCurrent < capsSpent) return deny('not enough CAP to fire smoke');
+    player.capCurrent -= capsSpent;
+
+    next.hexes[a.targetHexId]!.features.smoke = 2; // §14.1: a fresh Smoke Marker is always Heavy
+    log(
+      'smoke',
+      `${unit.id} fires Smoke ${indirect ? `(indirect, spotter ${a.spotterHexId})` : '(direct)'} onto ${a.targetHexId}`,
+      unit.side,
+    );
+    afterAction(unit, cost);
+    return finish();
+  };
+
   const doRally = (a: Extract<Action, { type: 'RALLY' }>): ReduceResult => {
     const unit = next.units[a.unitId];
     if (!unit) return deny('no such unit');
@@ -486,19 +558,25 @@ export function reduce(state: GameState, action: Action): ReduceResult {
     if (!leader || !target) return deny('no such unit');
     if (leader.side !== next.currentSide) return deny('not your turn');
     if (target.side === leader.side) return deny('friendly target');
-    // Group close combat is a later increment; support ranged Group Attacks now.
-    if (target.hexId === leader.hexId) return deny('group close combat not yet supported');
-    // §16.1: a Group Attack is always ranged fire, so Wagons (no attack) and
-    // Trucks (Close-Combat-only) may not lead one.
+    // §10.6: the Leader is in Close Combat iff it shares the Target's hex —
+    // only same-hex Units may support a Group Close Combat (isValidSupporter
+    // enforces that below).
+    const isCloseCombat = target.hexId === leader.hexId;
     const leaderTmpl = templateOf(next, leader);
-    if (leaderTmpl.attackMode === 'none' || leaderTmpl.attackMode === 'closeCombatOnly')
+    // §16.1: Wagons (no attack) may never lead; a Truck (Close-Combat-only)
+    // may lead a Group Close Combat, just not a ranged Group Attack.
+    if (leaderTmpl.attackMode === 'none') return deny('this Unit cannot Attack (§16.1)');
+    if (!isCloseCombat && leaderTmpl.attackMode === 'closeCombatOnly')
       return deny('this Unit cannot make a ranged Attack (§16.1)');
 
     const capMod = clampCapMod(a.capDiceMod ?? 0);
-    const ctx = attackContext(next, leader, target, capMod);
-    if (!ctx.legal) return deny(ctx.reason ?? 'illegal attack');
+    const ctx = isCloseCombat
+      ? closeCombatContext(next, leader, target)
+      : attackContext(next, leader, target, capMod);
+    if (!ctx.legal) return deny(ctx.reason ?? (isCloseCombat ? 'illegal close combat' : 'illegal attack'));
 
-    // Validate supporters (§10.6) and de-dup against the leader.
+    // Validate supporters (§10.6) and de-dup against the leader. In Close
+    // Combat, isValidSupporter restricts these to Units sharing the Leader's hex.
     const supIds = [...new Set(a.supporterIds)].filter((id) => id !== a.leaderId);
     const members: Unit[] = [leader];
     for (const id of supIds) {
@@ -511,9 +589,10 @@ export function reduce(state: GameState, action: Action): ReduceResult {
     const arBonus = supIds.length; // +1AR per qualifying Supporting Unit (§10.7)
 
     // §10.8: Group Attack cost = the Leader's Attack Cost (+ Group Stress).
-    // §16.2: a Turreted leader firing outside its Arc pays +2AP.
+    // §16.2: a Turreted leader firing outside its Arc pays +2AP (ranged only —
+    // Close Combat has no Arc of Fire requirement).
     const eff = effectiveStats(next, leader);
-    const arcPenalty = ctx.outOfArc && leaderTmpl.turreted ? 2 : 0;
+    const arcPenalty = !isCloseCombat && ctx.outOfArc && leaderTmpl.turreted ? 2 : 0;
     const costBeforeReduce = eff.apToFire + arcPenalty + groupStress(members);
     const reduceBy = Math.max(0, Math.trunc(a.capCostReduce ?? 0));
     const { cost, capsSpent } = reduceActionCost(costBeforeReduce, reduceBy);
@@ -524,21 +603,35 @@ export function reduce(state: GameState, action: Action): ReduceResult {
     if (player.capCurrent < capNeeded) return deny('not enough CAP');
     player.capCurrent -= capNeeded;
 
-    // §7.5.1: one shot at the hex resolves against every stacked enemy; the
-    // leader's AR carries the +1AR-per-supporter Group Support Bonus.
-    const stack = rollStackFire(next, leader, target.hexId, capMod, arBonus);
-    next.rng = stack.rng;
-    for (const { targetId, roll } of stack.rolls) {
+    if (isCloseCombat) {
+      // §7.7.3/§10.6: Close Combat resolves against ONE chosen target, not the
+      // whole hex — the leader's AR carries the +1AR-per-supporter bonus.
+      const roll = rollCloseCombat(next, leader, target, capMod, arBonus);
+      next.rng = roll.rng;
       log(
-        'groupFire',
-        `Group [${members.map((m) => m.id).join('+')}] fires at ${targetId}: rolled ${roll.dice[0]}+${roll.dice[1]}=` +
-          `${roll.total} vs Hit# ${roll.hitNumber} (AR ${roll.ar} / DR ${roll.dr})` +
-          `${roll.isFlank ? ' (flank)' : ''} -> ${roll.critical ? 'CRITICAL' : roll.hit ? 'hit' : 'miss'}`,
+        'groupCc',
+        `Group [${members.map((m) => m.id).join('+')}] close-combats ${target.id}: rolled ` +
+          `${roll.dice[0]}+${roll.dice[1]}=${roll.total} vs flank Hit# ${roll.hitNumber} ` +
+          `(AR ${roll.ar} / DR ${roll.dr}) -> ${roll.critical ? 'CRITICAL' : roll.hit ? 'hit' : 'miss'}`,
         leader.side,
       );
-      if (roll.hit) {
-        const t = next.units[targetId];
-        if (t) applyHit(t, roll.critical, roll.fpColor);
+      if (roll.hit) applyHit(target, roll.critical, roll.fpColor);
+    } else {
+      // §7.5.1: one shot at the hex resolves against every stacked enemy.
+      const stack = rollStackFire(next, leader, target.hexId, capMod, arBonus);
+      next.rng = stack.rng;
+      for (const { targetId, roll } of stack.rolls) {
+        log(
+          'groupFire',
+          `Group [${members.map((m) => m.id).join('+')}] fires at ${targetId}: rolled ${roll.dice[0]}+${roll.dice[1]}=` +
+            `${roll.total} vs Hit# ${roll.hitNumber} (AR ${roll.ar} / DR ${roll.dr})` +
+            `${roll.isFlank ? ' (flank)' : ''} -> ${roll.critical ? 'CRITICAL' : roll.hit ? 'hit' : 'miss'}`,
+          leader.side,
+        );
+        if (roll.hit) {
+          const t = next.units[targetId];
+          if (t) applyHit(t, roll.critical, roll.fpColor);
+        }
       }
     }
     afterGroupAction(members, cost);
@@ -756,6 +849,10 @@ export function reduce(state: GameState, action: Action): ReduceResult {
       return doFire(action);
     case 'CLOSE_COMBAT':
       return doCloseCombat(action);
+    case 'INDIRECT_FIRE':
+      return doIndirectFire(action);
+    case 'FIRE_SMOKE':
+      return doFireSmoke(action);
     case 'RALLY':
       return doRally(action);
     case 'STALL':
