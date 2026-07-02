@@ -3,8 +3,8 @@
 Guidance for Claude Code when building this project. Read this first, every session.
 
 > **Source of truth for rules:** the official *Conflict of Heroes: Awakening the Bear*
-> **3rd Edition** rulebook (Academy Games). This project is migrating from a 2nd-edition (7AP)
-> build to **3rd-edition rules only** — see **§A (v3 migration)** below.
+> **3rd Edition** rulebook (Academy Games). This project migrated from a 2nd-edition (7AP) build
+> to **3rd-edition rules only** — the migration is complete; see **§A** below.
 >
 > **Do not invent rules from memory, and do not read the PDF.** The rulebook has been transcribed
 > into a curated, section-by-section reference under **`rules/`**. Routing rule: when implementing
@@ -15,88 +15,15 @@ Guidance for Claude Code when building this project. Read this first, every sess
 
 ---
 
-## A. v3 MIGRATION — ✅ COMPLETE (kept as reference)
+## A. v3 migration (historical — complete)
 
-> **Status:** the cutover below (§A.3 steps 1–6) is **done**, and M5 Group Actions is built. This
-> section is retained as the rationale/spec for the 3rd-ed model — not a TODO. **Never reintroduce
-> 7AP logic.**
+This project migrated from a 2nd-edition (7AP-pool) engine to 3rd-edition (threshold-based action
+economy) rules. The migration finished long ago — the codebase has been v3-only since M4.5, and
+M5–M7 were all built on top of it since. **Never reintroduce 7AP/`ACTIVATE_UNIT`/`MARK_SPENT` logic.**
 
-The 2nd→3rd edition change is **not** a tweak; it replaces the **action economy**, which most of
-the engine hangs off. Everything below is the plan we cut over by.
-
-### A.1 What changed (and the one-line "why")
-
-| Area | 2nd ed (current code) | 3rd ed (target) | v3 § |
-|---|---|---|---|
-| **Action economy** | each Unit has a **7AP pool**; you `ACTIVATE_UNIT`, spend `player.ap`, interleave free "opportunity" actions, `MARK_SPENT` | **no pool.** Pick **one Unit → one Action**; Action Cost is a **threshold**, not a budget | 2.0–2.5 |
-| **Spent Check** | none (units just run out of AP) | after an Action, roll the **Spent Die**; **roll > cost → Fresh, else → Spent** | 2.5 |
-| **Spent Die** | n/a | weighted **d10 = [1,1,2,3,3,4,5,5,6,7]** | 2.5 |
-| **Stress** | **did not exist** | **+1AP** to cost if the Unit acted on your **previous** Turn; not cumulative; cleared by Passing | 2.6 |
-| **Pass / Stall** | pass/stall present | Pass = free, **clears Stress**; Stall = **1AP**, do nothing, Spent Check, Stresses; both Pass → Round ends | 2.7, 2.8 |
-| **CAPs** | supplement AP / CAP action / ≤2 dice mod / track loss | reduce Action Cost **before** a Spent Check (**any number, −1 each**); 0AP ⇒ **no check**; ±1 d6 (≤2); lost on death; **floor of 3** | 3.0–3.4, 7.12, 7.13 |
-| **Combat math** | `AV = FP + 2d6 + CAP ≥ DV`, crit at `+4` | `Hit Number = DR − AR`; `2d6 ≥ Hit Number`; crit by 4 | 6.0, 6.8 |
-| **Initiative** | both sides roll 2d6, higher first (reroll ties) | **only the side WITHOUT VP Advantage** rolls 2d6; **≥ 7 ⇒ goes first**, else opponent does | 9.11 |
-| **Round reset** | flip spent→fresh; CAP = start − losses | adds: **CAP floor 3**, clear Stress, **Smoke dissipation** (M7), (later) OBA resolution | 9.4–9.7 |
-| **Groups** | planned as "shared activation / 7AP firegroup" (**not built**) | **Group Actions**: one Action, **one** Spent Check for the group; group move cost = **highest** member; group attack = leader **+1AR per supporter** | 10.0–10.12 |
-
-> **Algebra note (good news):** v2's `AV = FP + 2d6 ≥ DV` is identical to v3's `2d6 ≥ DR − AR`
-> (with `AR` playing the FP role), and the `+4` critical is unchanged. **`combat.ts` ports with a
-> rename, not a rewrite.** Same for the range modifiers (short **+3AR** adjacent, long **−2AR**,
-> close combat **+4AR**, crewed **−2AR** in CC) and the **hit-marker table** (your foot markers
-> already match the v3 **Soft Target** deck — see §6).
-
-### A.2 Per-module punch list — keep / rename / rewrite / new
-
-**Port almost as-is (rename AV/DV→AR/DR, FP→Firepower→AR, re-verify values vs `rules/`):**
-`hex.ts`, `terrain.ts`, `los.ts`, `range.ts`, `movement.ts`, `combat.ts`, `hits.ts`, `victory.ts`,
-`rng.ts`, all of `data/` (stats/terrain/maps/`hitMarkers.ts`), all of `ui/`, `state/`, and the
-`scripts/` geometry.
-
-**Rewrite (the v3 cutover):**
-- `types.ts` — `PlayerState`: drop `activatedUnitId` and `ap`. `Unit.status`: `'fresh'|'spent'`
-  (delete `'active'`); add `stressed: boolean`. (CAP/loss/vp/hand/nation fields stay.)
-- `actions.ts` — delete `ACTIVATE_UNIT` / `MARK_SPENT`; every unit Action (`MOVE`/`FIRE`/`RALLY`/
-  `PIVOT`/`CLOSE_COMBAT`) is now self-contained and is followed by a Spent Check. Add CAP fields to
-  actions: `{ capCostReduce?, capDiceMod? }`. Re-derive `legalActions` from "is this Unit Fresh, or
-  Spent-but-affordable-to-0AP-with-CAPs".
-- `cap.ts` — new spend model: `reduceActionCost(cost, caps)` (−1 each, any number, can reach 0AP ⇒
-  skip Spent Check), keep `clampCapMod` for ±1 d6 (≤2); add the **floor-3** to `applyUnitLoss`/reset.
-- `turn.ts` — `startRound` = the v3 **Pre-Round Sequence** (flip spent→fresh keeping markers+facing,
-  CAP reset with floor 3, clear Stress, then v3 **initiative**: non-advantage side rolls 2d6 ≥ 7).
-  The per-Action turn step: cost = base + Stress + terrain + hit-marker mods − CAP; Spent Check;
-  set `stressed`; switch side. Pass clears the acting side's Stress.
-- `reducer.ts` — rewire `doMove/doFire/doRally/...` to the "act → Spent Check → Stress" flow; drop
-  activation bookkeeping; keep events/log.
-- `rally.ts` — keep 5AP + roll `2d6 ≥ Rally Number`, **but** add the **mandatory Spent Check after
-  the rally regardless of result** (7.10), let Stress raise the 5AP, and expand modifiers
-  (fortifications, heavy smoke, +1 per friendly un-hit unit — cumulative).
-
-**New modules:**
-- `spent.ts` — the Spent Die `[1,1,2,3,3,4,5,5,6,7]` + `spentCheck(rng, cost) → {fresh, roll, rng}`
-  (pass iff `roll > cost`). Oracle for tests = the Spent Chance table in `rules/03`.
-- `stress.ts` — set/clear Stress, and the "+1AP if acted last Turn" cost contribution.
-
-**Re-key data to v3 (later, with the relevant module):** unit counters use Fresh/Spent sides and
-attack/move cost as **check thresholds**; add the **Armored Target** hit-marker deck for vehicles
-(M6); card lists and hit-marker counts per the v3 back-matter.
-
-### A.3 Migration build order (each step = green tests before the next)
-
-0. **Pin rules:** commit `rules/` + `rules/INDEX.md`; delete/quarantine 2nd-ed rules notes and the
-   old `RULES-ASSUMPTIONS.md` rulings that v3 now answers (re-open only genuine v3 ambiguities).
-1. **`spent.ts`** (Spent Die + Spent Check). Test against the 20/30/50/60/80/90/100% table (`rules/03`).
-2. **State model** (`types.ts`): Fresh/Spent + `stressed`; migrate `state.ts`/`initGame`.
-3. **Action economy** (`turn.ts`/`actions.ts`/`reducer.ts`/`cap.ts`): act → Spent Check → Stress;
-   Pass/Stall; round-end on consecutive Pass. **This is the cutover.** Port the rulebook's red-box
-   examples in `rules/02` and `rules/03` as fixtures.
-4. **CAPs** integrated into the cost path + d6 checks (floor 3 on reset/loss).
-5. **Combat/Hits/Rally** rename to AR/DR; add the post-rally Spent Check; re-verify all numbers
-   against `rules/06`–`rules/07` (and their red boxes — they're ready-made test cases).
-6. **Round controller / Initiative / VP** to v3 (`rules/09`).
-7. **Re-scope M5 → Group Actions (§10)** (see roadmap §8). Then resume later modules in v3 order.
-
-The conformance harness (`scripts/conformance.ts`) is your safety net: re-point its re-derivation
-to the v3 tables as you go, so the engine is continuously checked against `rules/`.
+The full plan (the 2nd→3rd-ed change table, per-module rewrite list, and build order) is preserved
+at **`docs/v3-migration-plan.md`** for archaeology — not needed for day-to-day work. Current
+mechanics live in `rules/` and this file's §6/§8.
 
 ---
 
@@ -105,102 +32,25 @@ to the v3 tables as you go, so the engine is continuously checked against `rules
 This repo is self-describing: a fresh session needs only the code + these docs.
 
 - **Canonical location:** `C:\Users\ensch\Git Repos\conflict-of-heroes` (git repo; remote
-  `origin` = https://github.com/enschell/conflict-of-heroes.git). **Launch Claude Code from this
-  folder** so this CLAUDE.md auto-loads.
-- **Orient by reading, in order:** this file (esp. **§A migration**, golden rules §3, directory map
-  §4, rules index §6, roadmap §8), then `README.md`, then **`rules/INDEX.md`** and the specific
-  `rules/NN-*.md` for whatever you're building. (The old `reference/rulebook.txt` is superseded by
-  `rules/`.)
+  `origin` = https://github.com/enschell/conflict-of-heroes.git; active branch **`v3-migration`**,
+  not yet merged to `main` — that's a deliberate later step, not an oversight). **Launch Claude Code
+  from this folder** so this CLAUDE.md auto-loads.
+- **Orient by reading, in order:** this file (golden rules §3, directory map §4, rules index §6,
+  roadmap §8), then `README.md`, then **`rules/INDEX.md`** and the specific `rules/NN-*.md` for
+  whatever you're building.
 - **Authoring a Mission from the Mission Book PDF:** follow
-  `docs/extracting-missions-from-the-mission-book.md` (PyMuPDF render+extract, the
-  A–S × 01–12 label↔axial system, terrain transcription, and how Mission 1 was encoded).
+  `docs/extracting-missions-from-the-mission-book.md`.
 - **Verify before changing:** `npm install` (first time), then `npm test` (Vitest),
   `npm run typecheck`, `npm run build`, and `npm run conformance`. All green = known-good baseline.
 - **Run it:** `npm run dev` → http://localhost:5173. Windows: Node 24 is at
   `C:\Program Files\nodejs` (not on Git Bash's PATH; in PowerShell prepend it).
-- **Current status / next:** **v3 cutover DONE (§A.3 steps 1–6)**, **M5 — Group Actions DONE**, and
-  **M6 — Vehicles + Special Units DONE**. The engine runs on 3rd-ed rules: Spent Die/Check, Fresh/Spent
-  + Stress, Pass/Stall, CAP floor 3, AR/DR + Hit Number, v3 initiative + no-tie VP track, Group
-  Move/Attack/Rally (engine + UI), vehicles — Armored Target hit deck, vehicle movement (wheeled/
-  tracked terrain costs, Bonus Moves §15.2 with click-to-build path UI), vehicle combat specifics
-  (no CC terrain bonus, Vehicle Cover for foot units, §15.14–15.15), Transport/Towing (Load, ride-along
-  Move, Unload, free-unload-on-destroy, click-to-load/unload UI, towing damaged/immobilized Vehicles,
-  §15.6–15.11) — and Special Units (§16): Turreted Vehicles (fire outside Arc for +2AP), Open-Topped
-  Vehicles (red-FP Close Combat pulls a Soft Target marker), APC Transport Bonus (+2DR for a carried
-  Soft Target), and Trucks/Wagons (no Hex control, no CAP loss on destroy, Close-Combat-only / no
-  attack). **Real Mission 1 ("Partisans") is wired** on the authored Map 1 (206 hexes), 7 CAP/side,
-  German Round-1 initiative, Soviets start +1 VP, I06 scores 1 VP/round, 1 VP/kill. **Reinforcements
-  (§4.12) are real, not stopgap-placed:** Units wait off-Map in `GameState.reinforcements` until an
-  `ENTER` action (0AP, never a Spent Check, but Stressed; may enter as a Group in one Action) places
-  them on a Mission-specified entry Hex, with a within-2-hexes fallback if every entry Hex is
-  enemy-occupied. Mission 1: German Round 1 platoon (2 Rifles + 2 MG34) via the south edge (B01–B12),
-  German Round 3 SS Tracker (1 Pioneer) within 2 hexes of R01, Soviet Round 2+ reinforcements
-  (2 Rifles) at Road Hex R07 — composition/timing verified against the Mission Book's Commander's
-  Forces panels. A `ReinforcementsPanel` per side shows each pending wave's units (graphical badge +
-  name) and entry condition, with a one-click "Enter now" that auto-spreads the whole wave across
-  distinct legal entry hexes, **or** a one-Unit-at-a-time manual placement (a "Place" button per
-  pending Unit arms placement mode; the board highlights that Unit's legal entry Hexes in purple;
-  clicking one commits a single-Unit `ENTER` there, matching Load/Unload's click-to-place feel;
-  "Cancel" or any click on a non-highlighted Hex aborts without side effects). The old 2nd-ed
-  `FIREFIGHT_1`/`partisans` scaffold is retired. An **Armor Sandbox** test mission
-  (`data/missions/sandbox.ts`) exercises vehicles without touching Mission 1. Board edge rendering
-  (clipped non-playable half-hexes) is done.
-
-  **M7 — Mortars + Smoke (§13–14) — engine DONE, UI partial:** `kind: 'mortar'` templates
-  (`minRange`, `indirectApToFire`, `canFireSmoke`) fire High Explosive (`combat.ts`'s shared
-  `attackContext` forces Flank DR for any mortar, §13.9), enforce Minimum Range, and apply the Air
-  Burst exception (a red-Flank target loses the Heavy Woods +2DR bonus vs HE). Direct Attacks reuse
-  the existing `FIRE` action/UI as-is. **Indirect Attacks** are a new `mortar.ts` module + `INDIRECT_FIRE`
-  action (§13.2–§13.3): a Spotter Hex (within 2, clear LOS of the Mortar) supplies LOS to a Target
-  Hex the Mortar can't see itself, while Arc/Min/Max Range stay keyed to the Mortar's own Hex; Elevation
-  Combat Bonus from the Spotter is deferred to 0 pending Hills (M9), same as `movement.ts`'s existing
-  deferral. **Smoke** (`smoke.ts`) is a real Hex feature: Heavy (+2DR defend / −2AR attack, blocks LOS
-  outright) and Light (+1/−1, doesn't block alone but 2+ Light Hexes on a LOS path do, and a single one
-  adds +1DR); a Rally +1 bonus (§7.8); dissipation each Pre-Round Sequence (Heavy→Light, Light→removed,
-  wired into `turn.ts`). A new `FIRE_SMOKE` action places Heavy Smoke instead of attacking (Direct or
-  Indirect targeting, §14.1) — targets **any non-Water Hex, occupied or not** (§14.0: it's terrain,
-  not a Unit, so screening your own empty advance route is a legal target, not just an enemy Hex).
-  A non-canonical **Fire Support Sandbox** test mission
-  (`data/missions/fireSupportSandbox.ts`) gives each side a Mortar+Rifle pair separated by Heavy Woods,
-  so Indirect Attacks are exercised (not just theoretically legal) without touching Mission 1. Covered
-  by `mortar.test.ts`, `smoke.test.ts`, `fire-smoke-indirect.test.ts` (236 tests total, 0 conformance
-  violations). **UI ✅:** clicking an enemy Hex a Mortar can reach only indirectly (or that it can
-  Smoke) offers `⤳ Indirect Fire` / `☁ Fire Smoke` in the same `ActionChooser` popup used for the
-  Move-vs-Attack ambiguity (§5.4-style), auto-picks its Spotter Hex the same way `legalActionsForUnit`
-  already does (the first legal one via `bestSpotterFor`), then runs the normal CAP-confirm gate +
-  dice-roll flow (Fire Smoke skips the roll — it just places the Marker). The Board outlines any Hex a
-  Mortar can reach — Fire, Indirect Fire, or Fire Smoke alike — with the same solid red `#ff5a5a`
-  stroke as a normal Fire target (a dashed orange/grey variant per action type was tried first and
-  found too hard to see; solid + one shared color won). It also renders an actual Smoke Marker overlay
-  on any Hex that has one (translucent haze, denser for Heavy) — `HoverPanel` reports a Hex's Smoke
-  level too. **The
-  auto-picked Spotter Hex is the locked final design, not a stopgap** — §13.3 places no requirement on
-  *which* legal Spotter Hex is used (only that one exists), so there's no player choice to expose; a
-  manual picker was considered and deliberately rejected. If no legal Spotter Hex exists (within 2 of
-  the Mortar, clear LOS to the Mortar, clear LOS to the Target), the Hex simply isn't a legal Indirect
-  target — `bestSpotterFor` returns `undefined` and no action is offered. Min/Max Range and Arc of
-  Fire are always measured from the **Mortar's own Hex**, never the Spotter's — verified line-by-line
-  in `mortar.ts`'s `indirectFireZone`/`bestSpotterFor`.
-  **OBA (§13.4–13.9) is explicitly deferred**, not attempted: it's specified as "Artillery
-  Weapon Cards," and building a parallel non-card OBA planning/drift mechanic now would likely be
-  thrown away once the real Cards subsystem (§8, M12) lands — OBA should be built together with cards,
-  not ahead of them. **Group Close Combat (§10.6) is done**, closing the M5 gap: `GROUP_ATTACK` now
-  branches on `target.hexId === leader.hexId` — Close Combat resolves via `closeCombatContext`/
-  `rollCloseCombat` (now `arBonus`-aware) against the one chosen target, not a hex-wide stacked shot;
-  `isValidSupporter` restricts Close-Combat support to Units sharing the Leader's hex (a Truck,
-  `closeCombatOnly`, may lead or support one — only a Wagon, `attackMode:'none'`, still can't). A live
-  click-through of it then surfaced two real `store.ts` bugs (now fixed, see §8's Group Close Combat
-  entry for the detail): `groupAttack` used to dispatch instantly with no dice-roll preview and no
-  CAP-confirm, and the board-click Group-selection logic couldn't add a Spent Unit to a Group at all
-  (not just missing a confirm — fully unreachable), which is why Group Move looked "not implemented."
-  Both fixed via a new `groupCapGate`/`requestGroupAttackRoll` (mirroring the single-unit `capGate`/
-  roll-preview flow) and a `confirmPrecomputedCap` helper for Load/Unload. **M8 Hidden Units (§11) is
-  deliberately deferred to online play** (locked decision) — it's secret per-side information, which a
-  shared hotseat screen fundamentally can't enforce; see §8's M8 entry. The Mortar's auto-picked
-  Spotter Hex is likewise a **locked design decision, not a gap** — no manual picker; §13.3 places no
-  requirement on which valid Spotter Hex is used, and Min/Max Range/Arc always come from the Mortar's
-  own Hex regardless. **Next:** §16.4 Mobile Vehicles (deferred, narrow subtype), then M9+ per the
-  roadmap below.
+- **Current status:** the v3 cutover, M5 (Group Actions + Group Close Combat), M6 (Vehicles +
+  Special Units), and M7 (Mortars + Smoke) are all done; real **Mission 1** ("Partisans") plays
+  end-to-end with real reinforcements; conformance is at 0 violations. **M8 (Hidden Units) is
+  deliberately deferred to online play** — see §8, it's a locked decision, not a gap. **Next up:**
+  §16.4 Mobile Vehicles (deferred, narrow subtype, low priority), then M9 (elevation/hills). **§8 has
+  the full detail on every milestone — read that, not this bullet, for specifics on how something
+  works or why a decision was made.**
 
 ---
 
@@ -215,8 +65,8 @@ at the end wins (the v3 "no-tie" VP track — one side always leads).
 - **Hotseat first, online later.** Pass-and-play now; keep the engine network-agnostic so an
   authoritative server + WebSocket rooms can be added later with **no engine changes**.
 - **Vertical slice = infantry + vehicles, Mission 1 ("Partisans") playable end-to-end.** Vehicles
-  (M6) are largely built; mortars, OBA, smoke, hidden units, fortifications, mines, hills remain
-  **later modules** (roadmap §8).
+  (M6) and Mortars + Smoke (M7) are built; OBA, hidden units, fortifications, mines, hills remain
+  **later modules** (roadmap §8) — Hidden Units specifically deferred to online play, see §8.
 - **Stack:** Vite + React + TypeScript, **client-only**. SVG hex board. Pure-function rules engine.
   Zustand store. Vitest for tests.
 - **Content:** we author our **own** stats/terrain/scenario data and **original simple graphics**.
@@ -282,23 +132,23 @@ conflict-of-heroes/
   src/
     main.tsx  App.tsx
     engine/                 # PURE rules engine (see §3)
-      types.ts              # shared types (GameState, Unit, Hex, Action, GameEvent…)  [v3 rewrite]
-      state.ts              # GameState shape, initGame(mission), (de)serialize           [v3 edit]
-      rng.ts                # seeded RNG: roll2d6, rollD6, rollSpentDie, drawHit          [add die]
-      spent.ts              # ★ NEW: Spent Die [1,1,2,3,3,4,5,5,6,7] + spentCheck(cost)
-      stress.ts             # ★ NEW: Stress state + "+1AP if acted last Turn"
+      types.ts              # shared types (GameState, Unit, Hex, Action, GameEvent…)
+      state.ts              # GameState shape, initGame(mission), (de)serialize
+      rng.ts                # seeded RNG: roll2d6, rollD6, rollSpentDie, drawHit
+      spent.ts              # Spent Die [1,1,2,3,3,4,5,5,6,7] + spentCheck(cost)
+      stress.ts             # Stress state + "+1AP if acted last Turn"
       hex.ts                # axial math: neighbors, distance, direction, line, arc
       terrain.ts            # terrain table → AP cost, DR mod, blocksLOS, isCover
       los.ts                # line of sight + arc of fire; visibleHexesFrom(hex)
       movement.ts           # move cost, facing, pivot, backwards, roads, walls
       range.ts              # short +3AR (adjacent), long −2AR
-      combat.ts             # AR/DR; Hit Number = DR − AR; 2d6 ≥ HN; crit by 4   [rename only]
+      combat.ts             # AR/DR; Hit Number = DR − AR; 2d6 ≥ HN; crit by 4
       hits.ts               # draw marker, apply effects, 2nd hit = destroyed
-      rally.ts              # 5AP rally; 2d6 ≥ rally #; +mods; ★ Spent Check after (7.10)
+      rally.ts              # 5AP rally; 2d6 ≥ rally #; +mods; Spent Check after (7.10)
       cap.ts                # reduce cost (−1/CAP, any #; 0AP⇒no check), ±1 d6 (≤2), floor 3
       turn.ts               # Pre-Round Sequence, v3 initiative, act→SpentCheck→Stress, pass/stall
       victory.ts            # VP for kills, objective control, game end (no-tie track)
-      actions.ts            # action defs + getLegalActions()  [drop ACTIVATE/MARK_SPENT]
+      actions.ts            # action defs + getLegalActions()
       reducer.ts            # central reduce(state, action) → { state, events }
       groups.ts             # ✅ Group Actions §10: connectivity, support, one Spent Check/group
       reinforcements.ts     # ✅ M2.5/§4.12: legalEntryHexes (off-Map Units, ENTER)
@@ -319,12 +169,11 @@ conflict-of-heroes/
   scripts/  play.ts conformance.ts              # terminal driver + v3 conformance audit
 ```
 
-> **Current state:** engine/data/state/ui/scripts compile and pass under **3rd-ed (v3) rules** — the
-> §A cutover is complete, **M5 Group Actions** is built, **M6 Vehicles + Special Units** is built, and
-> **M7 Mortars + Smoke engine** is built (conformance 0 violations). Data is the real **Mission 1** on
-> **`maps/mission1.ts`** + **`missions/mission1.ts`** (the 2nd-ed `firefights/`/`maps/partisans.ts` are
-> deleted), plus the non-canonical **`missions/sandbox.ts`** (vehicles) and
-> **`missions/fireSupportSandbox.ts`** (mortars/smoke) test missions. `rules/` is the committed source
+> **Current state:** engine/data/state/ui/scripts compile and pass under 3rd-ed (v3) rules
+> (conformance 0 violations — see §0/§8 for the milestone status). Data is the real **Mission 1** on
+> `maps/mission1.ts` + `missions/mission1.ts` (the 2nd-ed `firefights/`/`maps/partisans.ts` are
+> deleted), plus the non-canonical `missions/sandbox.ts` (vehicles) and
+> `missions/fireSupportSandbox.ts` (mortars/smoke) test missions. `rules/` is the committed source
 > of truth.
 
 ---
@@ -502,51 +351,29 @@ Spent-Check die instead of a remaining-AP pool)*
 - **M0 — Scaffold** ✅ Vite+React+TS, Vitest; `hex.ts`, `types.ts`, `rng.ts`.
 - **M1 — Engine core (infantry, 2nd ed)** ✅ terrain, movement/facing, LOS/arc, combat, hits, rally,
   range, CAP, turn/round, victory, `reduce`, `initGame`, `legalActions`.
-- **M2 — Mission 1 content** ✅ `nations.ts`, `units.ts` (German + Soviet infantry, our own stats),
-  `maps/mission1.ts` (the real **Map 1** board, 206 hexes authored from the Mission Book) +
-  `missions/mission1.ts` ("Partisans": 5 rounds, 7 CAP/side, German Round-1 initiative, Soviets +1
-  VP, objective **I06** = 1 VP/round, 1 VP/kill). Mission 1 is a **Section-1 teaching Mission played
-  before cards**, so it uses **no cards** (card subsystem deferred). *(Replaced the earlier invented
-  2nd-ed firefight + `maps/partisans.ts`.)* **M2.5 — Reinforcements (§4.12)** ✅ added later: the
-  German Round-1 platoon, German Round-3 SS Tracker, and Soviet Round-2 reinforcements all enter via
-  the real `ENTER` action (`reinforcements.ts`, `ReinforcementsPanel.tsx`) instead of being pre-placed.
-- **M3 — UI** ✅ Zustand + React/SVG board, counters, inspector, LOS overlay, animated dice + SFX,
-  log, setup/victory screens.
-- **M3.1–M3.2 — UX** ✅ per-hex art; stacked-unit picker; SFX; right-sidebar hover panel; hold-Shift
-  LOS; fire-odds popup; turn banner; big readouts; dice in log.
-- **M3.3 — Close combat** ✅ same-hex attack vs flank DR, +4 (or −2 crewed/white-box), `CLOSE_COMBAT`.
-- **M3.4 — Conformance audit** ✅ `scripts/conformance.ts` self-plays + re-derives each move.
-- **M4 — Persistence** ✅ named save slots, JSON export/import, undo/redo; saves round-trip with RNG.
-
-- **★ M4.5 — v3 CUTOVER ✅ (see §A.3):** Spent Die + Spent Check → Fresh/Spent state → action
-  economy (dropped 7AP/activation; Stress; Pass/Stall) → CAP floor 3 → combat renamed to AR/DR +
-  post-rally Spent Check → v3 initiative/Pre-Round/no-tie VP. Real **Mission 1** plays under 3rd-ed
-  rules; conformance re-derives against `rules/`.
-
-- **M5 — Group Actions (§10)** ✅ `groups.ts` + `GROUP_MOVE`/`GROUP_ATTACK`/`GROUP_RALLY` (each
-  with **one** Spent Check for the group, all members Stressed): **group move** cost = highest member
-  move; **group attack** = leader **+1AR per qualifying supporter** (adjacent, target in Fire Zone +
-  Normal Range, no FP-affecting hit marker); **group rally** = per-unit Rally Checks, one group
-  Spent Check. UI: "Group" mode (multi-select, formation-move arrows, rally, click-enemy attack).
-  **Group Close Combat (§10.6)** landed later (see M7's entry below) — `GROUP_ATTACK` now covers both.
-
-- **M6 — Vehicles + Special Units (§15–16)** ✅: Armored Target hit deck + routing by DR colour;
-  vehicle movement (wheeled/tracked terrain costs, impassable/difficult terrain, roads ignore both,
-  §15.1–15.4); Bonus Moves (§15.2, multi-hex `MOVE.path`, forfeited on a Backwards/Difficult-Terrain
-  first move) with a click-to-build-path UI; vehicle combat specifics (no CC terrain bonus; Vehicle
-  Cover +1DR for co-located foot Units — excluded for a Transported Unit, §15.14–15.15); Transport/
-  Towing (`LOAD`/`UNLOAD`, same-hex vs adjacent-hex cost rules, ride-along Group Move, carried-Unit
-  Move/Pivot/Attack restrictions, free unload on the transport's destruction, click-to-load/unload UI,
-  Towing damaged/immobilized Vehicles by propulsion-compatible tugs, §15.6–15.11) — all as Group
-  Actions with one Group Spent Check. **Special Units (§16):** Turreted Vehicles fire outside their
-  Arc for +2AP (`turreted`); Open-Topped Vehicles treat their Flank DR as red vs red-FP Close Combat,
-  pulling a Soft Target marker (`openTopped`); APC Transport Bonus grants a carried Soft Target +2DR
-  (`apcTransport`); Trucks/Wagons cannot control a Hex, don't reduce the CAPs Track when destroyed,
-  and are Close-Combat-only / no-attack (`cannotControlHex`, `noCapLossOnDestroy`, `attackMode`).
-  `Armor Sandbox` (`data/missions/sandbox.ts`) is a non-canonical test mission (turreted tank + rifle
-  /side on Map 1; two extra German rifles were added later, each one Hex from the Soviet rifle, for a
-  quick Group Close Combat click-through — see §10.6 below). *Deferred:* §16.4 Mobile Vehicles
-  (combined wheel+track Bonus Moves — narrow subtype, no authored unit needs it).
+- **M2 — Mission 1 content** ✅ real **Map 1** (206 hexes, authored from the Mission Book) +
+  "Partisans" (`missions/mission1.ts`: 5 rounds, 7 CAP/side, German Round-1 initiative, Soviets +1
+  VP, I06 = 1 VP/round + 1 VP/kill, no cards — a Section-1 teaching Mission). **M2.5 —
+  Reinforcements (§4.12)** ✅ real `ENTER` action (`reinforcements.ts`, `ReinforcementsPanel.tsx`),
+  not pre-placed.
+- **M3 — UI** ✅ Zustand + React/SVG board, dice/SFX, log, setup/victory screens, LOS overlay
+  (hold Shift), fire-odds popup, per-hex art, hover panel, turn banner. **M3.3** ✅ Close Combat
+  (`CLOSE_COMBAT`, flank DR +4/−2 crewed). **M3.4** ✅ conformance audit (`scripts/conformance.ts`).
+- **M4 — Persistence** ✅ named save slots, JSON export/import, undo/redo; RNG travels with saves.
+- **★ M4.5 — v3 cutover** ✅ Spent Die/Check, Fresh/Spent + Stress, CAP floor 3, AR/DR combat, v3
+  initiative + no-tie VP. See `docs/v3-migration-plan.md` for the historical plan/rationale.
+- **M5 — Group Actions (§10)** ✅ `groups.ts` + `GROUP_MOVE`/`GROUP_ATTACK`/`GROUP_RALLY`, one Spent
+  Check per Group (group move = highest member cost; group attack = leader +1AR/supporter). UI:
+  "Group" mode (multi-select, formation-move arrows, click-enemy attack). **Group Close Combat
+  (§10.6)** landed later — see below; `GROUP_ATTACK` now covers both ranged and Close Combat.
+- **M6 — Vehicles + Special Units (§15–16)** ✅ Armored Target hit deck; vehicle movement
+  (wheeled/tracked terrain costs, Bonus Moves §15.2) with click-to-build-path UI; vehicle combat
+  specifics (no CC terrain bonus, Vehicle Cover); Transport/Towing (`LOAD`/`UNLOAD`, ride-along Group
+  Move, click-to-load/unload UI, towing damaged Vehicles). Special Units (§16): Turreted (+2AP
+  outside Arc), Open-Topped, APC Transport Bonus, Trucks/Wagons (`attackMode`, no Hex control, no
+  CAP loss on destroy). `Armor Sandbox` (`data/missions/sandbox.ts`) test mission; two extra German
+  rifles were added later for a Group Close Combat click-through (see §10.6 below). *Deferred:*
+  §16.4 Mobile Vehicles (combined wheel+track Bonus Moves — narrow subtype, no unit needs it).
 
 - **M7 — Mortars + Smoke (§13–14) — engine + UI ✅ (Spotter picker deferred):** `mortar.ts` — Direct
   Attacks reuse `FIRE` (min-range denial + HE-always-Flank-DR + Air Burst folded into `combat.ts`'s
