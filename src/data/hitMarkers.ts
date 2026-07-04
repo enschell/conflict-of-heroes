@@ -48,6 +48,11 @@ export const FOOT_HIT_MARKERS: Record<SoftHitType, HitMarkerDef> = {
   },
 };
 
+/** Title-case a hit-marker type id, e.g. 'cowering' → 'Cowering'. */
+export function markerName(type: string): string {
+  return type.charAt(0).toUpperCase() + type.slice(1);
+}
+
 /**
  * Human-readable list of a Hit Marker's restrictions and stat effects (§7.5),
  * for display under a Hit Unit. Derived from the marker's own data so the UI

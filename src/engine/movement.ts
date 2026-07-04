@@ -117,31 +117,32 @@ export function moveCost(state: GameState, unit: Unit, toHexId: HexId): MoveCost
   return { ap };
 }
 
-/** Is a single Bonus-Move step legal for `tmpl` (§15.2)? */
-function validBonusStep(
+/**
+ * Classify a single Bonus-Move step by which kind of Bonus Move symbol it
+ * requires (§15.2, §16.4): `'wheel'` (Road→Road, uncongested) can be paid from
+ * either a Wheel or Track budget; `'track'` (Road Congestion, or into Open
+ * Terrain) can only be paid from a Track budget. `null` = illegal for both.
+ */
+function classifyBonusStep(
   state: GameState,
-  tmpl: UnitTemplate,
   fromId: HexId,
   toId: HexId,
-): { ok: boolean; reason?: string } {
+): { kind: 'either' | 'track' | null; reason?: string } {
   const from = state.hexes[fromId];
   const to = state.hexes[toId];
-  if (!to) return { ok: false, reason: 'bonus move off-map' };
-  if (directionTo(fromId, toId) < 0) return { ok: false, reason: 'bonus move not adjacent' };
+  if (!to) return { kind: null, reason: 'bonus move off-map' };
+  if (directionTo(fromId, toId) < 0) return { kind: null, reason: 'bonus move not adjacent' };
   const roadToRoad = Boolean(from?.road) && to.road;
-  if ((tmpl.propulsion ?? 'tracked') === 'wheeled') {
-    // Wheel bonus moves: Road→adjacent Road only, and not into a vehicle-occupied Road (congestion).
-    if (!roadToRoad) return { ok: false, reason: 'wheeled bonus move must be road→road' };
+  if (!roadToRoad && to.terrain !== 'open')
+    return { kind: null, reason: 'bonus move must be road→road or into open terrain' };
+  if (roadToRoad) {
+    // Road Congestion (§15.2) blocks only Wheel Bonus Moves; Track Bonus Moves ignore it.
     const congested = Object.values(state.units).some(
       (u) => u.hexId === toId && templateOf(state, u).kind === 'vehicle',
     );
-    if (congested) return { ok: false, reason: 'road congestion' };
-  } else {
-    // Track bonus moves: Road→Road, or into Open Terrain.
-    if (!(roadToRoad || to.terrain === 'open'))
-      return { ok: false, reason: 'tracked bonus move must be road→road or into open' };
+    return congested ? { kind: 'track' } : { kind: 'either' };
   }
-  return { ok: true };
+  return { kind: 'track' }; // into Open Terrain: Track Bonus Moves only
 }
 
 export interface VehicleMovePlan {
@@ -162,7 +163,12 @@ export function planVehicleMove(state: GameState, unit: Unit, path: HexId[]): Ve
   const tmpl = templateOf(state, unit);
   const fail = (reason: string): VehicleMovePlan => ({ ap: null, reason, finalHexId: unit.hexId, finalFacing: unit.facing });
   if (path.length === 0) return fail('empty path');
-  const maxLen = 1 + (tmpl.bonusMoves ?? 0);
+  const prop0 = tmpl.propulsion ?? 'tracked';
+  // §16.4 Mobile Vehicles: a Wheeled vehicle may also carry Track Bonus Move
+  // symbols (`mobileTrackBonusMoves`) alongside its (Wheel) `bonusMoves`.
+  const wheelBudget = prop0 === 'wheeled' ? (tmpl.bonusMoves ?? 0) : 0;
+  const trackBudget = prop0 === 'tracked' ? (tmpl.bonusMoves ?? 0) : (tmpl.mobileTrackBonusMoves ?? 0);
+  const maxLen = 1 + wheelBudget + trackBudget;
   if (path.length > maxLen) return fail(`too many moves (max ${maxLen})`);
 
   // Step 0 — the regular Move pays the Action Cost (terrain + backwards folded in).
@@ -183,13 +189,19 @@ export function planVehicleMove(state: GameState, unit: Unit, path: HexId[]): Ve
     if (!forward0) return fail('bonus moves forfeited: first move was backwards');
     if (difficult0) return fail('bonus moves forfeited: first move into difficult terrain');
     let prev = path[0]!;
+    let trackRequired = 0;
+    let flexSteps = 0;
     for (let i = 1; i < path.length; i++) {
-      const v = validBonusStep(state, tmpl, prev, path[i]!);
-      if (!v.ok) return fail(v.reason ?? 'illegal bonus move');
+      const v = classifyBonusStep(state, prev, path[i]!);
+      if (v.kind === null) return fail(v.reason ?? 'illegal bonus move');
+      if (v.kind === 'track') trackRequired += 1;
+      else flexSteps += 1;
       const d = directionTo(prev, path[i]!);
       if (d >= 0) facing = d as Facing; // free pivot after each bonus move
       prev = path[i]!;
     }
+    if (trackRequired > trackBudget) return fail('not enough Track Bonus Moves (§16.4)');
+    if (flexSteps > wheelBudget + (trackBudget - trackRequired)) return fail('not enough Bonus Moves');
   }
   return { ap: reg.ap, finalHexId: path[path.length - 1]!, finalFacing: facing };
 }

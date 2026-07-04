@@ -43,6 +43,12 @@ button.primary {
   border-color: #3c8a4c;
   font-weight: 700;
 }
+button.danger {
+  background: #7a2020;
+  border-color: #a83a3a;
+  color: #fff;
+  font-weight: 700;
+}
 button.on {
   background: #4a3a16;
   border-color: var(--accent);
@@ -298,6 +304,28 @@ button.link {
 .hit-note__effects li {
   margin: 0.1rem 0;
 }
+.hit-effect {
+  color: #ff8a8a;
+  font-weight: 700;
+  margin: 0.5rem 0;
+  border: 1px solid rgba(255, 138, 138, 0.45);
+  border-radius: 4px;
+  padding: 0.4rem 0.6rem;
+  background: rgba(255, 138, 138, 0.08);
+  text-align: left;
+}
+.hit-effect__title {
+  margin-bottom: 0.2rem;
+}
+.hit-effect__list {
+  margin: 0;
+  padding-left: 1.1rem;
+  font-weight: 600;
+  font-size: 0.85rem;
+}
+.hit-effect__list li {
+  margin: 0.1rem 0;
+}
 .group-members {
   display: flex;
   flex-wrap: wrap;
@@ -341,6 +369,13 @@ button.link {
   align-items: center;
   gap: 4px;
   flex-wrap: wrap;
+}
+.facing-choice {
+  background: #2a2410;
+  border: 1px solid #e0a83a;
+  border-radius: 6px;
+  padding: 6px 8px;
+  margin: 6px 0;
 }
 
 .log ul {
@@ -422,12 +457,47 @@ button.link {
   text-align: center;
   min-width: 260px;
 }
+.dice-modal {
+  max-width: 460px;
+}
 .dice-label {
   font-weight: 700;
 }
 .dice-detail {
   color: var(--dim);
   margin-bottom: 0.8rem;
+}
+.dice-mods {
+  display: flex;
+  gap: 1.2rem;
+  text-align: left;
+  font-size: 0.8rem;
+  margin-bottom: 0.8rem;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  padding: 0.5rem 0;
+}
+.dice-mods__col {
+  flex: 1;
+  min-width: 0;
+}
+.dice-mods__head {
+  font-weight: 700;
+  color: var(--dim);
+  margin-bottom: 0.2rem;
+}
+.dice-mods__row {
+  display: flex;
+  gap: 0.4rem;
+  align-items: baseline;
+}
+.dice-mods__val {
+  font-weight: 700;
+  min-width: 1.6em;
+  flex-shrink: 0;
+}
+.dice-mods__label {
+  flex: 1;
 }
 .dice-row {
   display: flex;

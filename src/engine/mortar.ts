@@ -8,9 +8,9 @@
  * of the Mortar's own.
  */
 import { distance, parseHexId } from './hex';
-import { effectiveStats } from './hits';
+import { effectiveStats, templateOf } from './hits';
 import { hasLOS, inArc } from './los';
-import { wallDMForFire } from './combat';
+import { apcTransportBonus, vehicleCoverBonus, wallDMForFire, type Modifier } from './combat';
 import { fpRangeModifier, rangeBand, type RangeBand } from './range';
 import { roll2d6 } from './rng';
 import { smokeAttackPenalty, smokeDefenseBonus, smokeLosDrBonus } from './smoke';
@@ -126,6 +126,8 @@ export interface IndirectAttackRoll {
   hit: boolean;
   critical: boolean;
   fpColor: DRColor;
+  arMods: Modifier[];
+  drMods: Modifier[];
 }
 
 export interface IndirectFireResult {
@@ -157,26 +159,53 @@ export function rollIndirectFire(
   let rng = state.rng;
   for (const target of targets) {
     const tEff = effectiveStats(state, target);
-    const fpColor = tEff.dr.color;
+    // §16.5: Indirect Fire is always HE (§13.9), so an Open-Topped Vehicle's
+    // blue Flank Defense is always treated as red here — same flip as
+    // combat.ts's attackContext (Direct HE) and closeCombatContext (CC).
+    const openToppedFlip = templateOf(state, target).openTopped;
+    const fpColor = openToppedFlip ? 'red' : tEff.dr.color;
     const smokeDr = Math.min(
       2,
       smokeDefenseBonus(state, target.hexId) + smokeLosDrBonus(state, spotterHexId, targetHexId),
     );
-    const dr =
-      tEff.dr.flank +
-      heTerrainDM(state, target.hexId, fpColor) +
-      wallDMForFire(state, spotterHexId, target.hexId) +
-      smokeDr;
-    const ar =
-      (fpColor === 'red' ? aEff.fp.red : aEff.fp.blue) +
-      fpRangeModifier(band) +
-      smokeAttackPenalty(state, attacker.hexId);
+    const terrainDr = heTerrainDM(state, target.hexId, fpColor);
+    const wallDr = wallDMForFire(state, spotterHexId, target.hexId);
+    const coverDr = vehicleCoverBonus(state, target);
+    const apcDr = apcTransportBonus(state, target);
+    const rangeAr = fpRangeModifier(band);
+    const smokeAr = smokeAttackPenalty(state, attacker.hexId);
+    const fp = fpColor === 'red' ? aEff.fp.red : aEff.fp.blue;
+
+    const drMods: Modifier[] = [{ label: 'Flank Defense (HE always targets flank)', value: tEff.dr.flank, section: '§13.9' }];
+    const targetHex = state.hexes[target.hexId];
+    if (fpColor === 'red' && targetHex?.terrain === 'woodsHeavy') {
+      drMods.push({ label: 'Heavy Woods negated by Air Burst', value: 0, section: '§13.9' });
+    } else if (terrainDr !== 0) {
+      drMods.push({ label: `${targetHex ? terrainOf(targetHex).name : 'Terrain'} DM`, value: terrainDr, section: '§6.4' });
+    }
+    if (wallDr) drMods.push({ label: 'Wall Cover (shot crosses a wall)', value: wallDr, section: '§6.5' });
+    if (coverDr) drMods.push({ label: 'Vehicle Cover (shares hex with a friendly Vehicle)', value: coverDr, section: '§15.15' });
+    if (apcDr) drMods.push({ label: 'APC Transport Bonus', value: apcDr, section: '§16.6' });
+    if (smokeDr) drMods.push({ label: 'Smoke (defending in/behind it)', value: smokeDr, section: '§14.3' });
+
+    const arMods: Modifier[] = [
+      {
+        label: `${fpColor === 'red' ? 'Red' : 'Blue'} Firepower (HE)${openToppedFlip ? ' — Open-Topped target' : ''}`,
+        value: fp,
+        section: openToppedFlip ? '§16.5' : '§13.9',
+      },
+    ];
+    if (rangeAr) arMods.push({ label: rangeAr > 0 ? 'Short Range Bonus (adjacent)' : 'Long Range Penalty', value: rangeAr, section: '§6.7' });
+    if (smokeAr) arMods.push({ label: 'Smoke (firing out of it)', value: smokeAr, section: '§14.3' });
+
+    const dr = drMods.reduce((s, m) => s + m.value, 0);
+    const ar = arMods.reduce((s, m) => s + m.value, 0);
     const hitNumber = dr - ar - capMod;
     const { value, dice, rng: rolled } = roll2d6(rng);
     rng = rolled;
     const hit = value >= hitNumber;
     const critical = value >= hitNumber + 4;
-    rolls.push({ targetId: target.id, ar, dr, hitNumber, dice, total: value, hit, critical, fpColor });
+    rolls.push({ targetId: target.id, ar, dr, hitNumber, dice, total: value, hit, critical, fpColor, arMods, drMods });
   }
   return { rolls, rng };
 }

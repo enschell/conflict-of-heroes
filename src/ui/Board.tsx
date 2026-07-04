@@ -74,7 +74,11 @@ export function Board() {
         const v = game.units[a.vehicleId];
         if (v) transportTargets.add(v.hexId);
       }
-      if (a.type === 'UNLOAD') transportTargets.add(a.toHexId);
+      // Unload hexes render green like Move (the carried Unit has no MOVE
+      // actions of its own, so this is the only "where can I go" highlight it
+      // gets) — clicking one asks for confirmation rather than unloading
+      // silently (store.ts's hexClick).
+      if (a.type === 'UNLOAD') moveTargets.add(a.toHexId);
     }
   }
 
@@ -98,6 +102,19 @@ export function Board() {
   if (placingReinforcementId) {
     const r = game.reinforcements.find((x) => x.id === placingReinforcementId);
     if (r) for (const h of legalEntryHexes(game, r)) entryTargets.add(h);
+  }
+
+  // Free facing correction (§4.5/§15.11): the six neighbor Hexes of a Unit
+  // awaiting CHOOSE_FACING, clickable to face that direction (the arrow-button
+  // picker in Inspector.tsx still works too — this is an additional way in).
+  const facingTargets = new Set<string>();
+  const facingChoiceUnit =
+    selectedUnitId && game.pendingFacingChoices?.includes(selectedUnitId) ? game.units[selectedUnitId] : null;
+  if (facingChoiceUnit) {
+    for (const n of neighbors(parseHexId(facingChoiceUnit.hexId))) {
+      const nid = idOf(n);
+      if (game.hexes[nid]) facingTargets.add(nid);
+    }
   }
 
   let visible: Set<string> | null = null;
@@ -200,6 +217,7 @@ export function Board() {
                 {nextSteps.size === 0 && moveTargets.has(id) && <polygon points={pts} fill="#5ad17a" opacity={0.28} stroke="#5ad17a" strokeWidth={2} />}
                 {nextSteps.has(id) && <polygon points={pts} fill="#5ad17a" opacity={0.2} stroke="#5ad17a" strokeWidth={2} strokeDasharray="4 3" />}
                 {transportTargets.has(id) && <polygon points={pts} fill="none" stroke="#e0a83a" strokeWidth={3} strokeDasharray="2 3" />}
+                {facingTargets.has(id) && <polygon points={pts} fill="#3a8ee0" opacity={0.32} stroke="#3a8ee0" strokeWidth={2} />}
                 {entryTargets.has(id) && <polygon points={pts} fill="#c77dff" opacity={0.3} stroke="#c77dff" strokeWidth={2} strokeDasharray="4 3" />}
                 {pathSet.has(id) && (
                   <>
@@ -295,6 +313,43 @@ export function Board() {
             }
             return nodes;
           })}
+
+          {/* Rendered last so it's always above every Hex fill and Unit counter. */}
+          {facingChoiceUnit && (
+            <g pointerEvents="none">
+              {(() => {
+                const c = hexCenter(facingChoiceUnit.hexId);
+                const w = HEX_SIZE * 2.6;
+                const h = HEX_SIZE * 0.6;
+                const ty = c.y - HEX_SIZE * 1.55;
+                return (
+                  <>
+                    <rect
+                      x={c.x - w / 2}
+                      y={ty - h / 2}
+                      width={w}
+                      height={h}
+                      rx={h / 3}
+                      fill="#3a8ee0"
+                      stroke="#0b0d08"
+                      strokeWidth={1}
+                    />
+                    <text
+                      x={c.x}
+                      y={ty}
+                      fontSize={HEX_SIZE * 0.32}
+                      fill="#fff"
+                      fontWeight={700}
+                      textAnchor="middle"
+                      dominantBaseline="central"
+                    >
+                      Choose facing
+                    </text>
+                  </>
+                );
+              })()}
+            </g>
+          )}
         </g>
       </svg>
 

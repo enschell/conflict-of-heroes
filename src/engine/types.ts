@@ -105,6 +105,13 @@ export interface UnitTemplate {
   propulsion?: 'wheeled' | 'tracked';
   /** Vehicle Bonus Move symbols (§15.2): extra hexes per Move Action at no AP. */
   bonusMoves?: number;
+  /**
+   * Mobile Vehicle (§16.4): a Wheeled Vehicle that ALSO has Track Bonus Move
+   * symbols alongside its (Wheel) `bonusMoves`. These extra Bonus Moves may be
+   * used in any order and, unlike Wheel Bonus Moves, may enter Open Terrain and
+   * are not blocked by Road Congestion.
+   */
+  mobileTrackBonusMoves?: number;
   // -- Special Units (§16) --
   /** Turreted Vehicle (§16.2): may Attack outside its Arc of Fire (+2AP Attack Cost). */
   turreted?: boolean;
@@ -326,8 +333,14 @@ export interface GameEvent {
 export type Action =
   // `path` (vehicles, §15.2): the multi-hex Bonus-Move sequence (each hex
   // adjacent to the last); when set, `toHexId` is its final hex. Foot moves omit it.
-  | { type: 'MOVE'; unitId: UnitId; toHexId: HexId; path?: HexId[]; capCostReduce?: number }
+  | { type: 'MOVE'; unitId: UnitId; toHexId: HexId; path?: HexId[]; facing?: Facing; capCostReduce?: number }
   | { type: 'PIVOT'; unitId: UnitId; facing: Facing; capCostReduce?: number }
+  // Free facing correction (§4.5 after a Move, §15.11 unloaded from a destroyed
+  // Transport): 0AP, no Spent Check, no turn switch. Legal ONLY while `unitId`
+  // appears in `GameState.pendingFacingChoices` (the engine grants this window
+  // right after the Move/Unload/destroy-unload that put the Unit in a new Hex;
+  // it closes as soon as any other Action resolves).
+  | { type: 'CHOOSE_FACING'; unitId: UnitId; facing: Facing }
   | {
       type: 'FIRE';
       attackerId: UnitId;
@@ -438,6 +451,14 @@ export interface GameState {
   log: GameEvent[];
   /** Winner once phase === 'gameOver'. v3 has no ties — always the VP-Advantage holder (§9.3). */
   winner?: SideId | null;
+  /**
+   * Units still eligible for a free, no-cost `CHOOSE_FACING` (§4.5, §15.11):
+   * populated by a Move/Group Move (the mover, per member), an Unload, or a
+   * destroyed Transport's auto-unloaded passenger. Cleared at the start of
+   * `reduce` for any Action other than `CHOOSE_FACING` — the window is open
+   * until the next Action, by either side.
+   */
+  pendingFacingChoices?: UnitId[];
 }
 
 /** Result of reducing an action: the next state plus emitted events. */

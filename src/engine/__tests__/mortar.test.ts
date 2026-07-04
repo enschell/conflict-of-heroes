@@ -145,6 +145,79 @@ describe('Mortar Indirect Attacks (§13.2)', () => {
   });
 });
 
+// §16.5 (Open-Topped) and §16.6 (APC Transport Bonus) previously only applied
+// to closeCombatContext — HE Direct/Indirect fire (this file) never checked
+// either, a confirmed gap now closed in combat.ts's attackContext and
+// mortar.ts's rollIndirectFire.
+describe('HE vs Open-Topped Vehicles (§16.5) and APC Transport Bonus (§16.6)', () => {
+  function vehicleTemplate(over: Partial<UnitTemplate> = {}): UnitTemplate {
+    return {
+      id: 'apc',
+      nation: 'germans',
+      name: 'APC',
+      kind: 'vehicle',
+      fp: { red: 0, blue: 5 },
+      dr: { front: 12, flank: 8, color: 'blue' },
+      move: 1,
+      range: 10,
+      apToFire: 2,
+      vp: 2,
+      unburdened: false,
+      propulsion: 'tracked',
+      ...over,
+    };
+  }
+
+  it('Direct HE fire treats an Open-Topped Vehicle\'s Flank Defense as red (draws a Soft Target marker)', () => {
+    const s = baseState();
+    addTemplate(s, mortarTemplate());
+    addTemplate(s, vehicleTemplate({ openTopped: true }));
+    addHex(s, 0, 0, 'open');
+    addHex(s, 1, 0, 'open');
+    addHex(s, 2, 0, 'open'); // distance 2 — outside the Mortar's Minimum Range (§13.1)
+    const mortar = addUnit(s, 'M1', 'A', 0, 0, 0, 'mortar');
+    const target = addUnit(s, 'T1', 'B', 2, 0, 3, 'apc');
+    const ctx = attackContext(s, mortar, target);
+    expect(ctx.legal).toBe(true);
+    expect(ctx.fpColor).toBe('red');
+    // A closed (non-Open-Topped) Vehicle keeps its blue Flank Defense vs HE.
+    s.templates['apc']!.openTopped = false;
+    expect(attackContext(s, mortar, target).fpColor).toBe('blue');
+  });
+
+  it('Indirect Fire treats an Open-Topped Vehicle the same way', () => {
+    const { s, mortar, target: rifleTarget } = indirectScene();
+    // Swap the stacked rifle for an Open-Topped vehicle at the same hex.
+    delete s.units[rifleTarget.id];
+    addTemplate(s, vehicleTemplate({ openTopped: true }));
+    addUnit(s, 'V1', 'B', 3, 0, 3, 'apc');
+    const result = rollIndirectFire(s, mortar, '3,0', '1,-1');
+    expect(result.rolls).toHaveLength(1);
+    expect(result.rolls[0]!.fpColor).toBe('red');
+  });
+
+  it('Indirect Fire applies the +2DR APC Transport Bonus to a Transported Soft Target', () => {
+    const { s, mortar } = indirectScene();
+    addTemplate(s, vehicleTemplate({ id: 'carrier', apcTransport: true }));
+    const carrier = addUnit(s, 'CARRIER', 'B', 3, 0, 3, 'carrier');
+    const rider = s.units['T1']!; // the stock rifle target from indirectScene, at the same hex
+    rider.hexId = carrier.hexId;
+    rider.carriedBy = 'CARRIER';
+    const result = rollIndirectFire(s, mortar, carrier.hexId, '1,-1');
+    const riderRoll = result.rolls.find((r) => r.targetId === 'T1')!;
+    expect(riderRoll.dr).toBe(10 + 2); // flank DR (10) + APC Transport Bonus
+  });
+
+  it('Indirect Fire applies the +1DR Vehicle Cover Bonus to a Foot Unit sharing a hex with a friendly Vehicle', () => {
+    const { s, mortar, target } = indirectScene(); // target ('T1') is at '3,0', side B
+    addTemplate(s, vehicleTemplate({ id: 'friendlyveh' }));
+    addUnit(s, 'FRIEND', 'B', 3, 0, 0, 'friendlyveh'); // shares the target's hex
+    const result = rollIndirectFire(s, mortar, target.hexId, '1,-1');
+    const targetRoll = result.rolls.find((r) => r.targetId === 'T1')!;
+    expect(targetRoll.dr).toBe(10 + 1); // flank DR (10) + Vehicle Cover Bonus (§15.15)
+  });
+});
+
 describe('Mortars may Close Combat at a −2AR penalty (§13.1, whiteBoxFp)', () => {
   it('uses the crew-served −2 modifier, not the usual +4', () => {
     const { s, mortar, target } = directScene();

@@ -45,12 +45,12 @@ This repo is self-describing: a fresh session needs only the code + these docs.
 - **Run it:** `npm run dev` → http://localhost:5173. Windows: Node 24 is at
   `C:\Program Files\nodejs` (not on Git Bash's PATH; in PowerShell prepend it).
 - **Current status:** the v3 cutover, M5 (Group Actions + Group Close Combat), M6 (Vehicles +
-  Special Units), and M7 (Mortars + Smoke) are all done; real **Mission 1** ("Partisans") plays
-  end-to-end with real reinforcements; conformance is at 0 violations. **M8 (Hidden Units) is
-  deliberately deferred to online play** — see §8, it's a locked decision, not a gap. **Next up:**
-  §16.4 Mobile Vehicles (deferred, narrow subtype, low priority), then M9 (elevation/hills). **§8 has
-  the full detail on every milestone — read that, not this bullet, for specifics on how something
-  works or why a decision was made.**
+  **all** of Special Units §16.1–16.7, audited and confirmed complete), and M7 (Mortars + Smoke) are
+  all done; real **Mission 1** ("Partisans") plays end-to-end with real reinforcements; conformance
+  is at 0 violations. **M8 (Hidden Units) is deliberately deferred to online play** — see §8, it's a
+  locked decision, not a gap. **Next up:** M9 (elevation/hills). **§8 has the full detail on every
+  milestone — read that, not this bullet, for specifics on how something works or why a decision was
+  made.**
 
 ---
 
@@ -247,7 +247,7 @@ When in doubt, open `rules/INDEX.md`. Read the file before implementing; cite `N
 | Mortars: Direct/Indirect Attack, Spotter Hex, HE/Air Burst; *(later)* OBA/drift (pending Cards, M12) | `combat.ts`, `mortar.ts` *(M7)* | 13.0–13.3, 13.9 | `rules/13` |
 | Smoke: DR/AR, LOS blocking, Rally bonus, dissipation | `smoke.ts`, `los.ts`, `turn.ts`, `rally.ts` *(M7)* | 14.x | `rules/14` |
 | **Vehicles**: movement (wheeled/tracked, Bonus Moves), combat specifics, Transport/Towing; *(later)* Towing damaged Vehicles (§15.10) | `movement.ts`, `combat.ts`, `hits.ts`, `reducer.ts` *(M6)* | 15.x | `rules/15` |
-| **Special units**: Turreted, Open-Topped, APC Transport Bonus, Trucks/Wagons, Field Guns; *(later)* Mobile Vehicles (§16.4) | `combat.ts`, `reducer.ts`, `actions.ts`, `victory.ts` *(M6)* | 16.x | `rules/16` |
+| **Special units**: Turreted, Open-Topped, APC Transport Bonus, Trucks/Wagons, Field Guns, Mobile Vehicles (§16.4) | `combat.ts`, `movement.ts`, `reducer.ts`, `actions.ts`, `victory.ts` *(M6)* | 16.x | `rules/16` |
 | *(later)* fortifications / trenches / bunkers / obstacles / mines | — | 17.x | `rules/17` |
 | *(later)* flamethrowers / pioneers | — | 18.x | `rules/18` |
 | *(later)* alternate player counts | — | 19.x | `rules/19` |
@@ -290,7 +290,11 @@ target's DR colour (blue → vehicle pile, red → foot pile).
     apToFire, vp, flags, whiteBoxFp? }` in `data/units.ts`. (v3: `apToFire`/`move` are **Spent-Check
     thresholds**, not pool spend.) **Vehicles** (`kind:'vehicle'`) add `propulsion:'wheeled'|'tracked'`
     and `bonusMoves?: number` (§15.1–15.2); any `kind:'vehicle'` template may Transport one foot Unit
-    (§15.6) — no separate flag needed. **Special Units (§16):** `turreted?` (fire outside Arc, +2AP),
+    (§15.6) — no separate flag needed. A **Mobile Vehicle** (§16.4, a Wheeled vehicle that also
+    carries Track Bonus Move symbols) adds `mobileTrackBonusMoves?: number` alongside its (Wheel)
+    `bonusMoves` — those extra Bonus Moves may be spent in any order, may enter Open Terrain
+    (a plain Wheeled vehicle's Bonus Moves can't), and ignore Road Congestion. **Special Units (§16):**
+    `turreted?` (fire outside Arc, +2AP),
     `openTopped?` (red Flank DR + Soft marker vs red-FP CC), `apcTransport?` (+2DR for a carried Soft
     Target), `cannotControlHex?`/`noCapLossOnDestroy?`/`attackMode?:'closeCombatOnly'|'none'` (Trucks/
     Wagons, §16.1). Field Guns (§16.7) are just `kind:'gun'` + `propulsion:'wheeled'` — already towable
@@ -322,6 +326,29 @@ target's DR colour (blue → vehicle pile, red → foot pile).
 Spent-Check die instead of a remaining-AP pool)*
 - **Real pointy-top hex board** ✅ (`Board.tsx`/`hexgeo.ts`); the square ASCII grid in `play.ts` is
   debug-only.
+- **Unit facing (§4.1)** ✅ `UnitCounter.tsx` rotates the whole counter (not an overlay arrow) so its
+  **green top-edge bar** (+ a small outward notch) sits flush against whichever of the six hexsides it
+  faces — matching the physical counter/rotate-in-place metaphor exactly (a corner is never a legal
+  facing). Rotation = `atan2(facingVector) + 90°`, applied via one `<g transform="rotate(...)">`
+  wrapping the whole counter, so every printed stat rotates with it, just like flipping a physical chit.
+- **Free facing correction (§4.5/§15.11)** ✅ after a Move (solo or Group) or an automatic unload from
+  a destroyed Transport, `GameState.pendingFacingChoices` grants the affected Unit(s) a follow-up,
+  **0AP/no-Spent-Check** `CHOOSE_FACING` action (`reducer.ts`) — matches "may freely Pivot after
+  moving" / "placed facing any direction." Turn-agnostic (a normal Action already handed the turn to
+  the other side) and closes the instant any other Action resolves. Store auto-selects the pending
+  Unit (plain click-to-select is current-side-only and couldn't reach it); `Inspector.tsx`'s
+  arrow-button picker renders outside the `yours`-only gate so it's visible regardless of turn. Regular
+  Unload (§15.9) grants the same follow-up. `Board.tsx` also highlights the six neighbor Hexes **blue**
+  (`#3a8ee0`) with an on-board "Choose facing" label (rendered last in the SVG so it's always on top) —
+  clicking a blue Hex faces that direction, a second way in alongside the arrow picker. Tests:
+  `facing-choice.test.ts` + the `transport.test.ts` §15.11 case.
+- **Facing already governs both Arc of Fire and Front/Flank DR, and backwards movement already costs
+  extra** (verified, no code changes needed): `combat.ts`'s `attackContext` denies a shot outside the
+  attacker's own Arc of Fire unless it's Turreted (§16.2, `+2AP`, `outOfArc`/`inArc`), and separately
+  picks the target's Front vs Flank DR from whether the attacker sits inside *the target's* arc
+  (§6.1/§6.3, `attackerInTargetFront`). `movement.ts`'s `moveCost`/`planVehicleMove` add **+1AP**
+  whenever the destination isn't in the mover's own front arc (§4.11/§15.1, `isInFrontArc`) — a
+  Backwards Move.
 - **Custom per-hex artwork** ✅ via `data/hexArt.ts` (`TERRAIN_ART` + `HEX_ART_OVERRIDES`, SVG
   `clipPath`); `USE_HEX_ART=false` → flat colors.
 - **Under-cursor panel** ✅ `HoverPanel.tsx` — terrain rules + half-size unit renders.
@@ -332,7 +359,14 @@ Spent-Check die instead of a remaining-AP pool)*
 - **Stacked units / selection** ✅ fanned with `×N` badge; click auto-selects a Fresh unit; **Ctrl+
   click** opens `UnitPicker`; click selected to deselect.
 - **Action chooser** ✅ `ActionChooser.tsx` when a hex affords >1 action (e.g. move into an enemy
-  hex vs close-combat it).
+  hex vs close-combat it). **Fixed:** it used to derive "can Move/Fire/CC here" from
+  `legalActionsForUnit`'s CAP-gated list, so for a Spent Unit that could afford one option but not the
+  other, the unaffordable one silently vanished and the click just executed the sole survivor (no
+  chooser). `store.ts`'s `hexClick` and `ActionChooser.tsx` now check **rules legality directly**
+  (`moveCost(...).ap`, `attackContext(...).legal`, `closeCombatContext(...).legal` — same as the odds
+  popup) so a Spent Unit still gets offered the option; choosing it still runs the normal CAP-confirm
+  flow (§3.4). Indirect Fire/Fire Smoke/Load stay CAP-gated (out of scope). See memory
+  `conflict-of-heroes-chooser-legality`.
 - **Spent-Check / opportunity confirm** ✅ acting with a unit prompts the Spent-Check die flow
   (replaces the old opportunity-spend confirm); `ConfirmDialog`.
 - **Turn banner** ✅ `TurnBanner.tsx` "Start of turn N".
@@ -342,6 +376,25 @@ Spent-Check die instead of a remaining-AP pool)*
   settle on the **engine-provided** result (previewed from the seeded RNG, then committed); never
   influences the outcome. Stacked fire rolls one enemy at a time and commits once (6.9). **Add the
   Spent Die as a roll kind.**
+- **Dice-roller detail** ✅ `DiceRoller.tsx` now shows, above the dice: an **AR/DR modifier breakdown**
+  (`attackContext`/`closeCombatContext`/`rollIndirectFire` return `arMods`/`drMods: Modifier[]` —
+  `{label, value, section}` line items that sum to the actual `ar`/`dr`, incl. `value: 0` entries that
+  explain an *expected* bonus that didn't apply, e.g. Air Burst zeroing Heavy Woods; tests:
+  `combat-mods.test.ts`); the **% to hit/critical** (`odds.ts`'s `oddsForHitNumber`, off the
+  already-resolved `AttackRoll.hitNumber` so any CAP dice mod is included); and, once a Hit lands, the
+  **resulting Hit Marker's name + effects (or "Destroyed")** via `hits.ts`'s new `resolveHit` (the one
+  place that decides a Hit's outcome — `reducer.ts`'s `applyHit` now calls it too, so the dice-roller's
+  preview can never disagree with what actually commits; tests: `hits.test.ts`'s `resolveHit` suite,
+  incl. a seeded preview-vs-real-`reduce()` check). Cancel button restyled `button.danger` (red bg,
+  white text, same shape as `.primary`).
+- **Pivoting a loaded Vehicle also pivots its passenger** ✅ (§15.7: rides facing the same direction;
+  only Unloading, §15.9, gives it an independent facing choice) — `reducer.ts`'s `doPivot` propagates
+  `a.facing` to any `passengerOf(unit.id)` and treats it as a Group Action (one Spent Check for both,
+  like Move-with-passenger already did). Test in `transport.test.ts`.
+- **Unloading (§15.9) confirms instead of firing silently** ✅ a carried Unit's Unload Hexes render
+  green like Move (its only "where can I go" highlight); clicking an adjacent one shows a plain
+  "Unload to X?" confirm (`pendingConfirm`); clicking the Vehicle's own Hex is ambiguous with
+  click-to-deselect, so that one opens `ActionChooser` with explicit "🚚 Unload here"/"✕ Deselect".
 - **Movement & fire SFX** ✅ `sound.ts` synthesizes audio by `template.kind`; mute toggle.
 
 ---
@@ -372,8 +425,50 @@ Spent-Check die instead of a remaining-AP pool)*
   Move, click-to-load/unload UI, towing damaged Vehicles). Special Units (§16): Turreted (+2AP
   outside Arc), Open-Topped, APC Transport Bonus, Trucks/Wagons (`attackMode`, no Hex control, no
   CAP loss on destroy). `Armor Sandbox` (`data/missions/sandbox.ts`) test mission; two extra German
-  rifles were added later for a Group Close Combat click-through (see §10.6 below). *Deferred:*
-  §16.4 Mobile Vehicles (combined wheel+track Bonus Moves — narrow subtype, no unit needs it).
+  rifles were added later for a Group Close Combat click-through (see §10.6 below).
+
+  **§16.4 Mobile Vehicles** ✅ (landed later, low priority but no longer deferred): a Wheeled Vehicle
+  may also carry Track Bonus Move symbols (`mobileTrackBonusMoves` in `data/units.ts`) alongside its
+  (Wheel) `bonusMoves`. `movement.ts`'s `classifyBonusStep` tags each Bonus-Move step `'either'`
+  (uncongested Road→Road — payable from either budget) or `'track'` (Road Congestion, or entering
+  Open Terrain — Track budget only); `planVehicleMove` then checks the required-`'track'` count
+  against `mobileTrackBonusMoves` and the remaining flex steps against `bonusMoves` +
+  leftover Track budget, so the two symbol types can be spent in any order within a single multi-hex
+  Move. Retrofitted the `ger-sdkfz251` half-track (previously modelled as plain Tracked) to
+  `propulsion:'wheeled', bonusMoves:1, mobileTrackBonusMoves:1` — the historically-accurate case for
+  this unit and now a real, exercised example rather than a theoretical field. `Armor Sandbox` gained
+  a `G-sdkfz251` placement on the O02-O03 Road pair (Open terrain at O04) for a live click-through:
+  regular Move to O03 (Road→Road) + a Track Bonus Move off-road onto O04, resolved for 1AP total
+  (bonus moves are free) — verified in-browser. New coverage in
+  `engine/__tests__/mobile-vehicle.test.ts`.
+
+  **§16.5 Open-Topped: added the `ger-pzjg35r` (PzJg 35R) unit** — the rulebook's own worked example
+  for this rule ("the PzJg 35R has a red 13DR if attacked by a Soviet Rifle unit in CC"), so it's a
+  real, sourced example rather than only the already-existing `ger-sdkfz251`. A Czech 47mm gun on a
+  captured French R35 chassis (`kind:'vehicle'`, `propulsion:'tracked'`, no `turreted` flag → a §16.3
+  Self-Propelled Gun by default, matching its real casemate mount). Stats: `fp:{red:2,blue:7}`,
+  `dr:{front:15,flank:13,color:'blue'}`, `move:1`, `range:8`, `apToFire:4`, `openTopped:true`. Sourced
+  from `reference/rulebook.txt` (gitignored local OCR text, §10) Unit List p.38-39: the Flank DR (13)
+  and the "disappointing"/slow characterization are textually reliable, but the printed counter's own
+  numbers were badly OCR-scrambled (interleaved with a neighboring unit's) — Attack Cost, FP, and
+  Front DR are a best-effort reconstruction by elimination against that one confirmed fact, plus a
+  user-confirmed Range of 8; see the code comment in `data/units.ts` for the full reasoning. Added to
+  `Armor Sandbox` at F04.
+
+  **§16 audit — all subsections confirmed done; two real gaps found and fixed:** §16.1/16.2/16.4 were
+  already solid. §16.3 (SPGs) needs no code — it's just the default non-Turreted arc-check + ordinary
+  `PIVOT` — added a test labeled as such using `ger-pzjg35r`. §16.5 (Open-Topped) and §16.6 (APC
+  Transport Bonus) were **only wired into `closeCombatContext`, not `attackContext` (ranged/HE) or
+  `mortar.ts`'s `rollIndirectFire`** — an HE/Mortar attack on an Open-Topped Vehicle didn't flip its
+  Flank DR to red, and neither ranged nor Indirect Fire applied the APC +2DR bonus to a carried Soft
+  Target, even though neither rule carves out an HE exception. Fixed in both `attackContext` (gated on
+  `isHE`) and `rollIndirectFire` (unconditionally HE); also added the likewise-missing
+  `vehicleCoverBonus` (§15.15) to `rollIndirectFire`. `vehicleCoverBonus`/`apcTransportBonus` are now
+  exported from `combat.ts` for `mortar.ts` to reuse. Tests: `mortar.test.ts`, `special-units.test.ts`.
+  §16.7 Field Guns were mechanically correct already (`kind:'gun'` skips the Vehicle-only
+  Immobilized/Stunned tow precondition by construction) but untested and single-nation — added
+  `sov-atgun45` for parity, 4 tests in `transport.test.ts`, and both `ger-pak40`/`sov-atgun45` now sit
+  stacked with their side's Vehicle in `Armor Sandbox` for an immediate same-Hex Load, verified live.
 
 - **M7 — Mortars + Smoke (§13–14) — engine + UI ✅ (Spotter picker deferred):** `mortar.ts` — Direct
   Attacks reuse `FIRE` (min-range denial + HE-always-Flank-DR + Air Burst folded into `combat.ts`'s
@@ -433,10 +528,10 @@ Spent-Check die instead of a remaining-AP pool)*
   Do not attempt a hotseat-only approximation (e.g. hiding enemy Hidden Units from the board render by
   `currentSide`) — it's trivially defeated by anyone glancing at devtools/state and would need
   rebuilding anyway once the real per-client model exists.
-- **Later (additive, v3 order):** §16.4 Mobile Vehicles (deferred, narrow subtype) → M9 elevation/hills
-  (§12) → M10 fortifications/obstacles/mines (§17) → M11 flamethrowers/pioneers (§18) → M12 cards
-  (§8, incl. OBA) → **M13 online multiplayer** (host the pure engine authoritatively + WebSocket rooms;
-  the client already speaks action objects) → **M8 Hidden Units** (§11, now buildable for real).
+- **Later (additive, v3 order):** M9 elevation/hills (§12) → M10 fortifications/obstacles/mines (§17)
+  → M11 flamethrowers/pioneers (§18) → M12 cards (§8, incl. OBA) → **M13 online multiplayer** (host
+  the pure engine authoritatively + WebSocket rooms; the client already speaks action objects) →
+  **M8 Hidden Units** (§11, now buildable for real).
 
 ---
 

@@ -16,7 +16,7 @@ import { HIT_MARKERS, isArmoredMarker } from '../data/hitMarkers';
 import { applyUnitLoss, clampCapMod, reduceActionCost } from './cap';
 import { attackContext, closeCombatContext, rollCloseCombat, rollStackFire } from './combat';
 import { isInFrontArc, parseHexId } from './hex';
-import { drawHit, effectiveStats, returnHitToPile, templateOf } from './hits';
+import { effectiveStats, resolveHit, returnHitToPile, templateOf } from './hits';
 import { groupConnected, groupStress, isValidSupporter } from './groups';
 import { directFireZone, indirectFireZone, rollIndirectFire } from './mortar';
 import { directionTo, moveCost, pivotCost, planVehicleMove } from './movement';
@@ -43,6 +43,13 @@ export function reduce(state: GameState, action: Action): ReduceResult {
 
   const next: GameState = structuredClone(state);
   const events: GameEvent[] = [];
+
+  // §4.5/§15.11: the free-facing-correction window closes as soon as any other
+  // Action resolves — only `CHOOSE_FACING` itself is exempt from clearing it.
+  if (action.type !== 'CHOOSE_FACING') next.pendingFacingChoices = [];
+  const grantFacingChoice = (unitId: string) => {
+    next.pendingFacingChoices = [...(next.pendingFacingChoices ?? []), unitId];
+  };
 
   const log = (type: string, text: string, side?: SideId) => {
     const e: GameEvent = { type, round: next.round, side, text };
@@ -148,6 +155,8 @@ export function reduce(state: GameState, action: Action): ReduceResult {
     if (rider) {
       delete rider.carriedBy;
       rider.hexId = unit.hexId;
+      grantFacingChoice(rider.id);
+      log('unload', `${rider.id} unloaded from destroyed ${unit.id} — facing may be chosen freely (§15.11)`, rider.side);
     }
     // If this unit was itself a passenger, free its carrier's slot.
     if (unit.carriedBy) delete unit.carriedBy;
@@ -166,23 +175,22 @@ export function reduce(state: GameState, action: Action): ReduceResult {
    * it to red), so the hit pile is routed by the ATTACK, not just the target's
    * static template colour. */
   const applyHit = (target: Unit, critical: boolean, fpColor: DRColor) => {
-    if (critical || target.hitMarkers.length > 0) {
+    const res = resolveHit(next, target, critical, fpColor, next.rng);
+    next.rng = res.rng;
+    if (res.outcome.kind === 'destroyed-immediate') {
       destroyUnit(target);
       return;
     }
-    const armored = fpColor === 'blue';
-    const pile = armored ? next.hitPiles.vehicle : next.hitPiles.foot;
-    const draw = drawHit(next.rng, pile);
-    next.rng = draw.rng;
-    if (armored) next.hitPiles.vehicle = draw.pile;
-    else next.hitPiles.foot = draw.pile;
-    const def = HIT_MARKERS[draw.type];
-    if (def.killOnDraw) {
-      returnMarker(draw.type);
+    if (res.pile) {
+      if (res.armored) next.hitPiles.vehicle = res.pile;
+      else next.hitPiles.foot = res.pile;
+    }
+    if (res.outcome.kind === 'destroyed-drawn') {
+      returnMarker(res.outcome.hitType);
       destroyUnit(target);
     } else {
-      target.hitMarkers = [draw.type];
-      log('hit', `${target.id} takes a hit: ${draw.type}`, target.side);
+      target.hitMarkers = [res.outcome.hitType];
+      log('hit', `${target.id} takes a hit: ${res.outcome.hitType}`, target.side);
     }
   };
 
@@ -220,6 +228,10 @@ export function reduce(state: GameState, action: Action): ReduceResult {
       const forward = isInFrontArc(parseHexId(unit.hexId), unit.facing, parseHexId(finalHexId));
       finalFacing = forward && dir >= 0 ? (dir as Facing) : unit.facing;
     }
+    // §4.5: the mover may pick a facing explicitly; otherwise the direction of
+    // travel above is just a default — either way it's still freely correctable
+    // afterward via CHOOSE_FACING (see grantFacingChoice below).
+    if (a.facing != null) finalFacing = a.facing;
 
     const player = next.players[unit.side];
     const { cost, capsSpent } = planCost(unit, base, a.capCostReduce ?? 0);
@@ -230,12 +242,14 @@ export function reduce(state: GameState, action: Action): ReduceResult {
 
     unit.hexId = finalHexId;
     unit.facing = finalFacing;
+    grantFacingChoice(unit.id);
     // A transporting Vehicle carries its passenger along (§15.8) and the pair
     // makes a single Group Spent Check.
     const passenger = passengerOf(unit.id);
     if (passenger) {
       passenger.hexId = finalHexId;
       passenger.facing = finalFacing;
+      grantFacingChoice(passenger.id);
     }
     const bonus = path.length > 1 ? ` (+${path.length - 1} bonus)` : '';
     log('move', `${unit.id} -> ${finalHexId}${bonus} (cost ${cost})`, unit.side);
@@ -259,8 +273,34 @@ export function reduce(state: GameState, action: Action): ReduceResult {
     if (player.capCurrent < capsSpent) return deny('not enough CAP');
     player.capCurrent -= capsSpent;
     unit.facing = a.facing;
+    // §15.7: a loaded Unit sits "on top of" its Vehicle, facing the same
+    // direction — so pivoting the Vehicle pivots its passenger along with it
+    // (the rules don't give the passenger an independent facing choice here;
+    // it only gets one when actually Unloaded, §15.9).
+    const passenger = passengerOf(unit.id);
+    if (passenger) passenger.facing = a.facing;
     log('pivot', `${unit.id} pivots to ${a.facing} (cost ${cost})`, unit.side);
-    afterAction(unit, cost);
+    if (passenger) afterGroupAction([unit, passenger], cost);
+    else afterAction(unit, cost);
+    return finish();
+  };
+
+  /**
+   * Free facing correction (§4.5/§15.11): 0AP, no Spent Check, no turn switch,
+   * no `currentSide` check (the window can still be open for the side that
+   * just acted, since a normal Action always hands the turn to the other side
+   * first). Only legal while `unitId` is in `pendingFacingChoices` — the
+   * reducer grants that window itself; a Unit can never just choose to reface
+   * for free on a whim.
+   */
+  const doChooseFacing = (a: Extract<Action, { type: 'CHOOSE_FACING' }>): ReduceResult => {
+    const unit = next.units[a.unitId];
+    if (!unit) return deny('no such unit');
+    if (!next.pendingFacingChoices?.includes(a.unitId))
+      return deny('no free facing correction is available for this Unit right now');
+    unit.facing = a.facing;
+    next.pendingFacingChoices = (next.pendingFacingChoices ?? []).filter((id) => id !== a.unitId);
+    log('facing', `${unit.id} faces ${a.facing} (free, §4.5/§15.11)`, unit.side);
     return finish();
   };
 
@@ -538,6 +578,7 @@ export function reduce(state: GameState, action: Action): ReduceResult {
         unit.hexId = m.toHexId;
         if (m.facing != null) unit.facing = m.facing;
         else if (forward && dir >= 0) unit.facing = dir as Facing;
+        grantFacingChoice(unit.id); // §4.5: free follow-up correction, same as a solo Move
       } else if (m.facing != null) {
         unit.facing = m.facing;
       }
@@ -780,6 +821,7 @@ export function reduce(state: GameState, action: Action): ReduceResult {
     delete unit.carriedBy;
     unit.hexId = toHexId;
     if (a.facing !== undefined) unit.facing = a.facing; // §15.9: any facing
+    grantFacingChoice(unit.id); // still freely correctable afterward either way
     log('unload', `${unit.id} unloads from ${vehicle.id} to ${toHexId} (cost ${cost})`, unit.side);
     afterGroupAction(members, cost); // §15.9 step 3: one Group Spent Check
     return finish();
@@ -845,6 +887,8 @@ export function reduce(state: GameState, action: Action): ReduceResult {
       return doMove(action);
     case 'PIVOT':
       return doPivot(action);
+    case 'CHOOSE_FACING':
+      return doChooseFacing(action);
     case 'FIRE':
       return doFire(action);
     case 'CLOSE_COMBAT':

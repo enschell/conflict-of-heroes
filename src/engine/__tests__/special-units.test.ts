@@ -68,6 +68,38 @@ describe('§16.2 Turreted Vehicles', () => {
   });
 });
 
+describe('§16.3 Self-Propelled Guns (SPGs)', () => {
+  // SPGs get no dedicated code: they're simply any Vehicle without `turreted`,
+  // which the §16.2 arc-of-fire check (combat.ts's attackContext) already
+  // denies fire outside its Arc for by default. "Must Pivot to Track a
+  // Target" (§16.3) is just the ordinary 1AP PIVOT Action (§4.6) — this test
+  // exercises the full denied-then-Pivot-then-legal loop with a real
+  // non-Turreted vehicle template (matching `ger-pzjg35r`'s own comment).
+  it('may only Attack within its Arc of Fire, and must Pivot (a Move Action) to face a new Target', () => {
+    const s = baseState();
+    addTemplate(s, tankTemplate({ id: 'spg', fp: { red: 2, blue: 7 } })); // turreted left unset
+    addTemplate(s, rifleTemplate());
+    addHex(s, 0, 0);
+    addHex(s, -1, 0);
+    addUnit(s, 'SPG', 'A', 0, 0, 0, 'spg'); // facing East (0)
+    addUnit(s, 'TGT', 'B', -1, 0, 0, 'rifle'); // directly behind — out of arc
+
+    const denied = reduce(s, { type: 'FIRE', attackerId: 'SPG', targetId: 'TGT' });
+    expect(denied.events[0]?.type).toBe('illegal');
+    expect(denied.events[0]?.text).toMatch(/out of arc/);
+
+    const pivoted = reduce(s, { type: 'PIVOT', unitId: 'SPG', facing: 3 }); // face West, toward TGT
+    expect(pivoted.events.some((e) => e.type === 'illegal')).toBe(false);
+    expect(pivoted.state.units['SPG']!.facing).toBe(3);
+
+    // Now in-arc: a ranged Attack is legal with no Turreted +2AP surcharge.
+    const nextTurnState = { ...pivoted.state, currentSide: 'A' as const }; // PIVOT already handed the turn to B
+    const ctx = attackContext(nextTurnState, nextTurnState.units['SPG']!, nextTurnState.units['TGT']!);
+    expect(ctx.legal).toBe(true);
+    expect(ctx.outOfArc).toBe(false);
+  });
+});
+
 describe('§16.5 Open-Topped Vehicles', () => {
   function scene(openTopped: boolean, seed = 1): GameState {
     const s = baseState(seed);
@@ -127,6 +159,21 @@ describe('§16.6 APC Transport Bonus', () => {
     expect(ctxPlain.isFlank).toBe(true);
     expect(ctxPlain.dr).toBe(11); // raw flank DR — no Vehicle Cover leak while Transported (§15.15)
     expect(ctxApc.dr).toBe(13); // +2DR APC Transport Bonus
+  });
+
+  it('also applies the +2DR Bonus in Close Combat (attacker sharing the carried Unit\'s hex)', () => {
+    const s = baseState();
+    addTemplate(s, rifleTemplate({ id: 'rifle', dr: { front: 12, flank: 11, color: 'red' } }));
+    addTemplate(s, tankTemplate({ id: 'carrier', apcTransport: true }));
+    addTemplate(s, rifleTemplate({ id: 'atk', fp: { red: 4, blue: 0 } }));
+    addHex(s, 0, 0);
+    addUnit(s, 'CARRIER', 'A', 0, 0, 0, 'carrier');
+    const rider = addUnit(s, 'RIDER', 'A', 0, 0, 0, 'rifle');
+    rider.carriedBy = 'CARRIER';
+    addUnit(s, 'ATK', 'B', 0, 0, 0, 'atk'); // same hex — Close Combat
+    const ctx = closeCombatContext(s, s.units['ATK']!, s.units['RIDER']!);
+    expect(ctx.legal).toBe(true);
+    expect(ctx.dr).toBe(11 + 2); // Flank Defense + APC Transport Bonus
   });
 });
 

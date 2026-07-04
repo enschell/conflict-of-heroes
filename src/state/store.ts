@@ -8,9 +8,11 @@ import { create } from 'zustand';
 import {
   attackContext,
   closeCombatContext,
+  directionTo,
   effectiveStats,
   groupStress,
   idOf,
+  type Modifier,
   initGame,
   isValidSupporter,
   legalActionsForUnit,
@@ -22,15 +24,30 @@ import {
   planVehicleMove,
   RALLY_AP_COST,
   reduce,
+  resolveHit,
   rollCloseCombat,
   rollIndirectFire,
   rollRally,
   rollStackFire,
   serialize,
   templateOf,
+  type AttackRoll,
+  type IndirectAttackRoll,
 } from '../engine';
-import type { Action, Facing, GameEvent, GameState, HexId, MissionDef, Unit, UnitId } from '../engine/types';
+import type {
+  Action,
+  Facing,
+  GameEvent,
+  GameState,
+  HexId,
+  HitType,
+  MissionDef,
+  RngState,
+  Unit,
+  UnitId,
+} from '../engine/types';
 import { MISSION_1 } from '../data/missions/mission1';
+import { oddsForHitNumber, pct } from '../ui/odds';
 import { playFire, playMove } from '../ui/sound';
 import {
   clearAuto,
@@ -51,6 +68,19 @@ export interface RollStep {
   headline: string;
   detail: string;
   label: string;
+  /** AR/DR line items (§6.6/§6.1 etc.) for the dice-roller's modifier breakdown. */
+  arMods?: Modifier[];
+  drMods?: Modifier[];
+  /** % to Hit / Critical, from the same Hit Number the roll is actually judged
+   *  against (post-CAP-mod) — matches the fire-odds popup's own numbers. */
+  hitPct?: number;
+  critPct?: number;
+  /**
+   * If this roll is a Hit, what it does to the target (§7.4/§7.5) — computed
+   * with `resolveHit` from the exact RNG state the reducer will later consume,
+   * so the preview can never disagree with what actually happens on commit.
+   */
+  hitEffect?: { destroyed: boolean; hitType?: HitType };
 }
 
 export interface PendingRoll {
@@ -126,6 +156,8 @@ interface Store {
   closeCombat: (attackerId: UnitId, targetId: UnitId) => void;
   rally: (unitId: UnitId) => void;
   pivot: (unitId: UnitId, facing: Facing) => void;
+  /** Free facing correction (§4.5/§15.11) — only legal while `game.pendingFacingChoices` includes `unitId`. */
+  chooseFacing: (unitId: UnitId, facing: Facing) => void;
   load: (unitId: UnitId, vehicleId: UnitId) => void;
   unload: (unitId: UnitId, toHexId: HexId) => void;
   /** Mortar Indirect Attack (§13.2): a Spotter Hex is picked automatically —
@@ -319,6 +351,31 @@ export const useGame = create<Store>((set, get) => {
     hover: null,
   });
 
+  /**
+   * Preview what each Hit in a sequence of rolls will do to its target
+   * (§7.4/§7.5), threading the RNG exactly as the reducer's own sequential
+   * `applyHit` calls will (all dice first, then hit-marker draws in target
+   * order — see `doFire`/`doIndirectFire`) — so it can never disagree with
+   * what actually happens once the roll is committed.
+   */
+  const previewHitEffects = (
+    g: GameState,
+    rolls: { targetId: UnitId; roll: Pick<AttackRoll | IndirectAttackRoll, 'hit' | 'critical' | 'fpColor'> }[],
+    startRng: RngState,
+  ): (RollStep['hitEffect'] | undefined)[] => {
+    let rng = startRng;
+    return rolls.map(({ targetId, roll }) => {
+      if (!roll.hit) return undefined;
+      const target = g.units[targetId];
+      if (!target) return undefined;
+      const res = resolveHit(g, target, roll.critical, roll.fpColor, rng);
+      rng = res.rng;
+      if (res.outcome.kind === 'marked') return { destroyed: false, hitType: res.outcome.hitType };
+      if (res.outcome.kind === 'destroyed-drawn') return { destroyed: true, hitType: res.outcome.hitType };
+      return { destroyed: true };
+    });
+  };
+
   const requestFireRoll = (action: Extract<Action, { type: 'FIRE' }>) => {
     const g = get().game;
     if (!g) return;
@@ -334,13 +391,20 @@ export const useGame = create<Store>((set, get) => {
     // there — the player rolls each one in turn (one step per enemy).
     const stack = rollStackFire(g, attacker, target.hexId);
     if (!stack.rolls.length) return;
-    const steps: RollStep[] = stack.rolls.map(({ targetId: tid, roll }) => {
+    const hitEffects = previewHitEffects(g, stack.rolls, stack.rng);
+    const steps: RollStep[] = stack.rolls.map(({ targetId: tid, roll }, i) => {
+      const odds = oddsForHitNumber(roll.hitNumber);
       return {
         dice: roll.dice,
         success: roll.hit,
         headline: roll.critical ? 'CRITICAL HIT' : roll.hit ? 'HIT' : 'MISS',
         detail: `AR ${roll.ar} vs DR ${roll.dr} — 2d6 ≥ ${roll.hitNumber}${roll.isFlank ? ' (flank)' : ''}`,
         label: `${action.attackerId} → ${tid}`,
+        arMods: roll.arMods,
+        drMods: roll.drMods,
+        hitEffect: hitEffects[i],
+        hitPct: pct(odds.hit),
+        critPct: pct(odds.crit),
       };
     });
     set({ pendingRoll: { action, kind: 'fire', steps } });
@@ -355,13 +419,26 @@ export const useGame = create<Store>((set, get) => {
     // Fire), one roll per Unit — `rollIndirectFire` itself re-validates legality.
     const result = rollIndirectFire(g, attacker, action.targetHexId, action.spotterHexId);
     if (!result.rolls.length) return;
-    const steps: RollStep[] = result.rolls.map((roll) => ({
-      dice: roll.dice,
-      success: roll.hit,
-      headline: roll.critical ? 'CRITICAL HIT' : roll.hit ? 'HIT' : 'MISS',
-      detail: `Indirect (HE) · AR ${roll.ar} vs flank DR ${roll.dr} — 2d6 ≥ ${roll.hitNumber}`,
-      label: `${action.attackerId} ⇒ ${roll.targetId}`,
-    }));
+    const hitEffects = previewHitEffects(
+      g,
+      result.rolls.map((roll) => ({ targetId: roll.targetId, roll })),
+      result.rng,
+    );
+    const steps: RollStep[] = result.rolls.map((roll, i) => {
+      const odds = oddsForHitNumber(roll.hitNumber);
+      return {
+        dice: roll.dice,
+        success: roll.hit,
+        headline: roll.critical ? 'CRITICAL HIT' : roll.hit ? 'HIT' : 'MISS',
+        detail: `Indirect (HE) · AR ${roll.ar} vs flank DR ${roll.dr} — 2d6 ≥ ${roll.hitNumber}`,
+        label: `${action.attackerId} ⇒ ${roll.targetId}`,
+        arMods: roll.arMods,
+        drMods: roll.drMods,
+        hitEffect: hitEffects[i],
+        hitPct: pct(odds.hit),
+        critPct: pct(odds.crit),
+      };
+    });
     set({ pendingRoll: { action, kind: 'fire', steps } });
   };
 
@@ -377,6 +454,8 @@ export const useGame = create<Store>((set, get) => {
       return;
     }
     const roll = rollCloseCombat(g, attacker, target);
+    const [hitEffect] = previewHitEffects(g, [{ targetId: action.targetId, roll }], roll.rng);
+    const ccOdds = oddsForHitNumber(roll.hitNumber);
     set({
       pendingRoll: {
         action,
@@ -388,6 +467,11 @@ export const useGame = create<Store>((set, get) => {
             headline: roll.critical ? 'CRITICAL HIT' : roll.hit ? 'HIT' : 'MISS',
             detail: `close combat · AR ${roll.ar} vs flank DR ${roll.dr} — 2d6 ≥ ${roll.hitNumber}`,
             label: `${action.attackerId} ⚔ ${action.targetId}`,
+            arMods: roll.arMods,
+            drMods: roll.drMods,
+            hitEffect,
+            hitPct: pct(ccOdds.hit),
+            critPct: pct(ccOdds.crit),
           },
         ],
       },
@@ -422,6 +506,8 @@ export const useGame = create<Store>((set, get) => {
         return;
       }
       const roll = rollCloseCombat(g, leader, target, 0, arBonus);
+      const [hitEffect] = previewHitEffects(g, [{ targetId, roll }], roll.rng);
+      const groupCcOdds = oddsForHitNumber(roll.hitNumber);
       set({
         pendingRoll: {
           action,
@@ -433,6 +519,11 @@ export const useGame = create<Store>((set, get) => {
               headline: roll.critical ? 'CRITICAL HIT' : roll.hit ? 'HIT' : 'MISS',
               detail: `Group close combat · AR ${roll.ar} vs flank DR ${roll.dr} — 2d6 ≥ ${roll.hitNumber}`,
               label: `${label} ⚔ ${targetId}`,
+              arMods: roll.arMods,
+              drMods: roll.drMods,
+              hitEffect,
+              hitPct: pct(groupCcOdds.hit),
+              critPct: pct(groupCcOdds.crit),
             },
           ],
         },
@@ -448,13 +539,22 @@ export const useGame = create<Store>((set, get) => {
     // §7.5.1: one shot at the target's hex resolves against every enemy stacked there.
     const stack = rollStackFire(g, leader, target.hexId, 0, arBonus);
     if (!stack.rolls.length) return;
-    const steps: RollStep[] = stack.rolls.map(({ targetId: tid, roll }) => ({
-      dice: roll.dice,
-      success: roll.hit,
-      headline: roll.critical ? 'CRITICAL HIT' : roll.hit ? 'HIT' : 'MISS',
-      detail: `Group AR ${roll.ar} vs DR ${roll.dr} — 2d6 ≥ ${roll.hitNumber}${roll.isFlank ? ' (flank)' : ''}`,
-      label: `${label} → ${tid}`,
-    }));
+    const hitEffects = previewHitEffects(g, stack.rolls, stack.rng);
+    const steps: RollStep[] = stack.rolls.map(({ targetId: tid, roll }, i) => {
+      const odds = oddsForHitNumber(roll.hitNumber);
+      return {
+        dice: roll.dice,
+        success: roll.hit,
+        headline: roll.critical ? 'CRITICAL HIT' : roll.hit ? 'HIT' : 'MISS',
+        detail: `Group AR ${roll.ar} vs DR ${roll.dr} — 2d6 ≥ ${roll.hitNumber}${roll.isFlank ? ' (flank)' : ''}`,
+        label: `${label} → ${tid}`,
+        arMods: roll.arMods,
+        drMods: roll.drMods,
+        hitEffect: hitEffects[i],
+        hitPct: pct(odds.hit),
+        critPct: pct(odds.crit),
+      };
+    });
     set({ pendingRoll: { action, kind: 'fire', steps } });
   };
 
@@ -567,6 +667,19 @@ export const useGame = create<Store>((set, get) => {
         return;
       }
 
+      // Free facing correction (§4.5/§15.11): while the selected Unit has an
+      // open CHOOSE_FACING window, clicking one of its six highlighted (blue)
+      // neighbor Hexes faces it that way — an alternative to the arrow-button
+      // picker in Inspector.tsx, which still works too.
+      if (selectedUnitId && game.pendingFacingChoices?.includes(selectedUnitId)) {
+        const u = game.units[selectedUnitId];
+        const dir = u ? directionTo(u.hexId, hexId) : -1;
+        if (dir >= 0) {
+          get().chooseFacing(selectedUnitId, dir as Facing);
+          return;
+        }
+      }
+
       if (losMode) {
         set({ losSource: hexId });
         return;
@@ -615,21 +728,44 @@ export const useGame = create<Store>((set, get) => {
       if (sel && sel.side === game.currentSide) {
         const acts = legalActionsForUnit(game, sel.id);
 
-        // A Transported/Towed Unit (§15.8) has no Move/Fire of its own — a click
-        // on one of its Unload hexes (under or adjacent to its Vehicle) is
-        // unambiguous, so Unload immediately (§15.9).
+        // A Transported/Towed Unit (§15.8) has no Move/Fire of its own — its
+        // Unload Hexes (under or adjacent to its Vehicle) render green like a
+        // Move (Board.tsx). Clicking one always asks first (Unloading isn't
+        // something to trigger by accident): an adjacent Hex is unambiguous
+        // (just "unload here?"), but the Vehicle's own Hex is ambiguous with
+        // "deselect" (the normal click-selected-unit-to-deselect behavior),
+        // so that one opens the chooser instead of a plain confirm.
         if (sel.carriedBy) {
           const unloadAct = acts.find((a) => a.type === 'UNLOAD' && a.toHexId === hexId);
           if (unloadAct) {
-            get().unload(sel.id, hexId);
+            const carrier = game.units[sel.carriedBy];
+            if (carrier && hexId === carrier.hexId) {
+              set({ chooser: { hexId, x: opts.x, y: opts.y } });
+            } else {
+              set({
+                pendingConfirm: {
+                  message: `Unload ${sel.id} to ${hexId}?`,
+                  proceed: () => get().unload(sel.id, hexId),
+                },
+              });
+            }
             return;
           }
         }
 
         const enemy = here.find((u) => u.side !== game.currentSide);
-        const canMoveHere = acts.some((a) => a.type === 'MOVE' && a.toHexId === hexId);
-        const canFire = !!enemy && acts.some((a) => a.type === 'FIRE' && a.targetId === enemy.id);
-        const canCC = !!enemy && acts.some((a) => a.type === 'CLOSE_COMBAT' && a.targetId === enemy.id);
+        // Rules-legal (NOT CAP-gated) — mirrors the odds popup's own legality
+        // check (Board.tsx's `attackContext`/`closeCombatContext` calls), so a
+        // Spent Unit that merely lacks enough CAP *right now* still gets
+        // OFFERED the choice instead of the option silently vanishing;
+        // fire()/move()/closeCombat() already run the CAP confirm/rejection
+        // flow themselves once chosen (§3.4). `legalActionsForUnit`'s CAP
+        // gating would otherwise make a click default straight to whichever
+        // single action happened to be affordable — e.g. auto-Move a Spent
+        // Vehicle that also had a legal (but not-yet-CAP-affordable) shot.
+        const canMoveHere = !sel.carriedBy && moveCost(game, sel, hexId).ap != null;
+        const canFire = !!enemy && !sel.carriedBy && attackContext(game, sel, enemy).legal;
+        const canCC = !!enemy && !sel.carriedBy && closeCombatContext(game, sel, enemy).legal;
         // Mortar Indirect Attack (§13.2) — an Attack, so only vs an enemy-
         // occupied Hex (an alternative to normal Fire, e.g. when it's out of
         // the Mortar's own LOS but a Spotter Hex can still see it).
@@ -725,8 +861,16 @@ export const useGame = create<Store>((set, get) => {
         const kind = u ? game.templates[u.templateId]?.kind : undefined;
         if (kind) playFire(kind, get().muted);
       }
-      const selectedUnitId =
-        get().selectedUnitId && res.state.units[get().selectedUnitId!] ? get().selectedUnitId : null;
+      // §4.5/§15.11: right after a Move/Unload grants a free facing correction,
+      // auto-select the Unit awaiting it — it just switched control to the
+      // other side, so normal click-to-select (current-side-only) couldn't
+      // reach it otherwise. The most recently granted Unit wins if several.
+      const pending = res.state.pendingFacingChoices;
+      const selectedUnitId = pending?.length
+        ? pending[pending.length - 1]!
+        : get().selectedUnitId && res.state.units[get().selectedUnitId!]
+          ? get().selectedUnitId
+          : null;
       const advancedRound = res.state.round > game.round && res.state.phase === 'playing';
       saveAuto(res.state);
       set({
@@ -763,6 +907,9 @@ export const useGame = create<Store>((set, get) => {
       ),
     pivot: (unitId, facing) =>
       capGate({ type: 'PIVOT', unitId, facing }, (a) => get().dispatch(a)),
+    // Free, 0AP, no Spent Check — bypasses capGate entirely (that's only for
+    // Spent-Unit CAP costs, which don't apply here).
+    chooseFacing: (unitId, facing) => get().dispatch({ type: 'CHOOSE_FACING', unitId, facing }),
 
     // Load/Unload (§15.7/§15.9) are Group Actions: legalActionsForUnit already
     // bakes in the right capCostReduce when either the Unit or the Vehicle is

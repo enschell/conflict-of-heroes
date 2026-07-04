@@ -151,21 +151,53 @@ export const GERMAN_UNITS: UnitTemplate[] = [
   {
     // §16.5/§16.6 Open-Topped APC: transports a foot Unit with +2DR (apcTransport),
     // but its own open top pulls a Soft Target marker vs red-FP Close Combat.
+    // §16.4 Mobile Vehicle: a half-track has a Wheeled (green) Move Cost but
+    // carries a Track Bonus Move symbol too (mobileTrackBonusMoves), so it can
+    // spend that one to enter Open Terrain / dodge Road Congestion — its Wheel
+    // Bonus Move stays Road→Road only.
     id: 'ger-sdkfz251',
     nation: 'germans',
     name: 'SdKfz 251',
     kind: 'vehicle',
-    fp: { red: 3, blue: 1 },
-    dr: { front: 11, flank: 10, color: 'blue' },
+    fp: { red: 3, blue: 0 },
+    dr: { front: 13, flank: 12, color: 'blue' },
     move: 1,
-    range: 6,
+    range: 5,
     apToFire: 2,
     vp: 2,
     unburdened: false,
-    propulsion: 'tracked',
-    bonusMoves: 2,
+    propulsion: 'wheeled',
+    bonusMoves: 1,
+    mobileTrackBonusMoves: 1,
     openTopped: true,
     apcTransport: true,
+  },
+  {
+    // Unit List p.38-39 ("PzJg 35R x1", 41-44) — a Czech 47mm gun on a captured
+    // French R35 chassis (no turret: a Self-Propelled Gun, §16.3 — must Pivot to
+    // Track a Target, which we get for free by leaving `turreted` unset).
+    // §16.5's own worked example is THIS unit: "the PzJg 35R has a red 13DR if
+    // attacked by a Soviet Rifle unit in CC" — i.e. its Flank DR is 13 (reference/
+    // rulebook.txt, the §15.5/2nd-ed numbering for what's now §16.5). The rest of
+    // the printed counter's numbers are badly OCR-scrambled (interleaved with a
+    // neighboring unit's), so this reconstruction combines that one hard textual
+    // fact (Flank DR 13) with a user-confirmed Range of 8, then derives the
+    // remaining fields (Attack Cost 4, Move 1, FP 2/7, Front DR 15) from the
+    // leftover digit group by elimination — treat those five as best-effort, not
+    // verbatim transcription.
+    id: 'ger-pzjg35r',
+    nation: 'germans',
+    name: 'PzJg 35R',
+    kind: 'vehicle',
+    fp: { red: 2, blue: 7 },
+    dr: { front: 15, flank: 13, color: 'blue' },
+    move: 1,
+    range: 8,
+    apToFire: 4,
+    vp: 3,
+    unburdened: false,
+    propulsion: 'tracked',
+    openTopped: true,
   },
 ];
 
@@ -231,15 +263,15 @@ export const SOVIET_UNITS: UnitTemplate[] = [
   {
     // M6 vehicle (Armored Target, blue Defense). Stats are ours; movement
     // bonus-move / wheeled-tracked fields arrive with the vehicle-movement step.
-    id: 'sov-t34',
+    id: 'sov-t34a',
     nation: 'soviets',
-    name: 'T-34',
+    name: 'T-34a m40 Med Tank',
     kind: 'vehicle',
-    fp: { red: 5, blue: 10 },
-    dr: { front: 18, flank: 15, color: 'blue' },
+    fp: { red: 5, blue: 7 },
+    dr: { front: 19, flank: 15, color: 'blue' },
     move: 1,
-    range: 15,
-    apToFire: 3,
+    range: 8,
+    apToFire: 5,
     vp: 3,
     unburdened: false,
     propulsion: 'tracked',
@@ -284,6 +316,26 @@ export const SOVIET_UNITS: UnitTemplate[] = [
     attackMode: 'closeCombatOnly',
     cannotControlHex: true,
     noCapLossOnDestroy: true,
+  },
+  {
+    // §16.7 Field Gun: crewed, green Wheel Move cost, towable (15.6) rather
+    // than self-mobile — the Soviet counterpart to `ger-pak40` (the Unit List
+    // caption "AT Gun 45mm x2", reference/rulebook.txt, is clean prose, but
+    // the printed counter's own numbers were in the same badly OCR-scrambled
+    // block as the PzJg 35R's, so these stats are ours, not transcribed).
+    id: 'sov-atgun45',
+    nation: 'soviets',
+    name: '45mm AT Gun',
+    kind: 'gun',
+    whiteBoxFp: true,
+    fp: { red: 2, blue: 8 },
+    dr: { front: 10, flank: 9, color: 'red' },
+    move: 1,
+    range: 12,
+    apToFire: 3,
+    vp: 2,
+    unburdened: false,
+    propulsion: 'wheeled',
   },
 ];
 

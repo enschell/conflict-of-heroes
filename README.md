@@ -8,9 +8,10 @@ A personal, browser-based implementation of the Academy Games tactical wargame
   rooms can be added later.
 - **Vertical slice: infantry + vehicles**, **Mission 1 ("Partisans")** playable end-to-end —
   Spent Die/Check, Fresh/Spent + Stress, CAPs, AR/DR combat, Group Actions (incl. Group Close
-  Combat), vehicle movement/combat/transport, Special Units (turrets, open-topped, APCs, trucks/
-  wagons), and Mortars + Smoke are all built. OBA, hidden units, hills, and fortifications come
-  later (see `CLAUDE.md` §8) — Hidden Units specifically is deferred to online play, not hotseat.
+  Combat), vehicle movement/combat/transport, and all of Special Units §16 (Turreted, Self-Propelled
+  Guns, Mobile Vehicles, Open-Topped, APCs, Trucks/Wagons, Field Guns), and Mortars + Smoke are all
+  built. OBA, hidden units, hills, and fortifications come later (see `CLAUDE.md` §8) — Hidden Units
+  specifically is deferred to online play, not hotseat.
 - **Stack:** Vite + React + TypeScript, client-only. SVG hex board (real pointy-top hexes with
   per-hex artwork). Pure-function rules engine with a seeded RNG (deterministic saves / undo /
   replay).
@@ -64,11 +65,11 @@ Run `npm run dev` and open http://localhost:5173. Select **Start Mission 1** (or
 
 ## Roadmap (summary)
 v3 cutover (Spent Die/Check, Fresh/Spent + Stress, CAP floor 3, AR/DR combat, v3 initiative,
-no-tie VP) ✅ · M5 Group Actions incl. Group Close Combat ✅ · M6 Vehicles + Special Units ✅
-(movement, combat specifics, Transport/Towing, Turreted/Open-Topped/APC/Trucks-Wagons; §16.4 Mobile
-Vehicles deferred) · Mission 1 reinforcements (§4.12, map-edge/Group entry, manual per-hex
+no-tie VP) ✅ · M5 Group Actions incl. Group Close Combat ✅ · M6 Vehicles + all of Special Units §16
+✅ (movement, combat specifics, Transport/Towing, Turreted/SPG/Mobile-Vehicles/Open-Topped/APC/
+Trucks-Wagons/Field-Guns) · Mission 1 reinforcements (§4.12, map-edge/Group entry, manual per-hex
 placement) ✅ · M7 Mortars + Smoke ✅ (OBA deferred pending Cards) ·
-next: §16.4 Mobile Vehicles → M9 hills → M10 fortifications → M11 flamethrowers → M12 cards →
+next: M9 hills → M10 fortifications → M11 flamethrowers → M12 cards →
 M13 online multiplayer → M8 hidden units (deferred to online play). See `CLAUDE.md` §8 for the
 full milestone roadmap.
 

@@ -5,6 +5,7 @@
  * synthesized dice sound unless muted.
  */
 import { useEffect, useRef, useState } from 'react';
+import { HIT_MARKERS, hitMarkerEffects, markerName } from '../data/hitMarkers';
 import { useGame } from '../state/store';
 import { playDice } from './sound';
 
@@ -102,6 +103,38 @@ export function DiceRoller() {
           {steps.length > 1 ? ` — target ${stepIndex + 1} of ${steps.length}` : ''}
         </div>
         <div className="dice-detail">{step.detail}</div>
+        {step.hitPct != null && (
+          <>
+            <div className="fire-odds__big">{step.hitPct}% to hit</div>
+            {step.critPct != null && (
+              <div className="dim">incl. {step.critPct}% critical (instant kill)</div>
+            )}
+          </>
+        )}
+        {(step.arMods?.length || step.drMods?.length) ? (
+          <div className="dice-mods">
+            <div className="dice-mods__col">
+              <div className="dice-mods__head">AR</div>
+              {step.arMods?.map((m, i) => (
+                <div key={i} className="dice-mods__row">
+                  <span className="dice-mods__val">{m.value > 0 ? `+${m.value}` : m.value}</span>
+                  <span className="dice-mods__label">{m.label}</span>
+                  <span className="dim">{m.section}</span>
+                </div>
+              ))}
+            </div>
+            <div className="dice-mods__col">
+              <div className="dice-mods__head">DR</div>
+              {step.drMods?.map((m, i) => (
+                <div key={i} className="dice-mods__row">
+                  <span className="dice-mods__val">{m.value > 0 ? `+${m.value}` : m.value}</span>
+                  <span className="dice-mods__label">{m.label}</span>
+                  <span className="dim">{m.section}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : null}
         <div className="dice-row" onClick={roll} role="button" title="Roll the dice">
           <Die value={faces[0]} />
           <Die value={faces[1]} />
@@ -113,10 +146,29 @@ export function DiceRoller() {
             <div className={`outcome ${step.success ? 'outcome--hit' : 'outcome--miss'}`}>
               {step.headline}
             </div>
+            {step.success && step.hitEffect && (
+              <div className="hit-effect">
+                {step.hitEffect.destroyed ? (
+                  <div className="hit-effect__title">
+                    Destroyed
+                    {step.hitEffect.hitType ? ` (drew ${markerName(step.hitEffect.hitType)})` : ''}
+                  </div>
+                ) : (
+                  <>
+                    <div className="hit-effect__title">Hit Marker: {markerName(step.hitEffect.hitType!)}</div>
+                    <ul className="hit-effect__list">
+                      {hitMarkerEffects(HIT_MARKERS[step.hitEffect.hitType!]).map((line) => (
+                        <li key={line}>{line}</li>
+                      ))}
+                    </ul>
+                  </>
+                )}
+              </div>
+            )}
             <button className="primary" onClick={advance}>{isLast ? 'Continue' : 'Next target ▸'}</button>
           </>
         )}
-        {phase === 'ready' && <button className="link" onClick={cancel}>cancel</button>}
+        {phase === 'ready' && <button className="danger" onClick={cancel}>Cancel</button>}
       </div>
     </div>
   );

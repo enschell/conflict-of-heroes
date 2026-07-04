@@ -15,9 +15,15 @@ function pAtLeast(need: number): number {
   return ways / 36;
 }
 
-export function fireOdds(ar: number, dr: number): { hit: number; crit: number } {
-  const hitNumber = dr - ar;
+/** Odds from an already-resolved Hit Number (e.g. `AttackRoll.hitNumber`, which
+ *  already has any CAP dice mod baked in, §3.2) — the dice-roller uses this so
+ *  its shown % matches the actual roll, not just the pre-CAP-mod AR/DR. */
+export function oddsForHitNumber(hitNumber: number): { hit: number; crit: number } {
   return { hit: pAtLeast(hitNumber), crit: pAtLeast(hitNumber + 4) };
+}
+
+export function fireOdds(ar: number, dr: number): { hit: number; crit: number } {
+  return oddsForHitNumber(dr - ar);
 }
 
 export function pct(p: number): number {

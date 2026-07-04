@@ -5,14 +5,9 @@
  * followed by a Spent Check (§2.5) and Stresses the unit (§2.6).
  */
 import { attackContext, closeCombatContext, directionTo, effectiveStats, legalActionsForUnit, RALLY_AP_COST, templateOf } from '../engine';
-import { HIT_MARKERS, hitMarkerEffects } from '../data/hitMarkers';
+import { HIT_MARKERS, hitMarkerEffects, markerName } from '../data/hitMarkers';
 import type { Facing } from '../engine/types';
 import { useGame } from '../state/store';
-
-/** Title-case a hit-marker type id, e.g. 'cowering' → 'Cowering'. */
-function markerName(type: string): string {
-  return type.charAt(0).toUpperCase() + type.slice(1);
-}
 
 const ARROWS = ['→', '↗', '↖', '←', '↙', '↘'];
 
@@ -23,6 +18,7 @@ export function Inspector() {
   const closeCombat = useGame((s) => s.closeCombat);
   const rally = useGame((s) => s.rally);
   const pivot = useGame((s) => s.pivot);
+  const chooseFacing = useGame((s) => s.chooseFacing);
   const load = useGame((s) => s.load);
   const unload = useGame((s) => s.unload);
   const movePath = useGame((s) => s.movePath);
@@ -100,7 +96,7 @@ export function Inspector() {
         </b>
         <span>Move · Range</span>
         <b>
-          {tmpl.move} · {eff.range}
+          {eff.move} · {eff.range}
         </b>
         <span>Fire cost · VP</span>
         <b>
@@ -116,6 +112,22 @@ export function Inspector() {
               <li key={line}>{line}</li>
             ))}
           </ul>
+        </div>
+      )}
+
+      {game.pendingFacingChoices?.includes(unit.id) && (
+        <div className="pivot-row facing-choice">
+          <span className="dim">Choose facing (free, §4.5/§15.11):</span>
+          {ARROWS.map((arrow, f) => (
+            <button
+              key={f}
+              className="icon-btn"
+              disabled={f === unit.facing}
+              onClick={() => chooseFacing(unit.id, f as Facing)}
+            >
+              {arrow}
+            </button>
+          ))}
         </div>
       )}
 
@@ -143,8 +155,10 @@ export function Inspector() {
           {hasMove && !isVehicle && <p className="dim">Move: click a highlighted green hex.</p>}
           {hasMove && isVehicle && movePath.length === 0 && (
             <p className="dim">
-              Move: click hexes to build a path (1 Move + {tmpl.bonusMoves ?? 0} Bonus Move
-              {(tmpl.bonusMoves ?? 0) === 1 ? '' : 's'}, §15.2), then confirm.
+              Move: click hexes to build a path (1 Move + {(tmpl.bonusMoves ?? 0) + (tmpl.mobileTrackBonusMoves ?? 0)}{' '}
+              Bonus Move
+              {(tmpl.bonusMoves ?? 0) + (tmpl.mobileTrackBonusMoves ?? 0) === 1 ? '' : 's'}, §15.2
+              {tmpl.mobileTrackBonusMoves ? '/§16.4' : ''}), then confirm.
             </p>
           )}
           {isVehicle && movePath.length > 0 && (

@@ -24,8 +24,11 @@ export {
   enemiesInHex,
   rollStackFire,
 } from './combat';
+export type { Modifier, AttackRoll } from './combat';
+export type { IndirectAttackRoll } from './mortar';
 export { rollRally } from './rally';
-export { effectiveStats, templateOf } from './hits';
+export { effectiveStats, templateOf, resolveHit } from './hits';
+export type { HitOutcome, ResolvedHit } from './hits';
 export { hasLOS, inArc, canSightTarget, visibleHexesFrom } from './los';
 export { moveCost, directionTo, pivotCost, planVehicleMove } from './movement';
 export { rangeBand, fpRangeModifier } from './range';

@@ -20,8 +20,10 @@ export function ActionChooser() {
   const fire = useGame((s) => s.fire);
   const closeCombat = useGame((s) => s.closeCombat);
   const load = useGame((s) => s.load);
+  const unload = useGame((s) => s.unload);
   const indirectFire = useGame((s) => s.indirectFire);
   const fireSmoke = useGame((s) => s.fireSmoke);
+  const select = useGame((s) => s.select);
   const close = useGame((s) => s.closeChooser);
 
   if (!game || !chooser || !selectedUnitId || !game.units[selectedUnitId]) return null;
@@ -35,25 +37,32 @@ export function ActionChooser() {
     (u) => u.hexId === hexId && u.side === unit.side,
   );
 
-  const moveAct = acts.find((a) => a.type === 'MOVE' && a.toHexId === hexId);
-  const fireAct = enemy && acts.find((a) => a.type === 'FIRE' && a.targetId === enemy.id);
-  const ccAct = enemy && acts.find((a) => a.type === 'CLOSE_COMBAT' && a.targetId === enemy.id);
+  // Rules-legal (NOT CAP-gated) for Move/Fire/Close Combat — see the matching
+  // comment in store.ts's hexClick: a Spent Unit that can't currently afford
+  // an option should still see it offered here; choosing it runs the normal
+  // CAP confirm/rejection flow (§3.4). Indirect Fire/Fire Smoke/Load stay
+  // CAP-gated via `acts` — they're not part of this fix.
+  const moveAp = !unit.carriedBy ? moveCost(game, unit, hexId).ap : null;
+  const canMove = moveAp != null;
+  const fireCtx = enemy && !unit.carriedBy ? attackContext(game, unit, enemy) : null;
+  const canFire = !!fireCtx?.legal;
+  const ccCtx = enemy && !unit.carriedBy ? closeCombatContext(game, unit, enemy) : null;
+  const canCC = !!ccCtx?.legal;
   const indirectAct = acts.find((a) => a.type === 'INDIRECT_FIRE' && a.targetHexId === hexId);
   const smokeAct = acts.find((a) => a.type === 'FIRE_SMOKE' && a.targetHexId === hexId);
   const loadAct =
     vehicleHere && acts.find((a) => a.type === 'LOAD' && a.vehicleId === vehicleHere.id);
+  // §15.9: clicking a carried Unit's own (its Vehicle's) Hex is ambiguous
+  // between "unload here" and the normal click-selected-unit-to-deselect
+  // behavior — store.ts's hexClick routes that case to this chooser instead
+  // of a plain confirm (an adjacent Unload Hex isn't ambiguous, so it just
+  // gets a plain "unload here?" confirm, no chooser).
+  const carrier = unit.carriedBy ? game.units[unit.carriedBy] : undefined;
+  const sameHexUnload =
+    carrier && hexId === carrier.hexId ? acts.find((a) => a.type === 'UNLOAD' && a.toHexId === hexId) : undefined;
 
-  const moveAp = moveAct ? moveCost(game, unit, hexId).ap : null;
-  let fireHit: number | null = null;
-  if (fireAct && enemy) {
-    const c = attackContext(game, unit, enemy);
-    fireHit = pct(fireOdds(c.ar, c.dr).hit);
-  }
-  let ccHit: number | null = null;
-  if (ccAct && enemy) {
-    const c = closeCombatContext(game, unit, enemy);
-    ccHit = pct(fireOdds(c.ar, c.dr).hit);
-  }
+  const fireHit = fireCtx?.legal ? pct(fireOdds(fireCtx.ar, fireCtx.dr).hit) : null;
+  const ccHit = ccCtx?.legal ? pct(fireOdds(ccCtx.ar, ccCtx.dr).hit) : null;
 
   const run = (fn: () => void) => {
     close();
@@ -63,17 +72,17 @@ export function ActionChooser() {
   return (
     <div className="unit-picker" style={{ left: chooser.x, top: chooser.y }}>
       <div className="unit-picker__head">Action @ {hexId}</div>
-      {moveAct && (
+      {canMove && (
         <button className="unit-picker__row" onClick={() => run(() => move(unit.id, hexId))}>
           ➜ Move here{moveAp != null ? ` (${moveAp} AP)` : ''}
         </button>
       )}
-      {fireAct && enemy && (
+      {canFire && enemy && (
         <button className="unit-picker__row" onClick={() => run(() => fire(unit.id, enemy.id))}>
           ✸ Fire at {enemy.id} ({fireHit}% hit)
         </button>
       )}
-      {ccAct && enemy && (
+      {canCC && enemy && (
         <button className="unit-picker__row cc-btn" onClick={() => run(() => closeCombat(unit.id, enemy.id))}>
           ⚔ Close combat {enemy.id} ({ccHit}% hit)
         </button>
@@ -91,6 +100,16 @@ export function ActionChooser() {
       {loadAct && vehicleHere && (
         <button className="unit-picker__row" onClick={() => run(() => load(unit.id, vehicleHere.id))}>
           🚚 Load onto {vehicleHere.id} (§15.7)
+        </button>
+      )}
+      {sameHexUnload && (
+        <button className="unit-picker__row" onClick={() => run(() => unload(unit.id, hexId))}>
+          🚚 Unload here (§15.9)
+        </button>
+      )}
+      {sameHexUnload && (
+        <button className="unit-picker__row" onClick={() => run(() => select(null))}>
+          ✕ Deselect {unit.id}
         </button>
       )}
       <button className="link" onClick={close}>

@@ -48,98 +48,115 @@ export function UnitCounter({ game, unit, center, size, selected, stressed = fal
   const spent = unit.status === 'spent';
   const hit = unit.hitMarkers[0];
 
-  // Facing arrow
+  // §4.1: a Unit must face one of the six hex sides (never a vertex), with its
+  // "top" edge aligned to that side. Rather than an overlay arrow, rotate the
+  // whole counter — like turning a physical cardboard chit — so the green
+  // front-facing bar drawn along its (now-rotated) top edge lines up exactly
+  // with the faced hexside. Facing 0 (E) has an outward normal at 0°; the
+  // unrotated top edge's outward normal points at -90° (straight up), so the
+  // rotation needed is the facing angle + 90°.
   const fv = facingVector(unit.facing);
-  const perp = { x: -fv.y, y: fv.x };
-  const tip: Pt = { x: center.x + fv.x * half * 1.18, y: center.y + fv.y * half * 1.18 };
-  const b1: Pt = { x: center.x + fv.x * half * 0.72 + perp.x * 5, y: center.y + fv.y * half * 0.72 + perp.y * 5 };
-  const b2: Pt = { x: center.x + fv.x * half * 0.72 - perp.x * 5, y: center.y + fv.y * half * 0.72 - perp.y * 5 };
+  const rotateDeg = (Math.atan2(fv.y, fv.x) * 180) / Math.PI + 90;
 
   const fs = size * 0.27;
   const pad = size * 0.12;
+  const frontBarH = size * 0.16;
+  const clipId = `counter-clip-${unit.id}`;
 
   return (
     <g className="counter" onClick={onClick} style={{ cursor: 'pointer' }} opacity={spent ? 0.55 : 1}>
-      <polygon
-        points={`${tip.x},${tip.y} ${b1.x},${b1.y} ${b2.x},${b2.y}`}
-        fill={accent}
-        stroke="#000"
-        strokeWidth={0.5}
-      />
-      <rect
-        x={x}
-        y={y}
-        width={s}
-        height={s}
-        rx={size * 0.14}
-        fill={fill}
-        stroke={inGroup ? '#22d3ee' : selected ? '#ffd24a' : accent}
-        strokeWidth={selected || inGroup ? 3 : 1.5}
-      />
-      {stressed && (
+      <g transform={`rotate(${rotateDeg} ${center.x} ${center.y})`}>
+        <defs>
+          <clipPath id={clipId}>
+            <rect x={x} y={y} width={s} height={s} rx={size * 0.14} />
+          </clipPath>
+        </defs>
         <rect
-          x={x - 3}
-          y={y - 3}
-          width={s + 6}
-          height={s + 6}
-          rx={size * 0.18}
-          fill="none"
-          stroke="#ff8c00"
-          strokeWidth={3}
-          strokeDasharray="4 3"
+          x={x}
+          y={y}
+          width={s}
+          height={s}
+          rx={size * 0.14}
+          fill={fill}
+          stroke={inGroup ? '#22d3ee' : selected ? '#ffd24a' : accent}
+          strokeWidth={selected || inGroup ? 3 : 1.5}
+        />
+        {/* Front indicator (§4.1): the green field along the Unit's top edge,
+            plus a small outward notch, so facing reads clearly even zoomed out.
+            Clipped to the counter's rounded corners. */}
+        <g clipPath={`url(#${clipId})`} pointerEvents="none">
+          <rect x={x} y={y} width={s} height={frontBarH} fill="#2fbf4a" />
+        </g>
+        <polygon
+          points={`${center.x - fs * 0.32},${y + frontBarH * 0.62} ${center.x + fs * 0.32},${y + frontBarH * 0.62} ${center.x},${y - fs * 0.3}`}
+          fill="#0d3d17"
           pointerEvents="none"
         />
-      )}
-      {spent && (
-        <line x1={x} y1={y + s} x2={x + s} y2={y} stroke="#0008" strokeWidth={2} />
-      )}
-      {/* fire cost (top-left), move cost (top-right) */}
-      <text x={x + pad} y={y + fs + pad * 0.4} fontSize={fs} fill="#0e0e0e" fontWeight={700}>
-        {eff.apToFire}
-      </text>
-      <text x={x + s - pad} y={y + fs + pad * 0.4} fontSize={fs} fill="#e9e9e9" textAnchor="end">
-        {tmpl.move}
-      </text>
-      {/* unit code (centre) */}
-      <text
-        x={center.x}
-        y={center.y + fs * 0.35}
-        fontSize={fs * 1.08}
-        fill="#fff"
-        fontWeight={700}
-        textAnchor="middle"
-      >
-        {code(tmpl.name)}
-      </text>
-      {/* firepower (bottom-left, red), defense (bottom-right, colored) */}
-      <text x={x + pad} y={y + s - pad * 0.6} fontSize={fs} fill="#ff7b7b" fontWeight={700}>
-        {eff.fp.red}
-      </text>
-      <text
-        x={x + s - pad}
-        y={y + s - pad * 0.6}
-        fontSize={fs}
-        fill={eff.dr.color === 'blue' ? '#7bb6ff' : '#ff9d6e'}
-        fontWeight={700}
-        textAnchor="end"
-      >
-        {eff.dr.front}
-      </text>
-      {hit && (
-        <g>
-          <rect x={center.x - fs * 1.1} y={y - fs * 0.5} width={fs * 2.2} height={fs} rx={2} fill="#b91c1c" />
-          <text
-            x={center.x}
-            y={y + fs * 0.32}
-            fontSize={fs * 0.8}
-            fill="#fff"
-            fontWeight={700}
-            textAnchor="middle"
-          >
-            {hit.slice(0, 4).toUpperCase()}
-          </text>
-        </g>
-      )}
+        {stressed && (
+          <rect
+            x={x - 3}
+            y={y - 3}
+            width={s + 6}
+            height={s + 6}
+            rx={size * 0.18}
+            fill="none"
+            stroke="#ff8c00"
+            strokeWidth={3}
+            strokeDasharray="4 3"
+            pointerEvents="none"
+          />
+        )}
+        {spent && (
+          <line x1={x} y1={y + s} x2={x + s} y2={y} stroke="#0008" strokeWidth={2} />
+        )}
+        {/* fire cost (top-left), move cost (top-right) */}
+        <text x={x + pad} y={y + fs + pad * 0.4 + frontBarH} fontSize={fs} fill="#0e0e0e" fontWeight={700}>
+          {eff.apToFire}
+        </text>
+        <text x={x + s - pad} y={y + fs + pad * 0.4 + frontBarH} fontSize={fs} fill="#e9e9e9" textAnchor="end">
+          {eff.move}
+        </text>
+        {/* unit code (centre) */}
+        <text
+          x={center.x}
+          y={center.y + fs * 0.35}
+          fontSize={fs * 1.08}
+          fill="#fff"
+          fontWeight={700}
+          textAnchor="middle"
+        >
+          {code(tmpl.name)}
+        </text>
+        {/* firepower (bottom-left, red), defense (bottom-right, colored) */}
+        <text x={x + pad} y={y + s - pad * 0.6} fontSize={fs} fill="#ff7b7b" fontWeight={700}>
+          {eff.fp.red}
+        </text>
+        <text
+          x={x + s - pad}
+          y={y + s - pad * 0.6}
+          fontSize={fs}
+          fill={eff.dr.color === 'blue' ? '#7bb6ff' : '#ff9d6e'}
+          fontWeight={700}
+          textAnchor="end"
+        >
+          {eff.dr.front}
+        </text>
+        {hit && (
+          <g>
+            <rect x={center.x - fs * 1.1} y={y - fs * 0.5} width={fs * 2.2} height={fs} rx={2} fill="#b91c1c" />
+            <text
+              x={center.x}
+              y={y + fs * 0.32}
+              fontSize={fs * 0.8}
+              fill="#fff"
+              fontWeight={700}
+              textAnchor="middle"
+            >
+              {hit.slice(0, 4).toUpperCase()}
+            </text>
+          </g>
+        )}
+      </g>
     </g>
   );
 }

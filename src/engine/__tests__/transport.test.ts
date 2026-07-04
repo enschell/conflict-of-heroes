@@ -1,7 +1,10 @@
 /** Vehicle Transport: Loading, Transporting, Unloading (§15.6–15.11). */
 import { describe, expect, it } from 'vitest';
+import { closeCombatContext } from '../combat';
 import { reduce } from '../reducer';
 import { legalActionsForUnit } from '../actions';
+import { moveCost } from '../movement';
+import { UNIT_TEMPLATES } from '../../data/units';
 import { addHex, addTemplate, addUnit, baseState, rifleTemplate } from './helpers';
 import type { GameState } from '../types';
 
@@ -132,6 +135,17 @@ describe('Transporting (§15.8)', () => {
     expect(legalActionsForUnit(s, 'R').some((a) => a.type === 'RALLY')).toBe(true);
     expect(legalActionsForUnit(s, 'R').some((a) => a.type === 'STALL')).toBe(true);
   });
+
+  it('Pivoting the Vehicle also pivots its passenger to match (§15.7: rides facing the same direction)', () => {
+    const s = loadedScene();
+    const res = reduce(s, { type: 'PIVOT', unitId: 'V', facing: 4 });
+    expect(res.events.some((e) => e.type === 'illegal')).toBe(false);
+    expect(res.state.units['V']!.facing).toBe(4);
+    expect(res.state.units['R']!.facing).toBe(4);
+    // One Group Spent Check covers both (§15.8/§10.10), like Move already does.
+    expect(res.events.filter((e) => e.type === 'spent')).toHaveLength(1);
+    expect(res.events.some((e) => e.type === 'spent' && /whole Group/.test(e.text))).toBe(true);
+  });
 });
 
 describe('Unloading (§15.9)', () => {
@@ -193,6 +207,11 @@ describe('Destroying a Transport (§15.11)', () => {
     expect(res.state.units['R']).toBeDefined(); // passenger survived its own roll
     expect(res.state.units['R']!.carriedBy).toBeUndefined(); // freed
     expect(res.state.units['R']!.hexId).toBe('0,0'); // placed in the (former) hex
+    // §15.11: "facing any direction" — a free CHOOSE_FACING window opens for it.
+    expect(res.state.pendingFacingChoices).toEqual(['R']);
+    const faced = reduce(res.state, { type: 'CHOOSE_FACING', unitId: 'R', facing: 5 });
+    expect(faced.events.some((e) => e.type === 'illegal')).toBe(false);
+    expect(faced.state.units['R']!.facing).toBe(5);
   });
 });
 
@@ -284,5 +303,56 @@ describe('Towing damaged Vehicles (§15.10)', () => {
     const res = reduce(s, { type: 'MOVE', unitId: 'TOW', toHexId: '1,0' });
     expect(res.state.units['TOW']!.hexId).toBe('1,0');
     expect(res.state.units['DMG']!.hexId).toBe('1,0'); // towed along
+  });
+});
+
+describe('§16.7 Field Guns', () => {
+  // The real ger-pak40 unit: `kind: 'gun'`, not `kind: 'vehicle'` — so unlike
+  // §15.10's Immobilized/Stunned precondition for towing damaged Vehicles, a
+  // Field Gun may be hooked up (Loaded) at ANY time, undamaged or not, since
+  // `actions.ts`'s `loadable` check only imposes that precondition on
+  // `kind === 'vehicle'`.
+  function gunScene(): GameState {
+    const s = baseState(1);
+    addTemplate(s, UNIT_TEMPLATES['ger-pak40']!);
+    addTemplate(s, tankTemplate({ id: 'halftrack', propulsion: 'wheeled' }));
+    addHex(s, 0, 0);
+    addHex(s, 1, 0);
+    return s;
+  }
+
+  it('a fully healthy Field Gun may be Loaded (towed) — no Immobilized/Stunned precondition', () => {
+    const s = gunScene();
+    addUnit(s, 'TOW', 'A', 0, 0, 0, 'halftrack');
+    addUnit(s, 'GUN', 'A', 0, 0, 0, 'ger-pak40'); // fresh, no hit markers
+    expect(legalActionsForUnit(s, 'GUN').some((a) => a.type === 'LOAD' && a.vehicleId === 'TOW')).toBe(true);
+    const res = reduce(s, { type: 'LOAD', unitId: 'GUN', vehicleId: 'TOW' });
+    expect(res.events.some((e) => e.type === 'illegal')).toBe(false);
+    expect(res.state.units['GUN']!.carriedBy).toBe('TOW');
+  });
+
+  it('a Damaged Field Gun (Suppressed) may STILL be Loaded — the tow precondition never applies to Guns', () => {
+    const s = gunScene();
+    addUnit(s, 'TOW', 'A', 0, 0, 0, 'halftrack');
+    addUnit(s, 'GUN', 'A', 0, 0, 0, 'ger-pak40', ['suppressed']);
+    const res = reduce(s, { type: 'LOAD', unitId: 'GUN', vehicleId: 'TOW' });
+    expect(res.events.some((e) => e.type === 'illegal')).toBe(false);
+  });
+
+  it('may also move under its own power, using ordinary (non-Vehicle) terrain rules', () => {
+    const s = gunScene();
+    s.hexes['1,0']!.terrain = 'woodsHeavy'; // Foot Difficult Terrain is +1AP (§4.9); Vehicle rules would differ
+    const gun = addUnit(s, 'GUN', 'A', 0, 0, 0, 'ger-pak40');
+    const mc = moveCost(s, gun, '1,0');
+    expect(mc.ap).toBe(UNIT_TEMPLATES['ger-pak40']!.move + 1);
+  });
+
+  it('may Close Combat, but at the Crewed −2AR penalty (whiteBoxFp) instead of the usual +4AR', () => {
+    const s = gunScene();
+    addTemplate(s, rifleTemplate({ id: 'enemy' }));
+    const gun = addUnit(s, 'GUN', 'A', 0, 0, 0, 'ger-pak40'); // whiteBoxFp: true — Field Guns are Crewed (§6.11)
+    addUnit(s, 'ENEMY', 'B', 0, 0, 0, 'enemy');
+    const ctx = closeCombatContext(s, gun, s.units['ENEMY']!);
+    expect(ctx.arMods).toContainEqual({ label: 'Crewed Unit penalty in CC', value: -2, section: '§6.11' });
   });
 });
