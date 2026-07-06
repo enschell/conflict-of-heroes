@@ -162,6 +162,13 @@ export interface UnitTemplate {
    * Range-1-capped Smoke).
    */
   pioneer?: boolean;
+  /**
+   * Prototype (UI counter redesign, unshipped): a `public/assets/units/...`
+   * path to art rendered as the counter's background in place of the plain
+   * nation-color fill. Only set on units used to live-preview the new
+   * layout — not a general content field yet.
+   */
+  counterImage?: string;
 }
 
 /** A unit instance on the map. */

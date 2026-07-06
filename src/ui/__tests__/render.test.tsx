@@ -102,7 +102,7 @@ describe('UI renders', () => {
     const someHex = Object.keys(useGame.getState().game!.hexes)[0]!;
     useGame.setState({ hover: { id: someHex, x: 0, y: 0 } });
     const html = render();
-    expect(html).toContain('Under cursor');
+    expect(html).toContain('Terrain in Hex');
     expect(html).toContain(someHex);
   });
 

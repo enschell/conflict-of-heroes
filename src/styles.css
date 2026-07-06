@@ -147,6 +147,22 @@ button.link {
   margin: 0 0 0.5rem;
   font-size: 1rem;
 }
+.inspector-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+.inspector-header__text {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.inspector-counter {
+  /* 1.5x board scale (118.8px, matches Inspector.tsx's INSPECTOR_COUNTER_SIZE).
+     2x forced the header text to wrap and pushed the rest of the panel down. */
+  flex: 0 0 auto;
+  width: 118.8px;
+}
 
 .track {
   background: var(--panel);
@@ -541,16 +557,28 @@ button.link {
 .hover-units {
   margin-top: 0.6rem;
 }
+.hover-units__heading {
+  /* Same font-size/boldness as `.panel h3` ("Terrain in Hex"), so the two
+     section labels read as a matched pair. */
+  font-size: 1rem;
+  font-weight: bold;
+}
 .hover-units__row {
   display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem;
+  flex-wrap: nowrap;
+  gap: 5px;
   margin-top: 0.35rem;
 }
 .hover-units__cell {
   text-align: center;
+  /* flex-basis is the counter's literal size (--mini-box): 1-2 units render
+     at that size untouched, and flexbox's own shrink math only kicks in
+     once a 3rd would actually overflow the row — never widens the panel. */
+  flex: 0 1 var(--mini-box, 160px);
+  min-width: 0;
 }
 .hover-units__id {
+  margin-top: 3px;
   font-size: 0.68rem;
   color: var(--dim);
 }

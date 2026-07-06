@@ -32,6 +32,7 @@ export const GERMAN_UNITS: UnitTemplate[] = [
     apToFire: 3,
     vp: 1,
     unburdened: true,
+    counterImage: '/assets/units/German rifles 41.png',
   },
   {
     // Unit List p.38 — "MG34 - Belt Fed" (×7). Crew-served.
@@ -47,6 +48,7 @@ export const GERMAN_UNITS: UnitTemplate[] = [
     apToFire: 2,
     vp: 2,
     unburdened: true,
+    counterImage: '/assets/units/MG34v2.png',
   },
   {
     // Unit List p.38 — "Pioneers Squad" (×3). Notable blue 3 FP (anti-armor / demolition).
@@ -220,6 +222,7 @@ export const SOVIET_UNITS: UnitTemplate[] = [
     apToFire: 4,
     vp: 1,
     unburdened: true,
+    counterImage: '/assets/units/sov-rifle.png',
   },
   {
     // Unit List p.38 — "SMG/Rifles Squad" (×4).

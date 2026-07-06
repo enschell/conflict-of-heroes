@@ -65,7 +65,7 @@ export function hitMarkerEffects(def: HitMarkerDef): string[] {
 
   // What the Unit may not do.
   if (def.killOnDraw) lines.push('Destroyed');
-  if (def.onlyRally) lines.push('Cannot take any Action other than Rally');
+  if (def.onlyRally) lines.push('Can only Rally');
   if (def.cannotMove && def.cannotPivot) lines.push('Cannot Move or Pivot');
   else if (def.cannotMove) lines.push('Cannot Move');
   else if (def.cannotPivot) lines.push('Cannot Pivot');

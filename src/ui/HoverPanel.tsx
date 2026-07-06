@@ -1,14 +1,16 @@
 /**
  * Right-sidebar "under cursor" panel (replaces the floating tooltip): the
  * terrain of the hovered hex with its rules, and the units in that hex rendered
- * just like the board but at half size (click one to select it).
+ * just like the board, at the same full size (click one to select it).
  */
+import type { CSSProperties } from 'react';
 import { templateOf } from '../engine';
 import type { GameState, Unit } from '../engine/types';
 import { TERRAIN } from '../data/terrainTypes';
 import { artForHex } from '../data/hexArt';
 import { useGame } from '../state/store';
 import { UnitCounter } from './UnitCounter';
+import { HEX_SIZE } from './hexgeo';
 
 const OBSTACLE_NAMES: Record<string, string> = {
   barbedWire: 'Barbed Wire',
@@ -21,18 +23,35 @@ const FORTIFICATION_NAMES: Record<string, string> = {
   bunker: 'Bunker',
 };
 
+// 1.5x board scale — this is an inspector view, not a board tile. Cells are
+// flex items with this as their `flex-basis` and `flex-wrap: nowrap` (see
+// .hover-units__row in styles.css): 1-2 units render at this literal size,
+// and flexbox's own shrink algorithm only kicks in once a 3rd would actually
+// overflow the row, shrinking all three just enough to still fit.
+const MINI_SIZE = HEX_SIZE * 1.5;
+const MINI_BOX = MINI_SIZE * 2.2;
+
+/** Splits units into rows of at most `size` — a 5-Unit stack is 3+2 rows, a 9-Unit stack is 3+3+3. */
+function chunk<T>(arr: T[], size: number): T[][] {
+  const rows: T[][] = [];
+  for (let i = 0; i < arr.length; i += size) rows.push(arr.slice(i, i + size));
+  return rows;
+}
+
 function MiniCounter({ game, unit }: { game: GameState; unit: Unit }) {
   const select = useGame((s) => s.select);
-  const size = 18; // half of HEX_SIZE (36)
-  const box = size * 2.2;
   return (
-    <svg width={box} height={box} viewBox={`0 0 ${box} ${box}`} style={{ cursor: 'pointer' }}>
+    <svg
+      viewBox={`0 0 ${MINI_BOX} ${MINI_BOX}`}
+      style={{ cursor: 'pointer', width: '100%', aspectRatio: '1 / 1', display: 'block' }}
+    >
       <UnitCounter
         game={game}
         unit={unit}
-        center={{ x: box / 2, y: box / 2 }}
-        size={size}
+        center={{ x: MINI_BOX / 2, y: MINI_BOX / 2 }}
+        size={MINI_SIZE}
         selected={false}
+        ignoreFacing
         onClick={() => select(unit.id)}
       />
     </svg>
@@ -45,13 +64,17 @@ export function HoverPanel() {
   if (!game) return null;
 
   const hex = hover ? game.hexes[hover.id] : undefined;
+  // NOTE (M8, deferred — see CLAUDE.md §8): once Hidden Units exist, this
+  // filter must also drop enemy-owned hidden Units — this hover panel would
+  // otherwise leak them the same way the board render would. No `hidden`
+  // field exists on Unit yet, so there's nothing to check today.
   const units = hover ? Object.values(game.units).filter((u) => u.hexId === hover.id) : [];
   const t = hex ? TERRAIN[hex.terrain] : null;
   const art = hex ? artForHex(hex) : null;
 
   return (
     <div className="panel">
-      <h3>Under cursor</h3>
+      <h3>Terrain in Hex</h3>
       {!hex || !t ? (
         <p className="dim">Hover a hex to inspect terrain and units.</p>
       ) : (
@@ -119,15 +142,21 @@ export function HoverPanel() {
             )}
           </div>
           <div className="hover-units">
-            <div className="dim">Units here: {units.length || 'none'}</div>
-            <div className="hover-units__row">
-              {units.map((u) => (
-                <div key={u.id} className="hover-units__cell" title={`${u.id} · ${templateOf(game, u).name}`}>
-                  <MiniCounter game={game} unit={u} />
-                  <div className="hover-units__id">{u.id}</div>
-                </div>
-              ))}
-            </div>
+            <div className="hover-units__heading">Units in Hex: {units.length || 'none'}</div>
+            {chunk(units, 3).map((row, i) => (
+              <div
+                key={i}
+                className="hover-units__row"
+                style={{ '--mini-box': `${MINI_BOX}px` } as CSSProperties}
+              >
+                {row.map((u) => (
+                  <div key={u.id} className="hover-units__cell" title={`${u.id} · ${templateOf(game, u).name}`}>
+                    <MiniCounter game={game} unit={u} />
+                    <div className="hover-units__id">{u.id}</div>
+                  </div>
+                ))}
+              </div>
+            ))}
           </div>
         </>
       )}

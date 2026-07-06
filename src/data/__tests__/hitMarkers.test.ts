@@ -4,7 +4,7 @@ import { FOOT_HIT_MARKERS, hitMarkerEffects } from '../hitMarkers';
 describe('hitMarkerEffects (§7.5 Soft Target table)', () => {
   it('Stunned: only Rally', () => {
     expect(hitMarkerEffects(FOOT_HIT_MARKERS.stunned)).toEqual([
-      'Cannot take any Action other than Rally',
+      'Can only Rally',
       'Rally Number: 7',
     ]);
   });

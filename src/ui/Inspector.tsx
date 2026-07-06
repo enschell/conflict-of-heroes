@@ -7,10 +7,38 @@
 import { attackContext, closeCombatContext, directionTo, effectiveStats, legalActionsForUnit, RALLY_AP_COST, templateOf } from '../engine';
 import { isHopelessShot } from './odds';
 import { HIT_MARKERS, hitMarkerEffects, markerName } from '../data/hitMarkers';
-import type { Facing } from '../engine/types';
+import type { Facing, GameState, Unit } from '../engine/types';
 import { useGame } from '../state/store';
+import { UnitCounter } from './UnitCounter';
+import { HEX_SIZE } from './hexgeo';
 
 const ARROWS = ['→', '↗', '↖', '←', '↙', '↘'];
+
+// 1.5x board scale — 2x forced the header text to wrap and pushed the rest
+// of the panel down, so this dropped down a tier (see .inspector-counter).
+const INSPECTOR_COUNTER_SIZE = HEX_SIZE * 1.5;
+const INSPECTOR_COUNTER_BOX = INSPECTOR_COUNTER_SIZE * 2.2;
+
+function InspectorCounter({ game, unit }: { game: GameState; unit: Unit }) {
+  return (
+    <div className="inspector-counter">
+      <svg
+        viewBox={`0 0 ${INSPECTOR_COUNTER_BOX} ${INSPECTOR_COUNTER_BOX}`}
+        style={{ width: '100%', aspectRatio: '1 / 1', display: 'block' }}
+      >
+        <UnitCounter
+          game={game}
+          unit={unit}
+          center={{ x: INSPECTOR_COUNTER_BOX / 2, y: INSPECTOR_COUNTER_BOX / 2 }}
+          size={INSPECTOR_COUNTER_SIZE}
+          selected={false}
+          ignoreFacing
+          onClick={() => {}}
+        />
+      </svg>
+    </div>
+  );
+}
 
 export function Inspector() {
   const game = useGame((s) => s.game);
@@ -88,39 +116,41 @@ export function Inspector() {
 
   return (
     <div className="panel">
-      <h3>
-        {unit.id} <span className="dim">· {tmpl.name}</span>
-      </h3>
-
-      <div className="stats-grid">
-        <span>Side</span>
-        <b>{unit.side}</b>
-        <span>Status</span>
-        <b>
-          {unit.status}
-          {unit.stressed ? ' · stressed' : ''}
-        </b>
-        <span>Hex / facing</span>
-        <b>
-          {unit.hexId} {ARROWS[unit.facing]}
-        </b>
-        <span>Firepower</span>
-        <b>
-          {eff.fp.red}
-          {eff.fp.blue ? ` / ${eff.fp.blue}b` : ''}
-        </b>
-        <span>Defense</span>
-        <b>
-          {eff.dr.front}f / {eff.dr.flank}k ({eff.dr.color})
-        </b>
-        <span>Move · Range</span>
-        <b>
-          {eff.move} · {eff.range}
-        </b>
-        <span>Fire cost · VP</span>
-        <b>
-          {eff.apToFire} AP · {tmpl.vp}
-        </b>
+      <div className="inspector-header">
+        <div className="inspector-header__text">
+          <h3>{tmpl.name}</h3>
+          <div className="stats-grid">
+            <span>Side</span>
+            <b>{unit.side}</b>
+            <span>Status</span>
+            <b>
+              {unit.status}
+              {unit.stressed ? ' · stressed' : ''}
+            </b>
+            <span>Hex / facing</span>
+            <b>
+              {unit.hexId} {ARROWS[unit.facing]}
+            </b>
+            <span>Firepower</span>
+            <b>
+              {eff.fp.red}
+              {eff.fp.blue ? ` / ${eff.fp.blue}b` : ''}
+            </b>
+            <span>Defense</span>
+            <b>
+              {eff.dr.front}f / {eff.dr.flank}k ({eff.dr.color})
+            </b>
+            <span>Move · Range</span>
+            <b>
+              {eff.move} · {eff.range}
+            </b>
+            <span>Fire cost · VP</span>
+            <b>
+              {eff.apToFire} AP · {tmpl.vp}
+            </b>
+          </div>
+        </div>
+        <InspectorCounter game={game} unit={unit} />
       </div>
 
       {unit.hitMarkers[0] && (
@@ -156,7 +186,7 @@ export function Inspector() {
         <div className="actions">
           {unit.status === 'spent' && (
             <p className="dim">
-              Spent — an Action is only possible by spending CAPs to reduce its
+              Spent — an Action only possible by spending CAPs to reduce
               cost to 0AP (§3.4).
             </p>
           )}
