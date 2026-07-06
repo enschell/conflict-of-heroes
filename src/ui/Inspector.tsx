@@ -5,6 +5,7 @@
  * followed by a Spent Check (§2.5) and Stresses the unit (§2.6).
  */
 import { attackContext, closeCombatContext, directionTo, effectiveStats, legalActionsForUnit, RALLY_AP_COST, templateOf } from '../engine';
+import { isHopelessShot } from './odds';
 import { HIT_MARKERS, hitMarkerEffects, markerName } from '../data/hitMarkers';
 import type { Facing } from '../engine/types';
 import { useGame } from '../state/store';
@@ -17,6 +18,8 @@ export function Inspector() {
   const fire = useGame((s) => s.fire);
   const closeCombat = useGame((s) => s.closeCombat);
   const rally = useGame((s) => s.rally);
+  const hastyDefense = useGame((s) => s.hastyDefense);
+  const removeHastyDefense = useGame((s) => s.removeHastyDefense);
   const pivot = useGame((s) => s.pivot);
   const chooseFacing = useGame((s) => s.chooseFacing);
   const load = useGame((s) => s.load);
@@ -57,10 +60,26 @@ export function Inspector() {
   const rallyCost = RALLY_AP_COST + (unit.stressed ? 1 : 0); // AP (Fresh) or CAP-to-0AP (Spent)
   const spentRally = unit.status === 'spent';
   const rallyAffordable = !spentRally || player.capCurrent >= rallyCost;
-  const fireActs = acts.filter((a): a is Extract<typeof a, { type: 'FIRE' }> => a.type === 'FIRE');
-  const ccActs = acts.filter(
-    (a): a is Extract<typeof a, { type: 'CLOSE_COMBAT' }> => a.type === 'CLOSE_COMBAT',
-  );
+
+  // Hasty Defense (§17.6): a Foot Unit may build one (5AP) if it doesn't
+  // already have one; it may always be removed at will, for free.
+  const hastyDefenseAct = acts.find((a) => a.type === 'HASTY_DEFENSE');
+  const hastyDefenseCost = 5 + (unit.stressed ? 1 : 0);
+  const hastyDefenseAffordable = unit.status !== 'spent' || player.capCurrent >= hastyDefenseCost;
+  // §3.2: exclude a target no CAP could ever make hittable — same UI
+  // convenience as store.ts's hexClick/ActionChooser.tsx, not a rules change.
+  const fireActs = acts
+    .filter((a): a is Extract<typeof a, { type: 'FIRE' }> => a.type === 'FIRE')
+    .filter((a) => {
+      const tgt = game.units[a.targetId];
+      return tgt && !isHopelessShot(attackContext(game, unit, tgt, 0, 0, a.useFlamethrower).hitNumber);
+    });
+  const ccActs = acts
+    .filter((a): a is Extract<typeof a, { type: 'CLOSE_COMBAT' }> => a.type === 'CLOSE_COMBAT')
+    .filter((a) => {
+      const tgt = a.targetId ? game.units[a.targetId] : undefined;
+      return tgt && !isHopelessShot(closeCombatContext(game, unit, tgt, 0, a.useFlamethrower).hitNumber);
+    });
   // Transport (§15.6–15.10): Load onto an eligible Vehicle, or Unload from the
   // one carrying this Unit (a foot Unit or a towed, damaged Vehicle).
   const loadActs = acts.filter((a): a is Extract<typeof a, { type: 'LOAD' }> => a.type === 'LOAD');
@@ -152,6 +171,24 @@ export function Inspector() {
               Rally needs {rallyCost} CAP (have {player.capCurrent})
             </button>
           )}
+          {unit.hastyDefense && (
+            <button onClick={() => removeHastyDefense(unit.id)}>
+              Remove Hasty Defense (free, §17.6)
+            </button>
+          )}
+          {hastyDefenseAct && !spentRally && (
+            <button onClick={() => hastyDefense(unit.id)}>Build Hasty Defense ({hastyDefenseCost} AP, §17.6)</button>
+          )}
+          {hastyDefenseAct && spentRally && hastyDefenseAffordable && (
+            <button onClick={() => hastyDefense(unit.id)}>
+              Build Hasty Defense — spend {hastyDefenseCost} CAP → 0AP (§3.4)
+            </button>
+          )}
+          {hastyDefenseAct && spentRally && !hastyDefenseAffordable && (
+            <button disabled title="Not enough CAP to reach 0AP">
+              Hasty Defense needs {hastyDefenseCost} CAP (have {player.capCurrent})
+            </button>
+          )}
           {hasMove && !isVehicle && <p className="dim">Move: click a highlighted green hex.</p>}
           {hasMove && isVehicle && movePath.length === 0 && (
             <p className="dim">
@@ -178,10 +215,14 @@ export function Inspector() {
               <div className="dim">Fire targets:</div>
               {fireActs.map((a) => {
                 const tgt = game.units[a.targetId]!;
-                const ctx = attackContext(game, unit, tgt);
+                const ctx = attackContext(game, unit, tgt, 0, 0, a.useFlamethrower);
                 return (
-                  <button key={a.targetId} onClick={() => fire(unit.id, a.targetId)}>
-                    → {a.targetId}: AR {ctx.ar} vs DR {ctx.dr} — 2d6 ≥ {ctx.hitNumber}
+                  <button
+                    key={`${a.targetId}-${a.useFlamethrower ? 'ft' : 'n'}`}
+                    onClick={() => fire(unit.id, a.targetId, a.useFlamethrower)}
+                  >
+                    {a.useFlamethrower ? '🔥' : '→'} {a.targetId}
+                    {a.useFlamethrower ? ' (Flamethrower)' : ''}: AR {ctx.ar} vs DR {ctx.dr} — 2d6 ≥ {ctx.hitNumber}
                     {ctx.isFlank ? ' (flank)' : ''}
                   </button>
                 );
@@ -193,11 +234,20 @@ export function Inspector() {
             <div className="fire-list">
               <div className="dim">Close combat (enemy in your hex):</div>
               {ccActs.map((a) => {
-                const tgt = game.units[a.targetId]!;
-                const ctx = closeCombatContext(game, unit, tgt);
+                // legalActionsForUnit never enumerates a targetKind:'structure'
+                // CLOSE_COMBAT (that's a store-level explicit-choice action,
+                // §17.12) — every entry here always targets a Unit.
+                const targetId = a.targetId!;
+                const tgt = game.units[targetId]!;
+                const ctx = closeCombatContext(game, unit, tgt, 0, a.useFlamethrower);
                 return (
-                  <button key={a.targetId} className="cc-btn" onClick={() => closeCombat(unit.id, a.targetId)}>
-                    ⚔ {a.targetId}: AR {ctx.ar} vs flank DR {ctx.dr} — 2d6 ≥ {ctx.hitNumber}
+                  <button
+                    key={`${targetId}-${a.useFlamethrower ? 'ft' : 'n'}`}
+                    className="cc-btn"
+                    onClick={() => closeCombat(unit.id, targetId, a.useFlamethrower)}
+                  >
+                    {a.useFlamethrower ? '🔥⚔' : '⚔'} {targetId}
+                    {a.useFlamethrower ? ' (Flamethrower)' : ''}: AR {ctx.ar} vs flank DR {ctx.dr} — 2d6 ≥ {ctx.hitNumber}
                   </button>
                 );
               })}

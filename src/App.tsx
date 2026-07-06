@@ -16,6 +16,7 @@ import { GroupPanel } from './ui/GroupPanel';
 import { HoverPanel } from './ui/HoverPanel';
 import { Inspector } from './ui/Inspector';
 import { Log } from './ui/Log';
+import { MinesConfirm } from './ui/MinesConfirm';
 import { ReinforcementsPanel } from './ui/ReinforcementsPanel';
 import { SetupScreen } from './ui/SetupScreen';
 import { TrackSheet } from './ui/TrackSheet';
@@ -36,6 +37,7 @@ export function App() {
   const toggleGroupMode = useGame((s) => s.toggleGroupMode);
   const toggleMute = useGame((s) => s.toggleMute);
   const setShift = useGame((s) => s.setShift);
+  const togglePivotPicker = useGame((s) => s.togglePivotPicker);
   const newGame = useGame((s) => s.newGame);
   const quitToMenu = useGame((s) => s.quitToMenu);
   const [savesOpen, setSavesOpen] = useState(false);
@@ -44,6 +46,19 @@ export function App() {
   useEffect(() => {
     const down = (e: KeyboardEvent) => {
       if (e.key === 'Shift' && !e.repeat) setShift(true);
+      // 'P' with a unit selected: pivot picker (§4.6) — highlights the six
+      // neighbor Hexes on the board, click one to pivot toward it.
+      if (
+        (e.key === 'p' || e.key === 'P') &&
+        !e.repeat &&
+        !e.ctrlKey &&
+        !e.metaKey &&
+        !e.altKey &&
+        !(e.target instanceof HTMLInputElement) &&
+        !(e.target instanceof HTMLTextAreaElement)
+      ) {
+        togglePivotPicker();
+      }
     };
     const up = (e: KeyboardEvent) => {
       if (e.key === 'Shift') setShift(false);
@@ -57,7 +72,7 @@ export function App() {
       window.removeEventListener('keyup', up);
       window.removeEventListener('blur', blur);
     };
-  }, [setShift]);
+  }, [setShift, togglePivotPicker]);
 
   if (!game) return <SetupScreen />;
 
@@ -121,6 +136,7 @@ export function App() {
         <ActionChooser />
         <DiceRoller />
         <ConfirmDialog />
+        <MinesConfirm />
         <TurnBanner />
         <VictoryScreen />
         {savesOpen && <SavesDialog onClose={() => setSavesOpen(false)} />}

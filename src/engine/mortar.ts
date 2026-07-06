@@ -8,14 +8,15 @@
  * of the Mortar's own.
  */
 import { distance, parseHexId } from './hex';
+import { deniedByBunkerMortarRule, fortificationDrBonus, hastyDefenseDrBonus } from './fortifications';
 import { effectiveStats, templateOf } from './hits';
 import { hasLOS, inArc } from './los';
-import { apcTransportBonus, vehicleCoverBonus, wallDMForFire, type Modifier } from './combat';
+import { apcTransportBonus, elevationCombatMods, vehicleCoverBonus, wallDMForFire } from './combat';
 import { fpRangeModifier, rangeBand, type RangeBand } from './range';
 import { roll2d6 } from './rng';
 import { smokeAttackPenalty, smokeDefenseBonus, smokeLosDrBonus } from './smoke';
 import { terrainOf } from './terrain';
-import type { DRColor, GameState, HexId, RngState, Unit, UnitId } from './types';
+import type { DRColor, GameState, HexId, Modifier, RngState, Unit, UnitId } from './types';
 
 /**
  * A valid Spotter Hex for an Indirect Attack (§13.3): within 2 Hexes and clear
@@ -45,11 +46,20 @@ export function directFireZone(
   attacker: Unit,
   targetHexId: HexId,
   minRange = 0,
+  /** §18.1: Pioneers' Fire Smoke is capped to a max Range of 1, overriding
+   *  their normal (longer) Range stat. Undefined = no extra cap. */
+  maxRange?: number,
 ): FireZoneResult {
   if (!state.hexes[targetHexId]) return { legal: false, reason: 'no such hex', band: 'out' };
+  if (deniedByBunkerMortarRule(state, attacker)) {
+    return { legal: false, reason: 'Mortars may not fire from within a Bunker (§17.5)', band: 'out' };
+  }
   const dist = distance(parseHexId(attacker.hexId), parseHexId(targetHexId));
   if (dist < 1) return { legal: false, reason: 'cannot target own hex', band: 'out' };
   if (dist < minRange) return { legal: false, reason: 'inside Minimum Range (§13.1)', band: 'out' };
+  if (maxRange != null && dist > maxRange) {
+    return { legal: false, reason: 'outside Fire Smoke Max Range (1 Hex, §18.1)', band: 'out' };
+  }
   if (!inArc(attacker.hexId, attacker.facing, targetHexId))
     return { legal: false, reason: 'target out of arc', band: 'out' };
   if (!hasLOS(state, attacker.hexId, targetHexId))
@@ -72,6 +82,9 @@ export function indirectFireZone(
   minRange = 0,
 ): FireZoneResult {
   if (!state.hexes[targetHexId]) return { legal: false, reason: 'no such hex', band: 'out' };
+  if (deniedByBunkerMortarRule(state, attacker)) {
+    return { legal: false, reason: 'Mortars may not fire from within a Bunker (§17.5)', band: 'out' };
+  }
   if (!isValidSpotterHex(state, attacker.hexId, spotterHexId))
     return { legal: false, reason: 'not a valid Spotter Hex (§13.3)', band: 'out' };
   const dist = distance(parseHexId(attacker.hexId), parseHexId(targetHexId));
@@ -138,8 +151,8 @@ export interface IndirectFireResult {
 /**
  * Resolve an Indirect Attack against every enemy stacked in `targetHexId`
  * (§7.5.1-style, always HE vs Flank Defense, §13.9). Pure: threads the RNG.
- * (Elevation Combat Bonus from the Spotter Hex, §13.3/§12.3, is 0 until Hills
- * are built, M9 — the same deferral `movement.ts` already documents.)
+ * The Elevation Combat Bonus (§13.3/§12.3) is taken from the Spotter Hex,
+ * not the Mortar's own hex.
  */
 export function rollIndirectFire(
   state: GameState,
@@ -175,6 +188,7 @@ export function rollIndirectFire(
     const rangeAr = fpRangeModifier(band);
     const smokeAr = smokeAttackPenalty(state, attacker.hexId);
     const fp = fpColor === 'red' ? aEff.fp.red : aEff.fp.blue;
+    const { elevAr, elevDr } = elevationCombatMods(state, spotterHexId, targetHexId);
 
     const drMods: Modifier[] = [{ label: 'Flank Defense (HE always targets flank)', value: tEff.dr.flank, section: '§13.9' }];
     const targetHex = state.hexes[target.hexId];
@@ -187,6 +201,11 @@ export function rollIndirectFire(
     if (coverDr) drMods.push({ label: 'Vehicle Cover (shares hex with a friendly Vehicle)', value: coverDr, section: '§15.15' });
     if (apcDr) drMods.push({ label: 'APC Transport Bonus', value: apcDr, section: '§16.6' });
     if (smokeDr) drMods.push({ label: 'Smoke (defending in/behind it)', value: smokeDr, section: '§14.3' });
+    if (elevDr) drMods.push({ label: 'Elevation Bonus (target on higher ground)', value: elevDr, section: '§12.3' });
+    const fortDr = fortificationDrBonus(state, target, spotterHexId);
+    if (fortDr) drMods.push(fortDr);
+    const hastyDr = hastyDefenseDrBonus(target);
+    if (hastyDr) drMods.push(hastyDr);
 
     const arMods: Modifier[] = [
       {
@@ -197,6 +216,7 @@ export function rollIndirectFire(
     ];
     if (rangeAr) arMods.push({ label: rangeAr > 0 ? 'Short Range Bonus (adjacent)' : 'Long Range Penalty', value: rangeAr, section: '§6.7' });
     if (smokeAr) arMods.push({ label: 'Smoke (firing out of it)', value: smokeAr, section: '§14.3' });
+    if (elevAr) arMods.push({ label: 'Elevation Bonus (Spotter Hex on higher ground, §13.3)', value: elevAr, section: '§12.3' });
 
     const dr = drMods.reduce((s, m) => s + m.value, 0);
     const ar = arMods.reduce((s, m) => s + m.value, 0);

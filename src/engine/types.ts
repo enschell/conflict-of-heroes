@@ -142,6 +142,26 @@ export interface UnitTemplate {
   indirectApToFire?: number;
   /** May Fire Smoke (§14.0: mortars 80mm+, Artillery Cards, Pioneers, some Tanks). */
   canFireSmoke?: boolean;
+  // -- Flamethrowers & Pioneers (§18.0–§18.1) --
+  /**
+   * Foot or Vehicle Unit marked with a Flamethrower symbol (§18.0): may
+   * choose to Attack (ranged FIRE, max Range 1, or CLOSE_COMBAT) with the
+   * Flamethrower instead of its normal Firepower — see `useFlamethrower` on
+   * those Actions. Flat 3 Red/3 Blue Firepower, always vs Flank Defense,
+   * ignores ALL DR modifiers except Smoke.
+   */
+  hasFlamethrower?: boolean;
+  /**
+   * Pioneer Unit (§18.1): follows all Foot Unit rules, with three exceptions
+   * — may enter a Mines Hex without triggering a Mines Attack (`resolveMines`
+   * skips it); its Fire Smoke Action is capped to Range 1 (vs its own
+   * `range`/Mortar-style Max Range otherwise); and (redundantly with
+   * `hasFlamethrower`, which every Pioneer also sets) it may attack with a
+   * Flamethrower. Distinct from `hasFlamethrower` because a Flame Tank has
+   * the flamethrower without being a Pioneer (no Mines immunity, no
+   * Range-1-capped Smoke).
+   */
+  pioneer?: boolean;
 }
 
 /** A unit instance on the map. */
@@ -165,6 +185,15 @@ export interface Unit {
   assignedWeaponCards: CardId[];
   /** If loaded onto a transport Vehicle (§15.6–15.9): the carrying Vehicle's id. */
   carriedBy?: UnitId;
+  /** §17.2/17.3: true while this Unit is occupying (not merely standing atop)
+   *  its Hex's Trench/Bunker Fortification. */
+  occupyingFortification?: boolean;
+  /** §17.6: a Hasty Defense this Unit itself built (5AP Action). Per-Unit, not
+   *  a Hex feature — multiple Units in one Hex may each hold their own, and it
+   *  is stripped the instant this Unit Moves, Pivots, or is destroyed (or
+   *  removed at will, for free, via `REMOVE_HASTY_DEFENSE`). A transported
+   *  Unit cannot build one (§17.6 describes fortifying one's own position). */
+  hastyDefense?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -252,6 +281,46 @@ export interface HitMarkerDef {
 export type HitPile = Record<HitType, number>;
 
 // ---------------------------------------------------------------------------
+// Obstacles (§17.7-§17.10: Barbed Wire, Mines, Road Block)
+// ---------------------------------------------------------------------------
+
+export type ObstacleKind = 'barbedWire' | 'mines' | 'roadBlock';
+
+export interface ObstacleState {
+  kind: ObstacleKind;
+  /** Mines only (§17.10): the fixed Hit Number rolled against any Unit that
+   *  moves into, Pivots in, or initiates Close Combat in this Hex. */
+  hitNumber?: number;
+  /** §17.11: the Defense Rating needed to destroy this Obstacle by Attack;
+   *  absent = not destructible. */
+  destroyDr?: number;
+  destroyed: boolean;
+  /** The side that placed this Obstacle — for Mines (§17.10), this is whose
+   *  CAP pays for the up-to-2 Hit Number modification before rolling. */
+  ownerSide: SideId;
+}
+
+// ---------------------------------------------------------------------------
+// Fortifications (§17.1-§17.6: Trenches, Bunkers; Hasty Defenses are per-Unit,
+// see Unit.hastyDefense above, not a Hex feature)
+// ---------------------------------------------------------------------------
+
+export type FortificationKind = 'trench' | 'bunker';
+
+export interface FortificationState {
+  kind: FortificationKind;
+  /** Bunkers only (§17.1/17.5): the red Facing that locks the occupant's own
+   *  facing and Arc of Fire. Undefined for Trenches (occupant may face any
+   *  direction, §17.4). */
+  facing?: Facing;
+  /** §17.11: the Defense Rating needed to destroy this Fortification by ranged
+   *  Attack; absent = not destructible. Black DR (§17.1) — effective vs both
+   *  Red and Blue Firepower, so this is a flat number with no color. */
+  destroyDr?: number;
+  destroyed: boolean;
+}
+
+// ---------------------------------------------------------------------------
 // Hexes (runtime board state)
 // ---------------------------------------------------------------------------
 
@@ -271,6 +340,11 @@ export interface Hex {
     control?: SideId;
     /** Smoke level: 1 = +1DM, 2 = +2DM (later module). */
     smoke?: 1 | 2;
+    /** §17.7 Obstacle occupying this Hex (Barbed Wire, Mines, Road Block). */
+    obstacle?: ObstacleState;
+    /** §17.1 Fortification occupying this Hex (Trench, Bunker). Only one of
+     *  `obstacle`/`fortification` may be set at a time (§17.0). */
+    fortification?: FortificationState;
   };
 }
 
@@ -333,8 +407,25 @@ export interface GameEvent {
 export type Action =
   // `path` (vehicles, §15.2): the multi-hex Bonus-Move sequence (each hex
   // adjacent to the last); when set, `toHexId` is its final hex. Foot moves omit it.
-  | { type: 'MOVE'; unitId: UnitId; toHexId: HexId; path?: HexId[]; facing?: Facing; capCostReduce?: number }
-  | { type: 'PIVOT'; unitId: UnitId; facing: Facing; capCostReduce?: number }
+  // `minesCapMods` (§17.10): if the destination/current Hex has live Mines, the
+  // owning side's chosen CAP dice-mod per attacked Unit id (UnitId -> mod,
+  // clamped ±2); resolved by the UI (a CAP-choice dialog) before dispatch,
+  // since the choice belongs to the Mines' owner, not necessarily the acting side.
+  | {
+      type: 'MOVE';
+      unitId: UnitId;
+      toHexId: HexId;
+      path?: HexId[];
+      facing?: Facing;
+      capCostReduce?: number;
+      minesCapMods?: Record<UnitId, number>;
+      /** §17.2/17.3: occupy the destination Hex's Trench/Bunker on arrival —
+       *  entering never auto-occupies, it's the player's choice. Also used
+       *  for the same-Hex "occupy from within" Move (`toHexId === unitId`'s
+       *  current Hex) when a Unit began its Turn in the Hex without occupying. */
+      occupyFortification?: boolean;
+    }
+  | { type: 'PIVOT'; unitId: UnitId; facing: Facing; capCostReduce?: number; minesCapMods?: Record<UnitId, number> }
   // Free facing correction (§4.5 after a Move, §15.11 unloaded from a destroyed
   // Transport): 0AP, no Spent Check, no turn switch. Legal ONLY while `unitId`
   // appears in `GameState.pendingFacingChoices` (the engine grants this window
@@ -347,13 +438,24 @@ export type Action =
       targetId: UnitId;
       capDiceMod?: number;
       capCostReduce?: number;
+      /** §18.0: attack with a Flamethrower instead of normal Firepower —
+       *  only legal for a `hasFlamethrower` Unit, max Range 1. */
+      useFlamethrower?: boolean;
     }
   | {
       type: 'CLOSE_COMBAT';
       attackerId: UnitId;
-      targetId: UnitId;
+      /** Omitted when `targetKind === 'structure'` (§17.12). */
+      targetId?: UnitId;
+      /** §17.12: a CC Attack picks ONE target — the occupant Unit or the
+       *  Fortification/Obstacle itself, never both. Defaults to 'unit'. */
+      targetKind?: 'unit' | 'structure';
       capDiceMod?: number;
       capCostReduce?: number;
+      minesCapMods?: Record<UnitId, number>;
+      /** §18.0: attack with a Flamethrower instead of normal Firepower —
+       *  only legal for a `hasFlamethrower` Unit. */
+      useFlamethrower?: boolean;
     }
   | { type: 'RALLY'; unitId: UnitId; capDiceMod?: number; capCostReduce?: number }
   | { type: 'STALL'; unitId: UnitId; capCostReduce?: number }
@@ -407,6 +509,13 @@ export type Action =
   // Stressed). Reinforcements may enter as a Group — one Action placing several
   // Units on their entry Hexes at once.
   | { type: 'ENTER'; placements: { unitId: UnitId; hexId: HexId; facing?: Facing }[] }
+  // Hasty Defense (§17.6): a Foot Unit spends 5AP to build one on itself (not
+  // transported, not already marked). Stripped by this Unit's own Move/Pivot/
+  // destruction (§5's doMove/doPivot), or removed at will for free (below).
+  | { type: 'HASTY_DEFENSE'; unitId: UnitId; capCostReduce?: number }
+  // §17.6 "a player may freely remove their Hasty Defense at will": 0AP, no
+  // Spent Check, no CAP check — mirrors CHOOSE_FACING's no-cost immediacy.
+  | { type: 'REMOVE_HASTY_DEFENSE'; unitId: UnitId }
   | { type: 'PASS' };
 
 export type ActionType = Action['type'];
@@ -479,6 +588,10 @@ export interface MapHexDef {
   walls?: number[];
   road?: boolean;
   label?: string;
+  /** §17.7 Obstacle placed here at setup (`destroyed` always starts false). */
+  obstacle?: { kind: ObstacleKind; hitNumber?: number; destroyDr?: number; ownerSide: SideId };
+  /** §17.1 Fortification placed here at setup (`destroyed` always starts false). */
+  fortification?: { kind: FortificationKind; facing?: Facing; destroyDr?: number };
 }
 
 export interface UnitPlacement {
@@ -526,3 +639,30 @@ export interface MissionDef {
 
 /** @deprecated 2nd-ed name; use {@link MissionDef}. */
 export type FirefightDef = MissionDef;
+
+// ---------------------------------------------------------------------------
+// UI-facing modifier breakdowns (combat.ts, mortar.ts, movement.ts)
+// ---------------------------------------------------------------------------
+
+/**
+ * One line-item contributing to an AR/DR/AP total — for hover popups and the
+ * dice-roller UI, so a player can see not just the number but why it's there
+ * and where the rule lives. `value` is signed (already the sign it
+ * contributes with); a `value` of 0 is still worth listing when it explains
+ * an EXPECTED bonus that didn't apply (e.g. Air Burst zeroing Heavy Woods,
+ * §13.9).
+ */
+export interface Modifier {
+  label: string;
+  value: number;
+  section: string;
+  /**
+   * True if `value` was determined by a die roll the UI should keep hidden
+   * until the Action actually executes (e.g. Barbed Wire's §17.8 1d6 Move
+   * Cost) — the engine still needs the real (already-rolled, deterministic-
+   * from-the-seeded-RNG) number for correctness, but a preview popup should
+   * render it as unknown rather than spoiling the roll, same principle as
+   * the dice-roller showing "?" until clicked.
+   */
+  random?: boolean;
+}

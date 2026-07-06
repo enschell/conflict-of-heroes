@@ -44,3 +44,77 @@ describe('line of sight (rulebook §6.0)', () => {
     expect(vis.blocked).toContain('2,0'); // behind the woods
   });
 });
+
+describe('elevation and LOS (§12.4-§12.6)', () => {
+  it('Plateau Effect (§12.4 worked example): A-B-C-D-E', () => {
+    const s = baseState();
+    addHex(s, 0, 0, 'open', { elevation: 0 }); // A
+    addHex(s, 1, 0, 'open', { elevation: 1 }); // B
+    addHex(s, 2, 0, 'open', { elevation: 1 }); // C
+    addHex(s, 3, 0, 'open', { elevation: 2 }); // D
+    addHex(s, 4, 0, 'open', { elevation: 2 }); // E
+    expect(hasLOS(s, '0,0', '2,0')).toBe(false); // A->C: B ties High Ground C
+    expect(hasLOS(s, '0,0', '3,0')).toBe(true); // A->D: B/C both lower than D
+    expect(hasLOS(s, '0,0', '4,0')).toBe(false); // A->E: D ties High Ground E
+  });
+
+  it('§12.5 worked example: L1 MG blocked by flat Woods, sees an open ATG', () => {
+    const blocked = baseState();
+    addHex(blocked, 0, 0, 'open', { elevation: 1 }); // MG34
+    addHex(blocked, 1, 0, 'woodsLight', { elevation: 0 }); // flat Woods
+    addHex(blocked, 2, 0, 'open', { elevation: 0 }); // Rifles
+    expect(hasLOS(blocked, '0,0', '2,0')).toBe(false);
+
+    const clear = baseState();
+    addHex(clear, 0, 0, 'open', { elevation: 1 }); // MG34
+    addHex(clear, 1, 0, 'open', { elevation: 0 }); // open ground
+    addHex(clear, 2, 0, 'open', { elevation: 0 }); // ATG
+    expect(hasLOS(clear, '0,0', '2,0')).toBe(true);
+  });
+
+  it('§12.5: Woods on an L1 Hill is an L2 blocker; a plain L1 Hill is not', () => {
+    const woodsOnHill = baseState();
+    addHex(woodsOnHill, 0, 0, 'open', { elevation: 2 }); // Shooter A
+    addHex(woodsOnHill, 1, 0, 'woodsLight', { elevation: 1 }); // Woods on Hill
+    addHex(woodsOnHill, 2, 0, 'open', { elevation: 0 }); // Target A
+    expect(hasLOS(woodsOnHill, '0,0', '2,0')).toBe(false);
+
+    const plainHill = baseState();
+    addHex(plainHill, 0, 0, 'open', { elevation: 2 }); // Shooter B
+    addHex(plainHill, 1, 0, 'open', { elevation: 1 }); // plain Hill
+    addHex(plainHill, 2, 0, 'open', { elevation: 0 }); // Target B
+    expect(hasLOS(plainHill, '0,0', '2,0')).toBe(true);
+  });
+
+  it('§12.6 Blind Spot: blocked directly behind Woods, visible again beyond', () => {
+    const s = baseState();
+    addHex(s, 0, 0, 'open', { elevation: 2 }); // H1 (shooter)
+    addHex(s, 1, 0, 'woodsLight', { elevation: 0 }); // Woods
+    addHex(s, 2, 0, 'open', { elevation: 0 }); // Behind 1 (blind spot)
+    addHex(s, 3, 0, 'open', { elevation: 0 }); // Behind 2 (visible again)
+    expect(hasLOS(s, '0,0', '2,0')).toBe(false);
+    expect(hasLOS(s, '0,0', '3,0')).toBe(true);
+  });
+
+  it('a bare hillock (no terrain) still blocks two Level-0 hexes', () => {
+    const s = baseState();
+    addHex(s, 0, 0, 'open', { elevation: 0 }); // P1
+    addHex(s, 1, 0, 'open', { elevation: 1 }); // bare hillock
+    addHex(s, 2, 0, 'open', { elevation: 0 }); // P2
+    expect(hasLOS(s, '0,0', '2,0')).toBe(false);
+  });
+
+  it('same-level "plateau" LOS is uniform at any elevation, not just L0', () => {
+    const l1 = baseState();
+    addHex(l1, 0, 0, 'open', { elevation: 1 }); // G1
+    addHex(l1, 1, 0, 'open', { elevation: 1 }); // G2 (plateau)
+    addHex(l1, 2, 0, 'open', { elevation: 1 }); // G3
+    expect(hasLOS(l1, '0,0', '2,0')).toBe(true);
+
+    const l2 = baseState();
+    addHex(l2, 0, 0, 'open', { elevation: 2 }); // K1
+    addHex(l2, 1, 0, 'open', { elevation: 2 }); // K2 (plateau)
+    addHex(l2, 2, 0, 'open', { elevation: 2 }); // K3
+    expect(hasLOS(l2, '0,0', '2,0')).toBe(true);
+  });
+});

@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>§12 LOS mock-up</title>
+<style>
+  :root {
+    --text-primary: #1a1a1a;
+    --text-secondary: #5a5a5a;
+    --text-muted: #8a8a8a;
+    --text-success: #27500a;
+    --text-danger: #791f1f;
+    --text-accent: #1d4ed8;
+    --border: #d8d8d8;
+    --border-accent: #1d4ed8;
+    --border-success: #3b6d11;
+    --border-danger: #a32d2d;
+    --surface-1: #fafafa;
+  }
+  body {
+    font-family: -apple-system, "Segoe UI", Roboto, sans-serif;
+    background: var(--surface-1);
+    color: var(--text-primary);
+    margin: 0;
+    padding: 24px;
+  }
+  .wrap { max-width: 640px; margin: 0 auto; }
+  h1 { font-size: 16px; font-weight: 500; margin: 0 0 4px; }
+  .sub { font-size: 13px; color: var(--text-secondary); line-height: 1.5; margin-bottom: 12px; }
+  #status { margin-top: 8px; font-size: 13px; color: var(--text-secondary); min-height: 18px; }
+  .legend { display: flex; gap: 16px; flex-wrap: wrap; margin-top: 8px; font-size: 12px; color: var(--text-muted); }
+  .swatch { display:inline-block; width:10px; height:10px; border-radius:2px; margin-right:4px; vertical-align: -1px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>§12.4–§12.6 LOS mock-up</h1>
+  <div class="sub">
+    Click any hex to make it the viewer. Every other hex rings
+    <b style="color: var(--text-success);">green</b> (clear LOS) or
+    <b style="color: var(--text-danger);">red</b> (blocked) per the proposed §12 algorithm.
+    Compare each row against the matching rulebook section.
+  </div>
+
+  <svg id="board" viewBox="0 0 600 1220" width="100%" style="max-height: 90vh; display:block;"></svg>
+
+  <div id="status"></div>
+
+  <div class="legend">
+    <span><span class="swatch" style="background:#dff0c8;border:1px solid #b9d89a;"></span>L0 Ground</span>
+    <span><span class="swatch" style="background:#e8d9a0;border:1px solid #c9ad5f;"></span>L1 Hill &#9650;</span>
+    <span><span class="swatch" style="background:#c9a55c;border:1px solid #a9803a;"></span>L2 Hill &#9650;&#9650;</span>
+    <span>&#127794; Woods</span>
+    <span>&#127968; Building</span>
+    <span style="color:var(--text-accent);">&#9670; selected viewer</span>
+    <span style="color:var(--text-success);">&mdash; clear LOS</span>
+    <span style="color:var(--text-danger);">&mdash; blocked</span>
+  </div>
+</div>
+
+<script>
+(function () {
+  // ---- minimal axial hex math (mirrors src/engine/hex.ts) ----------------
+  function toCube(a){ return {x:a.q, z:a.r, y:-a.q-a.r}; }
+  function toAxial(c){ return {q:c.x, r:c.z}; }
+  function cubeRound(c){
+    let rx=Math.round(c.x), ry=Math.round(c.y), rz=Math.round(c.z);
+    const dx=Math.abs(rx-c.x), dy=Math.abs(ry-c.y), dz=Math.abs(rz-c.z);
+    if (dx>dy && dx>dz) rx=-ry-rz; else if (dy>dz) ry=-rx-rz; else rz=-rx-ry;
+    return {x:rx,y:ry,z:rz};
+  }
+  function dist(a,b){
+    const ac=toCube(a), bc=toCube(b);
+    return (Math.abs(ac.x-bc.x)+Math.abs(ac.y-bc.y)+Math.abs(ac.z-bc.z))/2;
+  }
+  function lerp(a,b,t){ return a+(b-a)*t; }
+  function lineDraw(a,b,eps){
+    const n=dist(a,b);
+    const ac=toCube(a), bc=toCube(b);
+    const aN={x:ac.x+eps.x,y:ac.y+eps.y,z:ac.z+eps.z};
+    const bN={x:bc.x+eps.x,y:bc.y+eps.y,z:bc.z+eps.z};
+    const out=[];
+    for (let i=0;i<=n;i++){
+      const t = n===0?0:i/n;
+      out.push(toAxial(cubeRound({x:lerp(aN.x,bN.x,t),y:lerp(aN.y,bN.y,t),z:lerp(aN.z,bN.z,t)})));
+    }
+    return out;
+  }
+  const EPS_P={x:1e-6,y:2e-6,z:-3e-6}, EPS_N={x:-1e-6,y:-2e-6,z:3e-6};
+
+  // ---- scenario data (each row is an independent worked example) --------
+  // r is spaced 5 apart per row so rows never geometrically interact.
+  const ROWS = [
+    { title: '§12.4 Plateau Effect', hexes: [
+      {col:0, elevation:0, terrain:'open', name:'A'},
+      {col:1, elevation:1, terrain:'open', name:'B'},
+      {col:2, elevation:1, terrain:'open', name:'C'},
+      {col:3, elevation:2, terrain:'open', name:'D'},
+      {col:4, elevation:2, terrain:'open', name:'E'},
+    ]},
+    { title: '§12.6 Blind Spot', hexes: [
+      {col:0, elevation:2, terrain:'open', name:'H1 (shooter)'},
+      {col:1, elevation:0, terrain:'woods', name:'Woods'},
+      {col:2, elevation:0, terrain:'open', name:'Behind 1'},
+      {col:3, elevation:0, terrain:'open', name:'Behind 2'},
+    ]},
+    { title: 'Flat ground, regression check', hexes: [
+      {col:0, elevation:0, terrain:'open', name:'Shooter'},
+      {col:1, elevation:0, terrain:'building', name:'Building'},
+      {col:2, elevation:0, terrain:'open', name:'Target'},
+    ]},
+    { title: '§12.5 Woods on an L1 Hill = L2 blocker', hexes: [
+      {col:0, elevation:2, terrain:'open', name:'Shooter A'},
+      {col:1, elevation:1, terrain:'woods', name:'Woods/Hill'},
+      {col:2, elevation:0, terrain:'open', name:'Target A'},
+    ]},
+    { title: '(contrast) plain L1 Hill, no terrain', hexes: [
+      {col:0, elevation:2, terrain:'open', name:'Shooter B'},
+      {col:1, elevation:1, terrain:'open', name:'Plain Hill'},
+      {col:2, elevation:0, terrain:'open', name:'Target B'},
+    ]},
+    { title: '§12.5 worked example: L1 MG vs flat Woods', hexes: [
+      {col:0, elevation:1, terrain:'open', name:'MG34'},
+      {col:1, elevation:0, terrain:'woods', name:'Woods'},
+      {col:2, elevation:0, terrain:'open', name:'Rifles'},
+    ]},
+    { title: '(contrast) L1 MG vs open ground', hexes: [
+      {col:0, elevation:1, terrain:'open', name:'MG34'},
+      {col:1, elevation:0, terrain:'open', name:'Open'},
+      {col:2, elevation:0, terrain:'open', name:'ATG'},
+    ]},
+    { title: 'Your claim, test 1: L1 sees L1 (no terrain)?', hexes: [
+      {col:0, elevation:1, terrain:'open', name:'G1'},
+      {col:1, elevation:1, terrain:'open', name:'G2 (plateau)'},
+      {col:2, elevation:1, terrain:'open', name:'G3'},
+    ]},
+    { title: 'Your claim, test 2: L2 sees L2 (no terrain)?', hexes: [
+      {col:0, elevation:2, terrain:'open', name:'K1'},
+      {col:1, elevation:2, terrain:'open', name:'K2 (plateau)'},
+      {col:2, elevation:2, terrain:'open', name:'K3'},
+    ]},
+    { title: 'Your claim, test 3: L0 sees L0 past a bare hill?', hexes: [
+      {col:0, elevation:0, terrain:'open', name:'P1'},
+      {col:1, elevation:1, terrain:'open', name:'Hillock'},
+      {col:2, elevation:0, terrain:'open', name:'P2'},
+    ]},
+  ];
+
+  const SIZE = 30, COL_W = 62, ROW_H = 112, MARGIN_X = 60, MARGIN_Y = 46;
+  const HEXES = [];
+  ROWS.forEach((row, ri) => {
+    row.hexes.forEach((h) => {
+      HEXES.push({
+        id: ri + '_' + h.col,
+        q: h.col, r: ri * 5,
+        elevation: h.elevation, terrain: h.terrain, name: h.name,
+        cx: MARGIN_X + h.col * COL_W,
+        cy: MARGIN_Y + ri * ROW_H,
+      });
+    });
+  });
+  const BY_QR = {};
+  HEXES.forEach((h) => { BY_QR[h.q + ',' + h.r] = h; });
+  function get(a) { return BY_QR[a.q + ',' + a.r]; }
+
+  // ---- the corrected §12 LOS algorithm (mirrors the plan for los.ts) -----
+  // No special-case for L0: a hex's obstruction level is just its own
+  // elevation, +1 more if it's LOS-blocking terrain. The only exemption is a
+  // genuine 3-way tie — both endpoints AND the intervening hex all at the
+  // SAME level — which never blocks, at ANY level (0, 1, or 2 alike). Any
+  // other tie (an intervening hex matching the HIGHER of two different-level
+  // endpoints) still blocks, per §12.4's literal "equal or higher" wording.
+  function blocksLOS(h) { return !!h && (h.terrain === 'woods' || h.terrain === 'building'); }
+  function level(h) {
+    if (!h) return 0;
+    return h.elevation + (blocksLOS(h) ? 1 : 0);
+  }
+  function hasLOS(from, to) {
+    if (from.id === to.id) return true;
+    const a = {q:from.q,r:from.r}, b = {q:to.q,r:to.r};
+    const eA = from.elevation, eB = to.elevation;
+    const H = Math.max(eA, eB);
+    const tie = eA === eB; // both endpoints share the same level
+    function blocks(lvl) { return tie ? lvl > H : lvl >= H; }
+    const lineP = lineDraw(a, b, EPS_P), lineM = lineDraw(a, b, EPS_N);
+    const n = lineP.length - 1;
+    for (let i = 1; i < n; i++) {
+      const hp = get(lineP[i]), hm = get(lineM[i]);
+      if (lineP[i].q === lineM[i].q && lineP[i].r === lineM[i].r) {
+        if (blocks(level(hp))) return false;
+      } else {
+        if (blocks(Math.min(level(hp), level(hm)))) return false;
+      }
+    }
+    if (n >= 2) {
+      if (eA === H) {
+        const near = get(lineP[n - 1]);
+        if (blocksLOS(near) && near.elevation + 1 < H) return false;
+      }
+      if (eB === H) {
+        const near = get(lineP[1]);
+        if (blocksLOS(near) && near.elevation + 1 < H) return false;
+      }
+    }
+    return true;
+  }
+
+  // ---- rendering ----------------------------------------------------------
+  function hexPoints(cx, cy, size) {
+    const pts = [];
+    for (let i = 0; i < 6; i++) {
+      const a = Math.PI / 180 * (60 * i - 30);
+      pts.push((cx + size * Math.cos(a)).toFixed(1) + ',' + (cy + size * Math.sin(a)).toFixed(1));
+    }
+    return pts.join(' ');
+  }
+  function elevFill(e) { return e === 2 ? '#c9a55c' : e === 1 ? '#e8d9a0' : '#dff0c8'; }
+  function elevGlyph(e) { return e === 2 ? '▲▲' : e === 1 ? '▲' : ''; }
+
+  const svg = document.getElementById('board');
+  const parts = [];
+  ROWS.forEach((row, ri) => {
+    const y = MARGIN_Y + ri * ROW_H - SIZE - 14;
+    parts.push('<text x="' + MARGIN_X + '" y="' + y + '" font-size="12" fill="var(--text-secondary)">' + row.title + '</text>');
+  });
+  HEXES.forEach((h) => {
+    parts.push(
+      '<g style="cursor:pointer" onclick="window.__selectHex(\'' + h.id + '\')">' +
+        '<polygon points="' + hexPoints(h.cx, h.cy, SIZE) + '" fill="' + elevFill(h.elevation) + '" stroke="var(--border)" stroke-width="0.5"/>' +
+        '<polygon id="ring_' + h.id + '" points="' + hexPoints(h.cx, h.cy, SIZE - 3) + '" fill="none" stroke="var(--border)" stroke-width="2" opacity="0.5"/>' +
+        (h.terrain === 'woods' ? '<text x="' + h.cx + '" y="' + (h.cy + 5) + '" font-size="15" text-anchor="middle">\u{1F332}</text>' : '') +
+        (h.terrain === 'building' ? '<text x="' + h.cx + '" y="' + (h.cy + 5) + '" font-size="15" text-anchor="middle">\u{1F3E0}</text>' : '') +
+        '<text x="' + h.cx + '" y="' + (h.cy - SIZE - 4) + '" font-size="10" text-anchor="middle" fill="var(--text-muted)">' + elevGlyph(h.elevation) + '</text>' +
+        '<text x="' + h.cx + '" y="' + (h.cy + SIZE + 12) + '" font-size="10" text-anchor="middle" fill="var(--text-secondary)">' + h.name + '</text>' +
+      '</g>'
+    );
+  });
+  svg.innerHTML = parts.join('');
+
+  function levelLabel(e) { return e === 0 ? 'L0 Ground' : e === 1 ? 'L1 Hill' : 'L2 Hill'; }
+
+  window.__selectHex = function (id) {
+    const from = HEXES.find((h) => h.id === id);
+    document.getElementById('status').innerHTML =
+      'Viewer: <b>' + from.name + '</b> — ' + levelLabel(from.elevation) +
+      (from.terrain !== 'open' ? ', ' + from.terrain : '');
+    HEXES.forEach((h) => {
+      const ring = document.getElementById('ring_' + h.id);
+      if (h.id === id) {
+        ring.setAttribute('stroke', 'var(--border-accent)');
+        ring.setAttribute('stroke-width', '4');
+        ring.setAttribute('opacity', '1');
+      } else {
+        const visible = hasLOS(from, h);
+        ring.setAttribute('stroke', visible ? 'var(--border-success)' : 'var(--border-danger)');
+        ring.setAttribute('stroke-width', '3.5');
+        ring.setAttribute('opacity', '1');
+      }
+    });
+  };
+
+  window.__selectHex('0_0');
+})();
+</script>
+</body>
+</html>

@@ -8,6 +8,8 @@ import { create } from 'zustand';
 import {
   attackContext,
   closeCombatContext,
+  closeCombatStructureAr,
+  destructibleFeatureAt,
   directionTo,
   effectiveStats,
   groupStress,
@@ -17,6 +19,8 @@ import {
   isValidSupporter,
   legalActionsForUnit,
   legalEntryHexes,
+  minesOwnerSide,
+  minesTargetsFor,
   modifiedActionCost,
   moveCost,
   neighbor,
@@ -29,6 +33,7 @@ import {
   rollIndirectFire,
   rollRally,
   rollStackFire,
+  rollStructureDestroy,
   serialize,
   templateOf,
   type AttackRoll,
@@ -43,11 +48,12 @@ import type {
   HitType,
   MissionDef,
   RngState,
+  SideId,
   Unit,
   UnitId,
 } from '../engine/types';
 import { MISSION_1 } from '../data/missions/mission1';
-import { oddsForHitNumber, pct } from '../ui/odds';
+import { isHopelessShot, MAX_CAP_DICE_MOD, oddsForHitNumber, pct } from '../ui/odds';
 import { playFire, playMove } from '../ui/sound';
 import {
   clearAuto,
@@ -88,6 +94,18 @@ export interface PendingRoll {
   action: Action;
   kind: 'fire' | 'rally';
   steps: RollStep[];
+  /** §3.2: the CAP dice-mod baked into `steps`' dice/results (0 by default).
+   *  Adjustable via the DiceRoller's stepper before the FIRST die of the
+   *  sequence is rolled; changing it rebuilds `steps` from the same base
+   *  action with the new mod, so the preview always matches what a Roll
+   *  would actually commit. Undefined (treated as 0/0) for roll kinds that
+   *  don't yet build this (e.g. a bare `{action:{type:'PASS'},...}` test
+   *  fixture) — every real request*Roll builder always supplies both. */
+  capDiceMod?: number;
+  /** Max |capDiceMod| available right now: clamped to ±2 (§3.2) and to the
+   *  acting side's remaining CAP after whatever this Action's own
+   *  `capCostReduce` already reserves. */
+  capDiceModMax?: number;
 }
 
 export interface Hover {
@@ -106,6 +124,22 @@ interface Picker {
 interface PendingConfirm {
   message: string;
   proceed: () => void;
+}
+
+/**
+ * §17.10 Mines CAP-choice: a MOVE/PIVOT/CLOSE_COMBAT about to trigger a live
+ * Mines Hex pauses here so the Mines' owning side gets an explicit UI element
+ * to spend up to 2 CAP per attacked Unit before rolling (never applied
+ * silently — same principle as every other CAP-augmentable roll). `mod` is
+ * signed: positive lowers the Hit Number (helps hit an enemy), negative
+ * raises it (protects a friendly Unit that blundered into its own field).
+ */
+interface PendingMines {
+  /** Whose CAP pays for the Hit Number modification (§17.10) — the Mines' owner, not necessarily the acting side. */
+  ownerSide: SideId;
+  targets: { unitId: UnitId; hitNumber: number; mod: number }[];
+  /** Called with the base action once every target's mod is decided. */
+  proceed: (minesCapMods: Record<UnitId, number>) => void;
 }
 
 interface ClickOpts {
@@ -128,12 +162,17 @@ interface Store {
   losMode: boolean;
   losSource: HexId | null;
   shiftHeld: boolean;
+  /** Pivot picker (P key): highlights the six neighbor Hexes of the selected
+   *  Unit, blue like the free facing-choice picker, but clicking one issues a
+   *  real PIVOT Action (§4.6 — 1AP + Spent Check), not the free correction. */
+  pivotPicker: boolean;
   hover: Hover | null;
   picker: Picker | null;
   /** When a clicked hex affords several actions (move-in vs attack), pick one. */
   chooser: { hexId: HexId; x: number; y: number } | null;
   pendingRoll: PendingRoll | null;
   pendingConfirm: PendingConfirm | null;
+  pendingMines: PendingMines | null;
   turnBanner: { round: number } | null;
   history: GameState[];
   /** Redo stack (states undone, newest first). */
@@ -148,18 +187,29 @@ interface Store {
   select: (unitId: UnitId | null) => void;
   setHover: (h: Hover | null) => void;
   setShift: (down: boolean) => void;
+  togglePivotPicker: () => void;
   hexClick: (hexId: HexId, opts: ClickOpts) => void;
 
   dispatch: (action: Action) => void;
-  move: (unitId: UnitId, toHexId: HexId) => void;
-  fire: (attackerId: UnitId, targetId: UnitId) => void;
-  closeCombat: (attackerId: UnitId, targetId: UnitId) => void;
+  /** `occupy` (§17.2/17.3): also occupy the destination Hex's Trench/Bunker on
+   *  arrival, or (when `toHexId === unitId`'s current Hex) occupy it from
+   *  within — entering never auto-occupies, it's the player's choice. */
+  move: (unitId: UnitId, toHexId: HexId, occupy?: boolean) => void;
+  /** `useFlamethrower` (§18.0): attack with a Flamethrower instead of normal Firepower. */
+  fire: (attackerId: UnitId, targetId: UnitId, useFlamethrower?: boolean) => void;
+  closeCombat: (attackerId: UnitId, targetId: UnitId, useFlamethrower?: boolean) => void;
+  /** §17.12: CC against the Hex's Fortification/Obstacle itself, not its occupant. */
+  closeCombatStructure: (attackerId: UnitId) => void;
   rally: (unitId: UnitId) => void;
   pivot: (unitId: UnitId, facing: Facing) => void;
   /** Free facing correction (§4.5/§15.11) — only legal while `game.pendingFacingChoices` includes `unitId`. */
   chooseFacing: (unitId: UnitId, facing: Facing) => void;
   load: (unitId: UnitId, vehicleId: UnitId) => void;
   unload: (unitId: UnitId, toHexId: HexId) => void;
+  /** §17.6: build a Hasty Defense on this Unit (5AP, CAP-gated like Rally). */
+  hastyDefense: (unitId: UnitId) => void;
+  /** §17.6: freely remove this Unit's own Hasty Defense — 0AP, no gate. */
+  removeHastyDefense: (unitId: UnitId) => void;
   /** Mortar Indirect Attack (§13.2): a Spotter Hex is picked automatically —
    *  the first legal one, via `legalActionsForUnit`/`bestSpotterFor` (§13.3
    *  places no requirement on WHICH legal Spotter Hex is used, so there's no
@@ -189,8 +239,18 @@ interface Store {
 
   commitRoll: () => void;
   cancelRoll: () => void;
+  /** §3.2: adjust the pending roll's CAP dice mod by `delta` (clamped to
+   *  ±2 and to `pendingRoll.capDiceModMax`) and rebuild its preview —
+   *  only meaningful before the first die of the sequence is rolled. */
+  adjustPendingCapMod: (delta: number) => void;
   confirmProceed: () => void;
   confirmCancel: () => void;
+  /** §17.10 Mines CAP-choice dialog: adjust one target's mod (clamped ±2),
+   *  commit all of them (dispatching the underlying action), or cancel
+   *  (abandons the whole Move/Pivot/Close Combat, same as a Confirm cancel). */
+  adjustMinesMod: (unitId: UnitId, delta: number) => void;
+  confirmMines: () => void;
+  cancelMines: () => void;
 
   openPicker: (hexId: HexId, unitIds: UnitId[], x: number, y: number) => void;
   closePicker: () => void;
@@ -214,7 +274,7 @@ const HISTORY_LIMIT = 100;
 /** Action types that go through the single-unit CAP-confirm gate below. */
 type GateableAction = Extract<
   Action,
-  { type: 'MOVE' | 'FIRE' | 'CLOSE_COMBAT' | 'RALLY' | 'PIVOT' | 'INDIRECT_FIRE' | 'FIRE_SMOKE' }
+  { type: 'MOVE' | 'FIRE' | 'CLOSE_COMBAT' | 'RALLY' | 'PIVOT' | 'INDIRECT_FIRE' | 'FIRE_SMOKE' | 'HASTY_DEFENSE' }
 >;
 
 export const useGame = create<Store>((set, get) => {
@@ -261,6 +321,37 @@ export const useGame = create<Store>((set, get) => {
           `${id} is Spent. Spend ${cost} CAP to take this Action at 0AP (§3.4)? ` +
           `CAP ${cap} → ${cap - cost}.`,
         proceed: () => proceed({ ...action, capCostReduce: cost }),
+      },
+    });
+  };
+
+  /**
+   * §17.10: if `hexId` has live Mines and `unitIds` would trigger it (a Move
+   * landing there, a Pivot happening there, or a Close Combat initiated
+   * there — the caller decides which), pause for the Mines-owning side's
+   * explicit CAP choice per attacked Unit before calling `proceed` with the
+   * final action (mods baked in as `minesCapMods`). No mines present ⇒
+   * proceeds immediately, no dialog.
+   */
+  const maybeMinesGate = <A extends { minesCapMods?: Record<UnitId, number> }>(
+    action: A,
+    hexId: HexId,
+    unitIds: UnitId[],
+    proceed: (a: A) => void,
+  ) => {
+    const g = get().game;
+    if (!g) return;
+    const targets = minesTargetsFor(g, hexId, unitIds);
+    const owner = minesOwnerSide(g, hexId);
+    if (!targets.length || !owner) {
+      proceed(action);
+      return;
+    }
+    set({
+      pendingMines: {
+        ownerSide: owner,
+        targets: targets.map((t) => ({ ...t, mod: 0 })),
+        proceed: (minesCapMods) => proceed({ ...action, minesCapMods }),
       },
     });
   };
@@ -345,9 +436,11 @@ export const useGame = create<Store>((set, get) => {
     chooser: null,
     pendingRoll: null,
     pendingConfirm: null,
+    pendingMines: null,
     turnBanner: null,
     losMode: false,
     losSource: null,
+    pivotPicker: false,
     hover: null,
   });
 
@@ -376,21 +469,29 @@ export const useGame = create<Store>((set, get) => {
     });
   };
 
-  const requestFireRoll = (action: Extract<Action, { type: 'FIRE' }>) => {
+  /**
+   * §3.2: the max |capDiceMod| a roll may spend right now — clamped to ±2 and
+   * to the acting side's CAP remaining after this Action's own
+   * `capCostReduce` (already decided via capGate, before the roll preview).
+   */
+  const capDiceModMaxFor = (g: GameState, sideId: SideId, capCostReduce?: number): number =>
+    Math.max(0, Math.min(MAX_CAP_DICE_MOD, g.players[sideId].capCurrent - (capCostReduce ?? 0)));
+
+  const requestFireRoll = (action: Extract<Action, { type: 'FIRE' }>, capDiceMod = 0) => {
     const g = get().game;
     if (!g) return;
     const attacker = g.units[action.attackerId];
     const target = g.units[action.targetId];
     if (!attacker || !target) return;
-    const ctx = attackContext(g, attacker, target);
+    const useFlamethrower = action.useFlamethrower ?? false;
+    const ctx = attackContext(g, attacker, target, 0, 0, useFlamethrower);
     if (!ctx.legal) {
       set({ lastEvents: [{ type: 'illegal', round: g.round, text: ctx.reason ?? 'illegal' }] });
       return;
     }
     // §7.5.1: a shot at the target's hex resolves against every enemy stacked
     // there — the player rolls each one in turn (one step per enemy).
-    const stack = rollStackFire(g, attacker, target.hexId);
-    if (!stack.rolls.length) return;
+    const stack = rollStackFire(g, attacker, target.hexId, capDiceMod, 0, useFlamethrower);
     const hitEffects = previewHitEffects(g, stack.rolls, stack.rng);
     const steps: RollStep[] = stack.rolls.map(({ targetId: tid, roll }, i) => {
       const odds = oddsForHitNumber(roll.hitNumber);
@@ -398,8 +499,8 @@ export const useGame = create<Store>((set, get) => {
         dice: roll.dice,
         success: roll.hit,
         headline: roll.critical ? 'CRITICAL HIT' : roll.hit ? 'HIT' : 'MISS',
-        detail: `AR ${roll.ar} vs DR ${roll.dr} — 2d6 ≥ ${roll.hitNumber}${roll.isFlank ? ' (flank)' : ''}`,
-        label: `${action.attackerId} → ${tid}`,
+        detail: `${useFlamethrower ? 'Flamethrower (§18.0) · ' : ''}AR ${roll.ar} vs DR ${roll.dr} — 2d6 ≥ ${roll.hitNumber}${roll.isFlank ? ' (flank)' : ''}`,
+        label: `${action.attackerId} ${useFlamethrower ? '🔥' : '→'} ${tid}`,
         arMods: roll.arMods,
         drMods: roll.drMods,
         hitEffect: hitEffects[i],
@@ -407,17 +508,39 @@ export const useGame = create<Store>((set, get) => {
         critPct: pct(odds.crit),
       };
     });
-    set({ pendingRoll: { action, kind: 'fire', steps } });
+    // §17.11: ranged Fire also resolves an automatic second roll against the
+    // target Hex's destructible Fortification/Obstacle, if any, under this
+    // SAME Spent Check — reuses the same AR (`ctx.ar`) and CAP dice mod as the
+    // occupant roll(s). Threaded from `stack.rng` (post-occupant-rolls) so the
+    // preview consumes the RNG in the exact order the reducer's `doFire` will.
+    const feature = destructibleFeatureAt(g.hexes[target.hexId]!);
+    if (feature) {
+      const structRoll = rollStructureDestroy({ ...g, rng: stack.rng }, ctx.ar, feature.destroyDr!, capDiceMod);
+      const odds = oddsForHitNumber(structRoll.hitNumber);
+      steps.push({
+        dice: structRoll.dice,
+        success: structRoll.hit,
+        headline: structRoll.hit ? 'FORTIFICATION DESTROYED' : 'FORTIFICATION SURVIVES',
+        detail: `Structure DR ${feature.destroyDr} (flat, no Terrain) vs AR ${ctx.ar} — 2d6 ≥ ${structRoll.hitNumber}`,
+        label: `${action.attackerId} → ${target.hexId}'s Fortification/Obstacle`,
+        drMods: [{ label: 'Structure Defense (flat)', value: feature.destroyDr!, section: '§17.11' }],
+        hitPct: pct(odds.hit),
+        critPct: pct(odds.crit),
+      });
+    }
+    if (!steps.length) return;
+    const capDiceModMax = capDiceModMaxFor(g, attacker.side, action.capCostReduce);
+    set({ pendingRoll: { action: { ...action, capDiceMod }, kind: 'fire', steps, capDiceMod, capDiceModMax } });
   };
 
-  const requestIndirectFireRoll = (action: Extract<Action, { type: 'INDIRECT_FIRE' }>) => {
+  const requestIndirectFireRoll = (action: Extract<Action, { type: 'INDIRECT_FIRE' }>, capDiceMod = 0) => {
     const g = get().game;
     if (!g) return;
     const attacker = g.units[action.attackerId];
     if (!attacker) return;
     // §13.2: resolves against every enemy in the Target Hex (like §7.5.1 Stacked
     // Fire), one roll per Unit — `rollIndirectFire` itself re-validates legality.
-    const result = rollIndirectFire(g, attacker, action.targetHexId, action.spotterHexId);
+    const result = rollIndirectFire(g, attacker, action.targetHexId, action.spotterHexId, capDiceMod);
     if (!result.rolls.length) return;
     const hitEffects = previewHitEffects(
       g,
@@ -439,34 +562,76 @@ export const useGame = create<Store>((set, get) => {
         critPct: pct(odds.crit),
       };
     });
-    set({ pendingRoll: { action, kind: 'fire', steps } });
+    const capDiceModMax = capDiceModMaxFor(g, attacker.side, action.capCostReduce);
+    set({ pendingRoll: { action: { ...action, capDiceMod }, kind: 'fire', steps, capDiceMod, capDiceModMax } });
   };
 
-  const requestCcRoll = (action: Extract<Action, { type: 'CLOSE_COMBAT' }>) => {
+  const requestCcRoll = (action: Extract<Action, { type: 'CLOSE_COMBAT' }>, capDiceMod = 0) => {
     const g = get().game;
     if (!g) return;
     const attacker = g.units[action.attackerId];
-    const target = g.units[action.targetId];
-    if (!attacker || !target) return;
-    const ctx = closeCombatContext(g, attacker, target);
+    if (!attacker) return;
+
+    // §17.12: CC against the Fortification/Obstacle itself instead of its
+    // occupant — a single flat-DR roll, no Terrain modifiers.
+    if (action.targetKind === 'structure') {
+      const feature = destructibleFeatureAt(g.hexes[attacker.hexId]!);
+      if (!feature) {
+        set({ lastEvents: [{ type: 'illegal', round: g.round, text: 'nothing destructible here' }] });
+        return;
+      }
+      const { ar } = closeCombatStructureAr(g, attacker);
+      const roll = rollStructureDestroy(g, ar, feature.destroyDr!, capDiceMod);
+      const odds = oddsForHitNumber(roll.hitNumber);
+      const capDiceModMax = capDiceModMaxFor(g, attacker.side, action.capCostReduce);
+      set({
+        pendingRoll: {
+          action: { ...action, capDiceMod },
+          kind: 'fire',
+          capDiceMod,
+          capDiceModMax,
+          steps: [
+            {
+              dice: roll.dice,
+              success: roll.hit,
+              headline: roll.hit ? 'FORTIFICATION DESTROYED' : 'FORTIFICATION SURVIVES',
+              detail: `close combat (§17.12) · Structure DR ${feature.destroyDr} (flat) vs AR ${ar} — 2d6 ≥ ${roll.hitNumber}`,
+              label: `${action.attackerId} ⚔ Fortification/Obstacle`,
+              drMods: [{ label: 'Structure Defense (flat)', value: feature.destroyDr!, section: '§17.12' }],
+              hitPct: pct(odds.hit),
+              critPct: pct(odds.crit),
+            },
+          ],
+        },
+      });
+      return;
+    }
+
+    const target = g.units[action.targetId!];
+    if (!target) return;
+    const useFlamethrower = action.useFlamethrower ?? false;
+    const ctx = closeCombatContext(g, attacker, target, 0, useFlamethrower);
     if (!ctx.legal) {
       set({ lastEvents: [{ type: 'illegal', round: g.round, text: ctx.reason ?? 'illegal' }] });
       return;
     }
-    const roll = rollCloseCombat(g, attacker, target);
-    const [hitEffect] = previewHitEffects(g, [{ targetId: action.targetId, roll }], roll.rng);
+    const roll = rollCloseCombat(g, attacker, target, capDiceMod, 0, useFlamethrower);
+    const [hitEffect] = previewHitEffects(g, [{ targetId: target.id, roll }], roll.rng);
     const ccOdds = oddsForHitNumber(roll.hitNumber);
+    const capDiceModMax = capDiceModMaxFor(g, attacker.side, action.capCostReduce);
     set({
       pendingRoll: {
-        action,
+        action: { ...action, capDiceMod },
         kind: 'fire',
+        capDiceMod,
+        capDiceModMax,
         steps: [
           {
             dice: roll.dice,
             success: roll.hit,
             headline: roll.critical ? 'CRITICAL HIT' : roll.hit ? 'HIT' : 'MISS',
-            detail: `close combat · AR ${roll.ar} vs flank DR ${roll.dr} — 2d6 ≥ ${roll.hitNumber}`,
-            label: `${action.attackerId} ⚔ ${action.targetId}`,
+            detail: `${useFlamethrower ? 'Flamethrower (§18.0) close combat' : 'close combat'} · AR ${roll.ar} vs flank DR ${roll.dr} — 2d6 ≥ ${roll.hitNumber}`,
+            label: `${action.attackerId} ${useFlamethrower ? '🔥⚔' : '⚔'} ${target.id}`,
             arMods: roll.arMods,
             drMods: roll.drMods,
             hitEffect,
@@ -488,6 +653,7 @@ export const useGame = create<Store>((set, get) => {
     supporterIds: UnitId[],
     targetId: UnitId,
     capCostReduce: number,
+    capDiceMod = 0,
   ) => {
     const g = get().game;
     if (!g) return;
@@ -496,8 +662,9 @@ export const useGame = create<Store>((set, get) => {
     if (!leader || !target) return;
     const arBonus = supporterIds.length;
     const isCloseCombat = target.hexId === leader.hexId;
-    const action: Action = { type: 'GROUP_ATTACK', leaderId, supporterIds, targetId, capCostReduce };
+    const action: Action = { type: 'GROUP_ATTACK', leaderId, supporterIds, targetId, capCostReduce, capDiceMod };
     const label = `[${[leaderId, ...supporterIds].join('+')}]`;
+    const capDiceModMax = capDiceModMaxFor(g, leader.side, capCostReduce);
 
     if (isCloseCombat) {
       const ctx = closeCombatContext(g, leader, target, arBonus);
@@ -505,13 +672,15 @@ export const useGame = create<Store>((set, get) => {
         set({ lastEvents: [{ type: 'illegal', round: g.round, text: ctx.reason ?? 'illegal' }] });
         return;
       }
-      const roll = rollCloseCombat(g, leader, target, 0, arBonus);
+      const roll = rollCloseCombat(g, leader, target, capDiceMod, arBonus);
       const [hitEffect] = previewHitEffects(g, [{ targetId, roll }], roll.rng);
       const groupCcOdds = oddsForHitNumber(roll.hitNumber);
       set({
         pendingRoll: {
           action,
           kind: 'fire',
+          capDiceMod,
+          capDiceModMax,
           steps: [
             {
               dice: roll.dice,
@@ -537,7 +706,7 @@ export const useGame = create<Store>((set, get) => {
       return;
     }
     // §7.5.1: one shot at the target's hex resolves against every enemy stacked there.
-    const stack = rollStackFire(g, leader, target.hexId, 0, arBonus);
+    const stack = rollStackFire(g, leader, target.hexId, capDiceMod, arBonus);
     if (!stack.rolls.length) return;
     const hitEffects = previewHitEffects(g, stack.rolls, stack.rng);
     const steps: RollStep[] = stack.rolls.map(({ targetId: tid, roll }, i) => {
@@ -555,24 +724,27 @@ export const useGame = create<Store>((set, get) => {
         critPct: pct(odds.crit),
       };
     });
-    set({ pendingRoll: { action, kind: 'fire', steps } });
+    set({ pendingRoll: { action, kind: 'fire', steps, capDiceMod, capDiceModMax } });
   };
 
-  const requestRallyRoll = (action: Extract<Action, { type: 'RALLY' }>) => {
+  const requestRallyRoll = (action: Extract<Action, { type: 'RALLY' }>, capDiceMod = 0) => {
     const g = get().game;
     if (!g) return;
     const unit = g.units[action.unitId];
     if (!unit) return;
-    const rr = rollRally(g, unit);
+    const rr = rollRally(g, unit, capDiceMod);
     if (!rr.legal) {
       set({ lastEvents: [{ type: 'illegal', round: g.round, text: rr.reason ?? 'illegal' }] });
       return;
     }
     const mod = rr.total - rr.roll; // cover/stacking/CAP modifiers (no dice)
+    const capDiceModMax = capDiceModMaxFor(g, unit.side, action.capCostReduce);
     set({
       pendingRoll: {
-        action,
+        action: { ...action, capDiceMod },
         kind: 'rally',
+        capDiceMod,
+        capDiceModMax,
         steps: [
           {
             dice: rr.dice,
@@ -596,11 +768,13 @@ export const useGame = create<Store>((set, get) => {
     losMode: false,
     losSource: null,
     shiftHeld: false,
+    pivotPicker: false,
     hover: null,
     picker: null,
     chooser: null,
     pendingRoll: null,
     pendingConfirm: null,
+    pendingMines: null,
     turnBanner: null,
     history: [],
     future: [],
@@ -619,11 +793,13 @@ export const useGame = create<Store>((set, get) => {
         placingReinforcementId: null,
         losMode: false,
         losSource: null,
+        pivotPicker: false,
         hover: null,
         picker: null,
         chooser: null,
         pendingRoll: null,
         pendingConfirm: null,
+        pendingMines: null,
         turnBanner: null,
         history: [],
         future: [],
@@ -641,9 +817,10 @@ export const useGame = create<Store>((set, get) => {
       set({ game: null, ...resetForLoad(), losMode: false });
     },
 
-    select: (unitId) => set({ selectedUnitId: unitId, movePath: [] }),
+    select: (unitId) => set({ selectedUnitId: unitId, movePath: [], pivotPicker: false }),
     setHover: (h) => set({ hover: h }),
     setShift: (down) => set({ shiftHeld: down }),
+    togglePivotPicker: () => set((s) => ({ pivotPicker: s.selectedUnitId ? !s.pivotPicker : false })),
 
     hexClick: (hexId, opts) => {
       const { game, losMode, selectedUnitId, pendingRoll, pendingConfirm, turnBanner } = get();
@@ -678,6 +855,20 @@ export const useGame = create<Store>((set, get) => {
           get().chooseFacing(selectedUnitId, dir as Facing);
           return;
         }
+      }
+
+      // Pivot picker (P key): clicking one of the six highlighted (blue)
+      // neighbor Hexes issues a real PIVOT Action (§4.6) toward it — unlike
+      // the free facing-correction above, this costs AP and runs a Spent
+      // Check/CAP-confirm via the normal `pivot()` → `capGate` path.
+      if (get().pivotPicker && selectedUnitId) {
+        const u = game.units[selectedUnitId];
+        const dir = u ? directionTo(u.hexId, hexId) : -1;
+        set({ pivotPicker: false });
+        if (dir >= 0) {
+          get().pivot(selectedUnitId, dir as Facing);
+        }
+        return;
       }
 
       if (losMode) {
@@ -764,8 +955,30 @@ export const useGame = create<Store>((set, get) => {
         // single action happened to be affordable — e.g. auto-Move a Spent
         // Vehicle that also had a legal (but not-yet-CAP-affordable) shot.
         const canMoveHere = !sel.carriedBy && moveCost(game, sel, hexId).ap != null;
-        const canFire = !!enemy && !sel.carriedBy && attackContext(game, sel, enemy).legal;
-        const canCC = !!enemy && !sel.carriedBy && closeCombatContext(game, sel, enemy).legal;
+        // §3.2: a shot that can never Hit even with the max 2-CAP dice mod is
+        // blocked here — not a rules illegality (the reducer would still
+        // accept it if dispatched directly), just a UI convenience so a click
+        // can't walk the player into a guaranteed-wasted Action/dice roll.
+        const fireCtx = enemy && !sel.carriedBy ? attackContext(game, sel, enemy) : null;
+        const canFire = !!fireCtx?.legal && !isHopelessShot(fireCtx.hitNumber);
+        const ccCtx = enemy && !sel.carriedBy ? closeCombatContext(game, sel, enemy) : null;
+        const canCC = !!ccCtx?.legal && !isHopelessShot(ccCtx.hitNumber);
+        // §17.2/17.3: a distinct "move here AND occupy" option — the same Hex
+        // may also just be a plain move target (`canMoveHere` above) when the
+        // Unit chooses not to occupy. Reuses `legalActionsForUnit`'s own
+        // enumeration (which already covers both the adjacent-arrival case and
+        // the same-hex occupy-from-within case) rather than re-deriving it.
+        const canOccupyFortification = acts.some(
+          (a) => a.type === 'MOVE' && a.toHexId === hexId && a.occupyFortification,
+        );
+        // §17.12: CC against the Hex's Fortification/Obstacle itself — only
+        // possible in the Unit's OWN Hex (CC always shares a Hex) and mutually
+        // exclusive with attacking an occupant there (`canCC` above).
+        const canAttackFortification =
+          hexId === sel.hexId &&
+          !sel.carriedBy &&
+          templateOf(game, sel).attackMode !== 'none' &&
+          !!destructibleFeatureAt(game.hexes[hexId]!);
         // Mortar Indirect Attack (§13.2) — an Attack, so only vs an enemy-
         // occupied Hex (an alternative to normal Fire, e.g. when it's out of
         // the Mortar's own LOS but a Spotter Hex can still see it).
@@ -785,6 +998,8 @@ export const useGame = create<Store>((set, get) => {
           Number(canMoveHere) +
           Number(canFire) +
           Number(canCC) +
+          Number(canOccupyFortification) +
+          Number(canAttackFortification) +
           Number(canIndirectFire) +
           Number(canFireSmoke) +
           Number(canLoad);
@@ -797,6 +1012,14 @@ export const useGame = create<Store>((set, get) => {
         }
         if (canMoveHere) {
           get().move(sel.id, hexId);
+          return;
+        }
+        if (canOccupyFortification) {
+          get().move(sel.id, hexId, true);
+          return;
+        }
+        if (canAttackFortification) {
+          get().closeCombatStructure(sel.id);
           return;
         }
         if (canFire && enemy) {
@@ -883,33 +1106,61 @@ export const useGame = create<Store>((set, get) => {
       });
     },
 
-    move: (unitId, toHexId) => {
+    move: (unitId, toHexId, occupy) => {
       const g = get().game;
       const u = g?.units[unitId];
       // Vehicles build a Bonus-Move path (§15.2); foot units move one hex.
-      if (g && u && g.templates[u.templateId]?.kind === 'vehicle') {
+      // (A same-hex occupy-from-within Move, §17.3, is never a Vehicle Move —
+      // `canOccupy` already denies Vehicles — so this branch is unreachable then.)
+      if (g && u && g.templates[u.templateId]?.kind === 'vehicle' && toHexId !== u.hexId) {
         get().extendMovePath(toHexId);
         return;
       }
-      capGate({ type: 'MOVE', unitId, toHexId }, (a) => get().dispatch(a));
+      capGate({ type: 'MOVE', unitId, toHexId, occupyFortification: occupy }, (a) => {
+        const action = a as Extract<Action, { type: 'MOVE' }>;
+        const game = get().game;
+        const passenger = game ? Object.values(game.units).find((x) => x.carriedBy === unitId) : undefined;
+        maybeMinesGate(action, toHexId, passenger ? [unitId, passenger.id] : [unitId], (a2) => get().dispatch(a2));
+      });
     },
-    fire: (attackerId, targetId) =>
-      capGate({ type: 'FIRE', attackerId, targetId }, (a) =>
+    fire: (attackerId, targetId, useFlamethrower) =>
+      capGate({ type: 'FIRE', attackerId, targetId, useFlamethrower }, (a) =>
         requestFireRoll(a as Extract<Action, { type: 'FIRE' }>),
       ),
-    closeCombat: (attackerId, targetId) =>
-      capGate({ type: 'CLOSE_COMBAT', attackerId, targetId }, (a) =>
-        requestCcRoll(a as Extract<Action, { type: 'CLOSE_COMBAT' }>),
-      ),
+    closeCombat: (attackerId, targetId, useFlamethrower) =>
+      capGate({ type: 'CLOSE_COMBAT', attackerId, targetId, useFlamethrower }, (a) => {
+        const action = a as Extract<Action, { type: 'CLOSE_COMBAT' }>;
+        const hexId = get().game?.units[attackerId]?.hexId;
+        if (!hexId) return;
+        maybeMinesGate(action, hexId, [attackerId], (a2) => requestCcRoll(a2));
+      }),
+    closeCombatStructure: (attackerId) =>
+      capGate({ type: 'CLOSE_COMBAT', attackerId, targetKind: 'structure' }, (a) => {
+        const action = a as Extract<Action, { type: 'CLOSE_COMBAT' }>;
+        const hexId = get().game?.units[attackerId]?.hexId;
+        if (!hexId) return;
+        maybeMinesGate(action, hexId, [attackerId], (a2) => requestCcRoll(a2));
+      }),
     rally: (unitId) =>
       capGate({ type: 'RALLY', unitId }, (a) =>
         requestRallyRoll(a as Extract<Action, { type: 'RALLY' }>),
       ),
     pivot: (unitId, facing) =>
-      capGate({ type: 'PIVOT', unitId, facing }, (a) => get().dispatch(a)),
+      capGate({ type: 'PIVOT', unitId, facing }, (a) => {
+        const action = a as Extract<Action, { type: 'PIVOT' }>;
+        const hexId = get().game?.units[unitId]?.hexId;
+        if (!hexId) return;
+        maybeMinesGate(action, hexId, [unitId], (a2) => get().dispatch(a2));
+      }),
     // Free, 0AP, no Spent Check — bypasses capGate entirely (that's only for
     // Spent-Unit CAP costs, which don't apply here).
     chooseFacing: (unitId, facing) => get().dispatch({ type: 'CHOOSE_FACING', unitId, facing }),
+
+    // §17.6: build a Hasty Defense — no roll, so straight through capGate to dispatch (like pivot's structure, minus the Mines gate: building one never moves/pivots into a Mines Hex).
+    hastyDefense: (unitId) =>
+      capGate({ type: 'HASTY_DEFENSE', unitId }, (a) => get().dispatch(a)),
+    // §17.6 "at will": 0AP, no Spent Check, no CAP gate at all.
+    removeHastyDefense: (unitId) => get().dispatch({ type: 'REMOVE_HASTY_DEFENSE', unitId }),
 
     // Load/Unload (§15.7/§15.9) are Group Actions: legalActionsForUnit already
     // bakes in the right capCostReduce when either the Unit or the Vehicle is
@@ -1094,7 +1345,12 @@ export const useGame = create<Store>((set, get) => {
       set({ movePath: [] });
       capGate(
         { type: 'MOVE', unitId: sel, toHexId: path[path.length - 1]!, path },
-        (a) => get().dispatch(a),
+        (a) => {
+          const action = a as Extract<Action, { type: 'MOVE' }>;
+          const game = get().game;
+          const passenger = game ? Object.values(game.units).find((x) => x.carriedBy === sel) : undefined;
+          maybeMinesGate(action, action.toHexId, passenger ? [sel, passenger.id] : [sel], (a2) => get().dispatch(a2));
+        },
       );
     },
     clearMovePath: () => set({ movePath: [] }),
@@ -1107,6 +1363,34 @@ export const useGame = create<Store>((set, get) => {
       get().dispatch(action);
     },
     cancelRoll: () => set({ pendingRoll: null }),
+    adjustPendingCapMod: (delta) => {
+      const p = get().pendingRoll;
+      if (!p) return;
+      const max = p.capDiceModMax ?? 0;
+      const current = p.capDiceMod ?? 0;
+      const next = Math.max(-max, Math.min(max, current + delta));
+      if (next === current) return;
+      // Rebuild the same base action's preview with the new mod — reuses
+      // whichever request*Roll built it in the first place, so the rebuilt
+      // steps/odds/dice are computed exactly the same way as the original.
+      switch (p.action.type) {
+        case 'FIRE':
+          requestFireRoll(p.action, next);
+          break;
+        case 'CLOSE_COMBAT':
+          requestCcRoll(p.action, next);
+          break;
+        case 'RALLY':
+          requestRallyRoll(p.action, next);
+          break;
+        case 'INDIRECT_FIRE':
+          requestIndirectFireRoll(p.action, next);
+          break;
+        case 'GROUP_ATTACK':
+          requestGroupAttackRoll(p.action.leaderId, p.action.supporterIds, p.action.targetId, p.action.capCostReduce ?? 0, next);
+          break;
+      }
+    },
 
     confirmProceed: () => {
       const c = get().pendingConfirm;
@@ -1114,6 +1398,28 @@ export const useGame = create<Store>((set, get) => {
       c?.proceed();
     },
     confirmCancel: () => set({ pendingConfirm: null }),
+
+    adjustMinesMod: (unitId, delta) =>
+      set((s) => {
+        if (!s.pendingMines) return s;
+        return {
+          pendingMines: {
+            ...s.pendingMines,
+            targets: s.pendingMines.targets.map((t) =>
+              t.unitId === unitId ? { ...t, mod: Math.max(-2, Math.min(2, t.mod + delta)) } : t,
+            ),
+          },
+        };
+      }),
+    confirmMines: () => {
+      const p = get().pendingMines;
+      if (!p) return;
+      set({ pendingMines: null });
+      const mods: Record<string, number> = {};
+      for (const t of p.targets) mods[t.unitId] = t.mod;
+      p.proceed(mods);
+    },
+    cancelMines: () => set({ pendingMines: null }),
 
     openPicker: (hexId, unitIds, x, y) => set({ picker: { hexId, unitIds, x, y } }),
     closePicker: () => set({ picker: null }),

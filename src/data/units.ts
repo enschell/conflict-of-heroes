@@ -50,6 +50,8 @@ export const GERMAN_UNITS: UnitTemplate[] = [
   },
   {
     // Unit List p.38 — "Pioneers Squad" (×3). Notable blue 3 FP (anti-armor / demolition).
+    // §18.1: Pioneers may attack with a Flamethrower, enter Mines Hexes without
+    // triggering them, and Fire Smoke at a max Range of 1.
     id: 'ger-pioneer',
     nation: 'germans',
     name: 'Pioneers Squad',
@@ -61,6 +63,9 @@ export const GERMAN_UNITS: UnitTemplate[] = [
     apToFire: 2,
     vp: 2,
     unburdened: true,
+    hasFlamethrower: true,
+    pioneer: true,
+    canFireSmoke: true,
   },
   {
     // Unit List p.38 — "HMG34" (×2). Tripod MG: long range, move 2. Crew-served.

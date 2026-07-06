@@ -29,3 +29,17 @@ export function fireOdds(ar: number, dr: number): { hit: number; crit: number } 
 export function pct(p: number): number {
   return Math.round(p * 100);
 }
+
+/** Max CAP-mod magnitude a single roll may spend (§3.2: "any number... up to 2"). */
+export const MAX_CAP_DICE_MOD = 2;
+
+/**
+ * True if `hitNumber` can never produce a Hit even with the maximum CAP dice
+ * mod (§3.2: up to 2 CAP lowers the Hit Number by up to 2) — 2d6's maximum
+ * roll is 12, so anything still above 12 after that best-case reduction is
+ * truly unwinnable, not just unlikely. UI-only convenience (not a rules
+ * change): the engine still allows dispatching the Action directly.
+ */
+export function isHopelessShot(hitNumber: number): boolean {
+  return hitNumber - MAX_CAP_DICE_MOD > 12;
+}

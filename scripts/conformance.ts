@@ -85,6 +85,26 @@ function rangeMod(dist: number, range: number): number | null {
   return null;
 }
 
+/** Elevation Move Cost Penalty (§12.2): Sloping (1 level) is +1AP ascending
+ * only; Steep (2 levels) is +2AP either direction. Applies to every unit kind
+ * (§15's own "Vehicle Moving Uphill" example pays it too) — this oracle never
+ * drives a vehicle (Mission 1 is foot-only), so no Steep-impassable check is
+ * needed here. */
+function elevationMoveCost(fromElev: number, toElev: number): number {
+  const diff = toElev - fromElev;
+  const absDiff = Math.abs(diff);
+  if (absDiff >= 2) return 2;
+  if (absDiff === 1) return diff > 0 ? 1 : 0;
+  return 0;
+}
+
+/** §12.3 Elevation Combat Bonus: +1AR attacker higher, +1DR target higher. */
+function elevationCombatMods(state: GameState, attackerHexId: string, targetHexId: string) {
+  const aElev = state.hexes[attackerHexId]?.elevation ?? 0;
+  const tElev = state.hexes[targetHexId]?.elevation ?? 0;
+  return { elevAr: aElev > tElev ? 1 : 0, elevDr: tElev > aElev ? 1 : 0 };
+}
+
 /** +1 DM if the shot crosses a wall in/bordering the target hex (§5.0.2). */
 function myWallDM(state: GameState, fromId: string, toId: string): number {
   const line = lineDraw(parseHexId(fromId), parseHexId(toId));
@@ -104,11 +124,12 @@ function expectFire(state: GameState, atk: Unit, tgt: Unit) {
   const dist = distance(parseHexId(atk.hexId), parseHexId(tgt.hexId));
   const rm = rangeMod(dist, ae.range);
   if (rm === null) return null;
-  const ar = (te.color === 'red' ? ae.fpRed : ae.fpBlue) + rm;
+  const { elevAr, elevDr } = elevationCombatMods(state, atk.hexId, tgt.hexId);
+  const ar = (te.color === 'red' ? ae.fpRed : ae.fpBlue) + rm + elevAr;
   const inFront = inArc(tgt.hexId, tgt.facing, atk.hexId); // attacker in target's front?
   const defense = inFront ? te.front : te.flank;
   const tHex = state.hexes[tgt.hexId]!;
-  const dr = defense + TERRAIN[tHex.terrain].dm + (tHex.features.smoke ?? 0) + myWallDM(state, atk.hexId, tgt.hexId);
+  const dr = defense + TERRAIN[tHex.terrain].dm + (tHex.features.smoke ?? 0) + myWallDM(state, atk.hexId, tgt.hexId) + elevDr;
   return { ar, dr, hitNumber: dr - ar, isFlank: !inFront, apToFire: ae.apToFire };
 }
 
@@ -132,7 +153,7 @@ function expectMoveCost(state: GameState, unit: Unit, toId: string): number {
   const dir = directionTo(unit.hexId, toId);
   const opp = (dir + 3) % 6;
   if (from.walls[dir] || to.walls[opp]) ap += 1; // wall crossing (§5.0.2)
-  ap += Math.max(0, to.elevation - from.elevation); // uphill (§5)
+  ap += elevationMoveCost(from.elevation, to.elevation); // §12.2
   return ap;
 }
 

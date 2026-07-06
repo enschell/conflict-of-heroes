@@ -6,8 +6,20 @@
 import { templateOf } from '../engine';
 import type { GameState, Unit } from '../engine/types';
 import { TERRAIN } from '../data/terrainTypes';
+import { artForHex } from '../data/hexArt';
 import { useGame } from '../state/store';
 import { UnitCounter } from './UnitCounter';
+
+const OBSTACLE_NAMES: Record<string, string> = {
+  barbedWire: 'Barbed Wire',
+  mines: 'Mines',
+  roadBlock: 'Road Block',
+};
+
+const FORTIFICATION_NAMES: Record<string, string> = {
+  trench: 'Trench',
+  bunker: 'Bunker',
+};
 
 function MiniCounter({ game, unit }: { game: GameState; unit: Unit }) {
   const select = useGame((s) => s.select);
@@ -35,6 +47,7 @@ export function HoverPanel() {
   const hex = hover ? game.hexes[hover.id] : undefined;
   const units = hover ? Object.values(game.units).filter((u) => u.hexId === hover.id) : [];
   const t = hex ? TERRAIN[hex.terrain] : null;
+  const art = hex ? artForHex(hex) : null;
 
   return (
     <div className="panel">
@@ -43,27 +56,66 @@ export function HoverPanel() {
         <p className="dim">Hover a hex to inspect terrain and units.</p>
       ) : (
         <>
-          <div className="stats-grid">
-            <span>Hex</span>
-            <b>{hex.id}</b>
-            <span>Terrain</span>
-            <b>{t.name}</b>
-            <span>Move into</span>
-            <b>+{t.apCost} AP</b>
-            <span>Defensive mod</span>
-            <b>
-              {t.dm >= 0 ? '+' : ''}
-              {t.dm} DM
-            </b>
-            <span>Blocks LOS</span>
-            <b>{t.blocksLOS ? 'Yes' : 'No'}</b>
-            <span>Cover terrain</span>
-            <b>{t.isCover ? 'Yes' : 'No'}</b>
-            {hex.features.smoke && (
-              <>
-                <span>Smoke (§14)</span>
-                <b>{hex.features.smoke === 2 ? 'Heavy (+2DR / −2AR, blocks LOS)' : 'Light (+1DR / −1AR)'}</b>
-              </>
+          <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'flex-start' }}>
+            <div className="stats-grid" style={{ flex: 1 }}>
+              <span>Hex</span>
+              <b>{hex.id}</b>
+              <span>Elevation</span>
+              <b>{hex.elevation === 2 ? 'L2 Hill ▲▲' : hex.elevation === 1 ? 'L1 Hill ▲' : 'L0 Ground'}</b>
+              <span>Terrain</span>
+              <b>{t.name}</b>
+              <span>Move into</span>
+              <b>+{t.apCost} AP</b>
+              <span>Defensive mod</span>
+              <b>
+                {t.dm >= 0 ? '+' : ''}
+                {t.dm} DM
+              </b>
+              <span>Blocks LOS</span>
+              <b>{t.blocksLOS ? 'Yes' : 'No'}</b>
+              <span>Cover terrain</span>
+              <b>{t.isCover ? 'Yes' : 'No'}</b>
+              {hex.features.smoke && (
+                <>
+                  <span>Smoke (§14)</span>
+                  <b>{hex.features.smoke === 2 ? 'Heavy (+2DR / −2AR, blocks LOS)' : 'Light (+1DR / −1AR)'}</b>
+                </>
+              )}
+              {hex.features.obstacle && (
+                <>
+                  <span>Obstacle (§17)</span>
+                  <b>
+                    {OBSTACLE_NAMES[hex.features.obstacle.kind]}
+                    {hex.features.obstacle.destroyed ? ' (destroyed)' : ''}
+                    {hex.features.obstacle.kind === 'mines' && !hex.features.obstacle.destroyed
+                      ? ` — Hit# ${hex.features.obstacle.hitNumber ?? 0}`
+                      : ''}
+                  </b>
+                </>
+              )}
+              {hex.features.fortification && (
+                <>
+                  <span>Fortification (§17)</span>
+                  <b>
+                    {FORTIFICATION_NAMES[hex.features.fortification.kind]}
+                    {hex.features.fortification.destroyed ? ' (destroyed)' : ''}
+                    {hex.features.fortification.kind === 'bunker' && hex.features.fortification.facing != null
+                      ? ` — faces ${hex.features.fortification.facing}`
+                      : ''}
+                  </b>
+                  <span>Occupying</span>
+                  <b>
+                    {units.filter((u) => u.occupyingFortification).map((u) => u.id).join(', ') || 'none'}
+                  </b>
+                </>
+              )}
+            </div>
+            {art && (
+              <img
+                src={art}
+                alt={t.name}
+                style={{ width: 96, height: 96, objectFit: 'cover', borderRadius: 'var(--radius, 4px)', flexShrink: 0 }}
+              />
             )}
           </div>
           <div className="hover-units">

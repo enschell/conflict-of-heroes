@@ -44,6 +44,7 @@ export function DiceRoller() {
   const pending = useGame((s) => s.pendingRoll);
   const commit = useGame((s) => s.commitRoll);
   const cancel = useGame((s) => s.cancelRoll);
+  const adjustCapMod = useGame((s) => s.adjustPendingCapMod);
   const muted = useGame((s) => s.muted);
 
   const [stepIndex, setStepIndex] = useState(0);
@@ -110,6 +111,31 @@ export function DiceRoller() {
               <div className="dim">incl. {step.critPct}% critical (instant kill)</div>
             )}
           </>
+        )}
+        {/* §3.2: CAP dice mod — only adjustable before the first die of the
+            whole sequence is rolled (it applies to every step uniformly, so
+            changing it mid-sequence would invalidate already-rolled dice). */}
+        {stepIndex === 0 && phase === 'ready' && (
+          <div className="confirm__mines-row">
+            <span>
+              CAP dice mod{(pending.capDiceMod ?? 0) !== 0 ? ` (${(pending.capDiceMod ?? 0) > 0 ? '+' : ''}${pending.capDiceMod})` : ''}
+            </span>
+            <div className="confirm__mines-stepper">
+              <button
+                disabled={(pending.capDiceMod ?? 0) <= -(pending.capDiceModMax ?? 0)}
+                onClick={() => adjustCapMod(-1)}
+              >
+                −
+              </button>
+              <span>{pending.capDiceMod ?? 0}</span>
+              <button
+                disabled={(pending.capDiceMod ?? 0) >= (pending.capDiceModMax ?? 0)}
+                onClick={() => adjustCapMod(1)}
+              >
+                +
+              </button>
+            </div>
+          </div>
         )}
         {(step.arMods?.length || step.drMods?.length) ? (
           <div className="dice-mods">

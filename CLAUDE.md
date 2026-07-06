@@ -45,12 +45,14 @@ This repo is self-describing: a fresh session needs only the code + these docs.
 - **Run it:** `npm run dev` → http://localhost:5173. Windows: Node 24 is at
   `C:\Program Files\nodejs` (not on Git Bash's PATH; in PowerShell prepend it).
 - **Current status:** the v3 cutover, M5 (Group Actions + Group Close Combat), M6 (Vehicles +
-  **all** of Special Units §16.1–16.7, audited and confirmed complete), and M7 (Mortars + Smoke) are
-  all done; real **Mission 1** ("Partisans") plays end-to-end with real reinforcements; conformance
-  is at 0 violations. **M8 (Hidden Units) is deliberately deferred to online play** — see §8, it's a
-  locked decision, not a gap. **Next up:** M9 (elevation/hills). **§8 has the full detail on every
-  milestone — read that, not this bullet, for specifics on how something works or why a decision was
-  made.**
+  **all** of Special Units §16.1–16.7, audited and confirmed complete), M7 (Mortars + Smoke), and
+  **M9 (Hills/Elevation §12)** are all done; real **Mission 1** ("Partisans") plays end-to-end with
+  real reinforcements; conformance is at 0 violations. **M8 (Hidden Units) is deliberately deferred
+  to online play** — see §8, it's a locked decision, not a gap. **M10 (Fortifications and Obstacles
+  §17) is complete** (both Phases — Obstacles and Fortifications, incl. §17.11/17.12 destroying one by
+  Attack), and **M11 (Flamethrowers + Pioneers §18) is complete** too. OBA (Battle Cards) remains the
+  only unbuilt v3 combat module (M12, roadmap §8). **§8 has the full detail on every milestone — read
+  that, not this bullet, for specifics on how something works or why a decision was made.**
 
 ---
 
@@ -65,8 +67,10 @@ at the end wins (the v3 "no-tie" VP track — one side always leads).
 - **Hotseat first, online later.** Pass-and-play now; keep the engine network-agnostic so an
   authoritative server + WebSocket rooms can be added later with **no engine changes**.
 - **Vertical slice = infantry + vehicles, Mission 1 ("Partisans") playable end-to-end.** Vehicles
-  (M6) and Mortars + Smoke (M7) are built; OBA, hidden units, fortifications, mines, hills remain
-  **later modules** (roadmap §8) — Hidden Units specifically deferred to online play, see §8.
+  (M6), Mortars + Smoke (M7), Hills/Elevation (M9), Fortifications and Obstacles (M10 — Barbed Wire,
+  Mines, Road Block, Trenches, Bunkers, Hasty Defenses), and Flamethrowers + Pioneers (M11) are all
+  built; OBA and hidden units remain **later modules** (roadmap §8) — Hidden Units specifically
+  deferred to online play, see §8.
 - **Stack:** Vite + React + TypeScript, **client-only**. SVG hex board. Pure-function rules engine.
   Zustand store. Vitest for tests.
 - **Content:** we author our **own** stats/terrain/scenario data and **original simple graphics**.
@@ -139,8 +143,8 @@ conflict-of-heroes/
       stress.ts             # Stress state + "+1AP if acted last Turn"
       hex.ts                # axial math: neighbors, distance, direction, line, arc
       terrain.ts            # terrain table → AP cost, DR mod, blocksLOS, isCover
-      los.ts                # line of sight + arc of fire; visibleHexesFrom(hex)
-      movement.ts           # move cost, facing, pivot, backwards, roads, walls
+      los.ts                # LOS + arc of fire; visibleHexesFrom(hex); ✅ M9 elevation (§12.4-12.6)
+      movement.ts           # move cost, facing, pivot, backwards, roads, walls, ✅ M9 elevation (§12.2)
       range.ts              # short +3AR (adjacent), long −2AR
       combat.ts             # AR/DR; Hit Number = DR − AR; 2d6 ≥ HN; crit by 4
       hits.ts               # draw marker, apply effects, 2nd hit = destroyed
@@ -154,6 +158,8 @@ conflict-of-heroes/
       reinforcements.ts     # ✅ M2.5/§4.12: legalEntryHexes (off-Map Units, ENTER)
       mortar.ts             # ✅ M7/§13: Direct/Indirect Attack fire zones, Spotter Hex, rollIndirectFire
       smoke.ts              # ✅ M7/§14: Heavy/Light DR/AR, LOS-path bonus, Rally bonus, dissipation
+      obstacles.ts          # ✅ M10 Phase 1/§17.7-17.10: rollMinesAttack, minesTargetsFor/OwnerSide, destroysBarbedWire
+      fortifications.ts     # ✅ M10 Phase 2/§17.1-17.6,17.11-17.12: canOccupy, fortificationDrBonus, rollStructureDestroy
       cards.ts              # (deferred) Battle/Weapon cards §8; OBA (§13.4-13.9) waits on this too
       index.ts              # public engine API surface
       __tests__/            # Vitest
@@ -162,19 +168,24 @@ conflict-of-heroes/
       maps/mission1.ts   missions/mission1.ts   # Mission 1 "Partisans": Map 1 board + setup + reinforcement waves
       missions/sandbox.ts   # non-canonical Armor Sandbox test mission (M6)
       missions/fireSupportSandbox.ts  # non-canonical Fire Support Sandbox test mission (M7)
+      missions/hillsSandbox.ts  # non-canonical Hills Sandbox test mission (M9) — own map, real hills
+      missions/obstaclesSandbox.ts  # non-canonical Obstacles Sandbox test mission (M10 Phase 1) — own map
+      missions/fortificationsSandbox.ts  # non-canonical Fortifications Sandbox test mission (M10 Phase 2) — own map
       cards/                # deferred to the cards milestone
       __tests__/
     state/  store.ts persistence.ts             # Zustand + localStorage saves
-    ui/     …  ReinforcementsPanel.tsx  …        # React + SVG (see §7)
+    ui/     …  ReinforcementsPanel.tsx  MinesConfirm.tsx  …  # React + SVG (see §7)
   scripts/  play.ts conformance.ts              # terminal driver + v3 conformance audit
+  public/hills-los-mockup.html  # ✅ kept in repo: interactive §12 LOS validator/reference (M9)
 ```
 
 > **Current state:** engine/data/state/ui/scripts compile and pass under 3rd-ed (v3) rules
 > (conformance 0 violations — see §0/§8 for the milestone status). Data is the real **Mission 1** on
 > `maps/mission1.ts` + `missions/mission1.ts` (the 2nd-ed `firefights/`/`maps/partisans.ts` are
-> deleted), plus the non-canonical `missions/sandbox.ts` (vehicles) and
-> `missions/fireSupportSandbox.ts` (mortars/smoke) test missions. `rules/` is the committed source
-> of truth.
+> deleted), plus the non-canonical `missions/sandbox.ts` (vehicles), `missions/fireSupportSandbox.ts`
+> (mortars/smoke), `missions/hillsSandbox.ts` (elevation), `missions/obstaclesSandbox.ts`
+> (Obstacles), and `missions/fortificationsSandbox.ts` (Fortifications) test missions. `rules/` is
+> the committed source of truth.
 
 ---
 
@@ -204,12 +215,18 @@ GameState = {
     hitMarkers: HitType[]             // hidden info per 7.5
     assignedWeaponCards: CardId[]
     carriedBy?: UnitId                // loaded onto a transport Vehicle (15.6-15.9, M6)
+    occupyingFortification?: boolean  // occupying (not just standing atop) a Trench/Bunker (17.2/17.3, M10 Phase 2)
+    hastyDefense?: boolean            // per-Unit marker, not a Hex feature (17.6, M10 Phase 2)
   }>
   hexes: Record<HexId, {
     coord: { q: number; r: number }   // axial; label "B05"/"I06" derived for display (1.0)
     terrain: TerrainId; elevation: number; label?: string
     walls: boolean[]; road: boolean
-    features: { control?: SideId; smoke?: 1|2 }
+    features: {
+      control?: SideId; smoke?: 1|2
+      obstacle?: { kind: 'barbedWire'|'mines'|'roadBlock'; hitNumber?: number; destroyDr?: number; destroyed: boolean; ownerSide: SideId }  // 17.7-17.10, M10 Phase 1
+      fortification?: { kind: 'trench'|'bunker'; facing?: 0|1|2|3|4|5; destroyDr?: number; destroyed: boolean }  // 17.1-17.6, M10 Phase 2
+    }
   }>
   hitPiles: { foot: Record<HitType, number>; vehicle: Record<HitType, number> }  // v3: two decks (15.13)
   reinforcements: ReinforcementUnit[] // off-Map Units awaiting an ENTER Action (4.12, real from Mission 1)
@@ -243,13 +260,13 @@ When in doubt, open `rules/INDEX.md`. Read the file before implementing; cite `N
 | Round end, **Pre-Round Sequence (10 steps)**, **Initiative (2d6≥7, non-advantage)**, VP no-tie | `turn.ts`, `victory.ts` | 9.0–9.11 | `rules/09` |
 | **Group Actions** (one Spent Check; group move = highest; attack = leader +1AR/supporter) | `groups.ts` *(M5)* | 10.0–10.12 | `rules/10` |
 | *(later)* hidden units | — | 11.x | `rules/11` |
-| *(later)* hills / elevation / LOS-over-levels | — | 12.x | `rules/12` |
-| Mortars: Direct/Indirect Attack, Spotter Hex, HE/Air Burst; *(later)* OBA/drift (pending Cards, M12) | `combat.ts`, `mortar.ts` *(M7)* | 13.0–13.3, 13.9 | `rules/13` |
+| **Hills/elevation**: move cost (Sloping ±1AP, Steep ±2AP incl. vehicle Steep-impassable-off-road), elevation-aware LOS (Plateau Effect, Blind Spots), Elevation Combat Bonus | `movement.ts`, `los.ts`, `combat.ts` *(M9)* | 12.x | `rules/12` |
+| Mortars: Direct/Indirect Attack, Spotter Hex, HE/Air Burst, Spotter Hex Elevation Bonus (M9); *(later)* OBA/drift (pending Cards, M12) | `combat.ts`, `mortar.ts` *(M7/M9)* | 13.0–13.3, 13.9 | `rules/13` |
 | Smoke: DR/AR, LOS blocking, Rally bonus, dissipation | `smoke.ts`, `los.ts`, `turn.ts`, `rally.ts` *(M7)* | 14.x | `rules/14` |
 | **Vehicles**: movement (wheeled/tracked, Bonus Moves), combat specifics, Transport/Towing; *(later)* Towing damaged Vehicles (§15.10) | `movement.ts`, `combat.ts`, `hits.ts`, `reducer.ts` *(M6)* | 15.x | `rules/15` |
 | **Special units**: Turreted, Open-Topped, APC Transport Bonus, Trucks/Wagons, Field Guns, Mobile Vehicles (§16.4) | `combat.ts`, `movement.ts`, `reducer.ts`, `actions.ts`, `victory.ts` *(M6)* | 16.x | `rules/16` |
-| *(later)* fortifications / trenches / bunkers / obstacles / mines | — | 17.x | `rules/17` |
-| *(later)* flamethrowers / pioneers | — | 18.x | `rules/18` |
+| **Obstacles + Fortifications** ✅: Barbed Wire (1d6 Move Cost, foot only, hidden from the pre-move popup until executed), Mines (fixed Hit Number attack on Move/Pivot/CC, owner-side CAP-modifiable, **always visible** — mirrors the M8 Hidden Units rationale), Road Block (impassable to Wheeled even on a Road) — impassable-to-Wheeled + no-Bonus-Move-in/out for all three (M10 Phase 1); Trenches (foot only, +2DR any direction, impassable to Wheeled), Bunkers (foot + Field Gun, facing/Arc-of-Fire locked on occupy, no Pivot, +5DR in-arc/+3DR flank, denies Mortar fire), Hasty Defenses (per-Unit, not a Hex feature, 5AP build/free removal, +1DR, stripped by that Unit's own Move/Pivot), and §17.11/17.12 destroying a Fortification/Obstacle (ranged Fire: automatic two rolls under one Spent Check; CC: an exclusive occupant-or-structure choice) (M10 Phase 2) | `movement.ts`, `combat.ts`, `mortar.ts`, `obstacles.ts`, `fortifications.ts`, `reducer.ts`, `state.ts` *(M10)* | 17.x | `rules/17` |
+| **Flamethrowers + Pioneers** ✅: a `hasFlamethrower` Unit may choose the Flamethrower profile on a FIRE/CLOSE_COMBAT Attack instead of its normal Firepower — flat 3 red/3 blue FP, max Range 1 (ranged) or same-Hex (CC), always vs Flank DR, ignores ALL DR modifiers except Smoke (Terrain/Wall/Vehicle-Cover/APC/Elevation/Fortification/Hasty-Defense all zeroed); a `pioneer` Unit additionally ignores Mines Attacks entirely and caps its own Fire Smoke to Range 1 | `combat.ts`, `mortar.ts`, `reducer.ts`, `actions.ts` *(M11)* | 18.x | `rules/18` |
 | *(later)* alternate player counts | — | 19.x | `rules/19` |
 
 ### Combat quick-reference (v3 — the math everything hinges on)
@@ -303,18 +320,26 @@ target's DR colour (blue → vehicle pile, red → foot pile).
     Cost, separate from `apToFire`'s Direct cost); every `kind:'mortar'` automatically fires HE (always
     vs Flank DR, Air Burst exception) via `combat.ts`, no extra flag needed. `canFireSmoke?` (any kind)
     marks a Unit that may `FIRE_SMOKE` (§14.0: 80mm+ mortars, Artillery Cards, Pioneers, some Tanks).
+    **Flamethrowers + Pioneers (§18, M11):** `hasFlamethrower?` (Foot or Vehicle) lets a FIRE/
+    CLOSE_COMBAT Action set `useFlamethrower: true` for a flat 3 red/3 blue FP, max Range 1 profile
+    that always hits Flank DR and ignores every DR modifier but Smoke; `pioneer?` (Foot only) adds the
+    §18.1 exceptions on top — immune to Mines Attacks, and its own `canFireSmoke` is capped to Range 1
+    regardless of the Unit's normal (longer) Range.
   - **Add a card:** `{ id, type:'action'|'bonus'|'mission'|'artillery', cost:{green?,blue?}, effect }`
     in `data/cards/` (v3 Green/Blue cost, 8.5). Effects are engine actions/modifiers, not UI code.
   - **Add a mission:** new file in `data/missions/` with maps, placements (by hex label), starting
     CAPs per side, rounds, victory config, deck, hidden-unit slots.
 - **Actions** are plain serializable objects (see `engine/types.ts`'s `Action` union for the exact
-  shapes): `MOVE` (unitId, toHexId, optional vehicle `path`, `capCostReduce?`), `PIVOT`, `FIRE`/
-  `CLOSE_COMBAT` (attackerId, targetId, `capDiceMod?`, `capCostReduce?`), `RALLY`, `STALL`, `PASS`;
+  shapes): `MOVE` (unitId, toHexId, optional vehicle `path`, `capCostReduce?`, `minesCapMods?`),
+  `PIVOT` (`capCostReduce?`, `minesCapMods?`), `FIRE`/`CLOSE_COMBAT` (attackerId, targetId,
+  `capDiceMod?`, `capCostReduce?`; `CLOSE_COMBAT` also `minesCapMods?`), `RALLY`, `STALL`, `PASS`;
   Group Actions `GROUP_MOVE`/`GROUP_ATTACK`/`GROUP_RALLY` (§10); Transport `LOAD`/`UNLOAD` (§15.7/
   §15.9); reinforcement `ENTER` (`{ placements: {unitId, hexId, facing?}[] }`, §4.12); Mortar
   `INDIRECT_FIRE` (attackerId, targetHexId, spotterHexId, §13.2) and `FIRE_SMOKE` (unitId, targetHexId,
-  optional spotterHexId for Indirect, §14.1). Cards (`PLAY_CARD`) are deferred, not yet a real action
-  type.
+  optional spotterHexId for Indirect, §14.1). `minesCapMods` (`Record<UnitId, number>`, §17.10) is
+  resolved by the store's Mines CAP-choice dialog (`MinesConfirm.tsx`) *before* dispatch — the Mines'
+  owning side may not be the acting side, so this can't reuse the normal `capDiceMod` pre-roll flow.
+  Cards (`PLAY_CARD`) are deferred, not yet a real action type.
   **Removed in v3:** `ACTIVATE_UNIT`, `MARK_SPENT` (no activation/pool).
 - **Tests:** colocate in `__tests__/`. **Reproduce the v3 red-box examples** from `rules/NN-*.md` as
   fixtures — they are worked rule implementations (Spent Checks, Stress, combat HN, rally, OBA drift,
@@ -396,6 +421,90 @@ Spent-Check die instead of a remaining-AP pool)*
   "Unload to X?" confirm (`pendingConfirm`); clicking the Vehicle's own Hex is ambiguous with
   click-to-deselect, so that one opens `ActionChooser` with explicit "🚚 Unload here"/"✕ Deselect".
 - **Movement & fire SFX** ✅ `sound.ts` synthesizes audio by `template.kind`; mute toggle.
+- **Move-cost hover popup** ✅ (M9) hovering a legal Move-target hex with a unit selected shows a
+  green-bordered popup itemizing every AP modifier (`movement.ts`'s `MoveCostResult.mods: Modifier[]`
+  — base Move, terrain, Backwards, Wall Crossing, Sloping/Steep Terrain, only pushed when non-zero),
+  not just the total — mirrors the fire-odds popup's positioning/pattern but grows **upward** from the
+  cursor so the two never overlap when a hex is both a move target and shows fire-odds. `Modifier` now
+  lives in `engine/types.ts` (moved out of `combat.ts`, which re-exported it) since `movement.ts`,
+  `combat.ts`, and `mortar.ts` all need the identical shape. **(M10)** `Modifier` gained a `random?`
+  flag: Barbed Wire's §17.8 1d6 is deterministic from the seeded RNG (so the engine already knows the
+  real number), but the popup deliberately renders it as `?` and folds it out of the displayed total
+  (`Move to X — N AP + ?`) rather than spoiling the roll — the same "hide it until executed" principle
+  as the dice-roller. The real value IS logged once the move commits (`reducer.ts`'s `doMove`: "incl.
+  +NAP, Barbed Wire (§17.8)").
+- **Illegal-move popup** ✅ (M10) hovering an *adjacent* Hex the selected Unit cannot enter shows a
+  red-bordered popup with `moveCost`'s own `reason` string (`Board.tsx`'s `moveIllegalPopup`) — every
+  `reason` in `movement.ts` now cites its rulebook section (e.g. "impassable due to Barbed Wire
+  (§17.8)", "impassable due to Road Block (§17.9)", "Steep terrain impassable to vehicles (§15.3,
+  §12.2)") instead of a bare phrase.
+- **Pivot picker (P key)** ✅ pressing **P** with a unit selected highlights its six neighbor Hexes
+  blue (reusing the same on-board highlight/label as the free facing-choice picker, `Board.tsx`'s
+  `facingHighlightUnit`) — clicking one issues a real **PIVOT** Action (§4.6, AP-costed, runs the
+  normal Spent Check/CAP-confirm via `pivot()`), unlike the free correction. Store: `pivotPicker:
+  boolean` + `togglePivotPicker()`; `store.ts`'s `hexClick` branches on it before the normal click
+  logic, mirroring the existing `pendingFacingChoices` branch but calling `pivot()` instead of
+  `chooseFacing()`.
+- **Mines CAP-choice dialog** ✅ (M10 Phase 1) a MOVE/PIVOT/CLOSE_COMBAT about to trigger a live Mines
+  Hex (§17.10) pauses before dispatch — `store.ts`'s `maybeMinesGate` previews targets via
+  `minesTargetsFor`/`minesOwnerSide`, then `MinesConfirm.tsx` shows one row per attacked Unit with a
+  ±CAP stepper (clamped to ±2 **and** to the owner's remaining CAP, shared across every row in the
+  dialog) before the roll — CAPs are never spent silently (see memory `conflict-of-heroes-cap-confirm`).
+  The dialog names the owning side's **nation** (e.g. "Soviets"), not the bare side letter. Confirming
+  bakes the chosen mods into `minesCapMods` and dispatches the real action; the reducer still clamps
+  defensively (CLAUDE.md §3: legality lives in the engine, never trust the UI alone).
+- **Fortifications UI** ✅ (M10 Phase 2) `ActionChooser.tsx` gains two more rows when they're genuine
+  choices: "🛡 Move & occupy {Trench/Bunker}" alongside a plain "Move here" (occupying is never
+  automatic, §17.2/17.3), and "⚔ Close combat the {Fortification/Obstacle}" alongside attacking its
+  occupant (§17.12's exclusive either/or). Ranged Fire's §17.11 two-roll destroy needs **no new
+  DiceRoller UI** — `store.ts`'s `requestFireRoll` just appends one more `RollStep` (built from
+  `rollStructureDestroy`, threaded off the post-occupant-roll RNG) to the same multi-step "Next
+  target ▸ / Continue" flow already used for stacked fire (§6.9). `Inspector.tsx` gets a Rally-style
+  self-targeted "Build Hasty Defense (5AP)" / "Remove Hasty Defense (free)" button pair;
+  `HoverPanel.tsx` and `Board.tsx` show Fortification info/labels the same way Obstacles already do.
+  `UnitCounter.tsx` badges: "HD" (Hasty Defense) and, for occupancy, **"TRENCH"/"BUNK"** — kind-
+  specific, not a generic "FORT" (looked up live from `game.hexes[unit.hexId].features.fortification`,
+  so it's always in sync). No new `MinesConfirm`-style dialog — the structure roll's CAP dice-mod is
+  the attacker's own, already gated through the ordinary single-attacker CAP-confirm flow.
+  **Follow-up fixes from user testing:** (1) `Board.tsx`'s move-cost hover popup didn't fire for the
+  same-hex occupy-from-within case at all — `moveCost()` returns null ("not adjacent") for
+  `toHexId === unit.hexId`, so the popup silently bailed; it now special-cases that hex (reading the
+  AP cost from `legalActionsForUnit`'s own occupy entry instead) and shows "Occupy Trench/Bunker
+  (§17.3) — N AP". (2) A Bunker's Arc of Fire is now drawn directly on the board — the 3 frontal
+  hexsides (facing ±1) highlighted in cyan on every live Bunker Hex, unconditionally (not hover-gated),
+  using the same `EDGE_CORNERS`/`hexCorners` approach `Board.tsx` already uses for Walls.
+- **Stress in AP popups** ✅ two small pre-existing gaps, not Fortification-specific but caught while
+  testing them: `Board.tsx`'s move-cost hover popup and `ActionChooser.tsx`'s "Move here (N AP)"
+  button both computed their AP total straight from `moveCost()`, which only knows the Move's own
+  terrain/backwards/wall/elevation component — Stress's +1AP (§2.6) is folded in later by the
+  reducer's `planCost`, so a Stressed Unit's displayed cost silently under-reported by 1AP. Both now
+  add an explicit `{ label: 'Stress', value: 1, section: '§2.6' }` line (Board's popup) or just the
+  extra +1 (ActionChooser's compact button label) when `unit.stressed`.
+- **Hopeless-shot block + CAP dice-mod stepper** ✅ two related general-combat fixes (not
+  Fortification-specific, but surfaced by a Fortification live-test — an MMG had a 0% chance to hit a
+  Panzer). `ui/odds.ts`'s new `isHopelessShot(hitNumber)` — true only if `hitNumber − 2 > 12`, i.e.
+  unhittable even at the max §3.2 CAP dice mod (a **UI-only** convenience gate, not a rules change —
+  the reducer still accepts the Action if dispatched directly). Wired into `Board.tsx`'s hover-odds
+  popup (shows "Cannot hit — even with CAP (§3.2)" instead of "0% to hit"), `store.ts`'s `hexClick`
+  (`canFire`/`canCC` no longer true for a hopeless target — click falls through to deselect instead of
+  opening the dice roller), `ActionChooser.tsx` (same), and `Inspector.tsx` (filters hopeless targets
+  out of the Fire/Close-Combat button lists). Separately: **there was no UI at all to set a CAP dice
+  mod for FIRE/CLOSE_COMBAT/RALLY/INDIRECT_FIRE/GROUP_ATTACK** before this — `capDiceMod` existed on
+  the `Action` types and the reducer honored it, but nothing in the UI ever set it to anything but 0.
+  Fixed by parameterizing `store.ts`'s `request*Roll` builders to accept `capDiceMod` (rebuildable),
+  adding `PendingRoll.capDiceMod`/`capDiceModMax` (max = min(2, remaining CAP after the Action's own
+  `capCostReduce`)) and a new `adjustPendingCapMod(delta)` store action, and a +/− stepper in
+  `DiceRoller.tsx` (reusing `MinesConfirm.tsx`'s `.confirm__mines-row`/`.confirm__mines-stepper`
+  styling) shown only before the first die of the sequence is rolled (the mod applies uniformly to
+  every step, so it locks once rolling starts).
+- **Flamethrower attack UI** ✅ (M11) `Inspector.tsx`'s Fire/Close-Combat target lists show a
+  🔥-prefixed row alongside the normal one whenever `legalActionsForUnit` offers both for the same
+  target (a `hasFlamethrower` Unit within Range 1) — each row computes its own `attackContext`/
+  `closeCombatContext(..., useFlamethrower)` so the displayed AR/DR is never the wrong profile.
+  `store.ts`'s `fire`/`closeCombat` gained a `useFlamethrower?` param threaded straight into the
+  dispatched Action. Board-click (`hexClick`/`ActionChooser.tsx`) deliberately stays normal-Fire-only
+  for now — Flamethrower attacks go through Inspector.tsx, a follow-up could add it to the board click
+  path too.
 
 ---
 
@@ -474,7 +583,8 @@ Spent-Check die instead of a remaining-AP pool)*
   Attacks reuse `FIRE` (min-range denial + HE-always-Flank-DR + Air Burst folded into `combat.ts`'s
   `attackContext` for any `kind: 'mortar'`); Indirect Attacks are a new `INDIRECT_FIRE` action resolved
   via a Spotter Hex (within 2, clear LOS of the Mortar) that supplies LOS while Arc/Range stay keyed to
-  the Mortar's own Hex (Spotter Elevation Bonus deferred to 0 pending Hills, M9). `smoke.ts` — Heavy/
+  the Mortar's own Hex (Spotter Elevation Bonus was 0 pending Hills — now wired, see M9 below).
+  `smoke.ts` — Heavy/
   Light DR/AR modifiers, LOS blocking (Heavy always; 2+ Light Hexes on a path; a lone Light Hex adds
   +1DR instead), a Rally +1 bonus, and Pre-Round dissipation (`turn.ts`); a new `FIRE_SMOKE` action
   (Direct or Indirect) places Heavy Smoke instead of attacking — legal on any non-Water Hex whether or
@@ -528,10 +638,136 @@ Spent-Check die instead of a remaining-AP pool)*
   Do not attempt a hotseat-only approximation (e.g. hiding enemy Hidden Units from the board render by
   `currentSide`) — it's trivially defeated by anyone glancing at devtools/state and would need
   rebuilding anyway once the real per-client model exists.
-- **Later (additive, v3 order):** M9 elevation/hills (§12) → M10 fortifications/obstacles/mines (§17)
-  → M11 flamethrowers/pioneers (§18) → M12 cards (§8, incl. OBA) → **M13 online multiplayer** (host
-  the pure engine authoritatively + WebSocket rooms; the client already speaks action objects) →
-  **M8 Hidden Units** (§11, now buildable for real).
+- **M9 — Hills and Elevation (§12)** ✅ `movement.ts` — Elevation Move Cost Penalty (Sloping 1-level
+  ±1AP ascending only, Steep 2-level ±2AP both directions; fixed a bug where Steep-descending
+  silently cost 0 instead of 2), applies to foot/guns/vehicles alike (incl. Bonus-Move steps); Steep
+  is impassable to vehicles **off-road**, but a Road lets a vehicle cross it (still paying the AP)
+  per §15.4's "roads negate Impassable Terrain." `los.ts` — elevation-aware `hasLOS`: a hex's
+  obstruction level is its own Elevation +1 if it's also LOS-blocking terrain; ties block only if
+  **strictly** exceeding the higher endpoint's level, **except** a genuine 3-way tie (both endpoints
+  and the intervening hex all equal) never blocks, uniformly at L0, L1, *or* L2 — **no L0 special
+  case** (an earlier draft wrongly special-cased L0 alone; caught via user testing, see memory
+  `conflict-of-heroes-m9-los-elevation`); plus §12.6 Blind Spots (an LOS-blocking hex creates an
+  unseeable hex directly behind it from the High Ground Hex's side, even when the plain level test
+  would otherwise allow seeing past it). Validated interactively before coding in
+  `public/hills-los-mockup.html` (kept in the repo as a design/regression reference — update it if
+  this algorithm ever changes). `combat.ts` — Elevation Combat Bonus (§12.3): +1AR attacker higher,
+  +1DR target higher (no effect on Close Combat, same hex ⇒ always level); exported
+  `elevationCombatMods` reused by `mortar.ts`'s Indirect Fire with the **Spotter Hex**'s elevation,
+  not the Mortar's own (§13.3). `scripts/conformance.ts`'s independent oracle synced with the same
+  formulas. New non-canonical `Hills Sandbox` (`data/missions/hillsSandbox.ts`) — its own small
+  8×5 map (Mission 1 has no hills), with a Steep cliff, a Sloping ridge on a Road, a Blind Spot
+  showcase row, and a same-level L1 "mesa" row. UI: hill glyphs (▲/▲▲) on the board, an Elevation row
+  in the hover panel, a full-sized hex-art picture next to it, and the move-cost/pivot-picker features
+  listed in §7 above (built alongside this milestone, not elevation-specific themselves).
+- **M10 Phase 1 — Obstacles (§17.7-§17.10)** ✅ Locked decisions (memory `conflict-of-heroes-m10-scope`):
+  **Mines are never hidden** — same rationale as the M8 Hidden Units deferral (a hotseat render-layer
+  hide of shared `GameState` is trivially defeated); the user's first instinct was to try that
+  approximation anyway, then reconsidered once shown it's the exact anti-pattern CLAUDE.md already
+  warns against. Data model: `Hex.features.obstacle?: { kind: 'barbedWire'|'mines'|'roadBlock';
+  hitNumber?; destroyDr?; destroyed; ownerSide }` (authored via a new `MapHexDef.obstacle` field,
+  `state.ts`'s `buildHex`); `ownerSide` exists specifically because Mines' CAP modification (§17.10)
+  is paid by whoever *placed* the mines, not necessarily the side whose Unit triggers them.
+  `movement.ts`: Barbed Wire adds a real 1d6 (via `rollD6(state.rng)`, threaded through a new
+  `MoveCostResult.rng` field so `moveCost` stays the single source of truth for both preview and
+  commit — same "compute once, commit only from the reducer's own call" pattern as `combat.ts`'s
+  `rollStackFire`); Barbed Wire and Road Block are impassable to Wheeled vehicles **unconditionally**
+  (§15.4's "roads negate Impassable Terrain" does NOT apply — that would defeat the point of a Road
+  Block); all three Obstacle kinds forbid vehicle Bonus Moves into or out of them. New `obstacles.ts`:
+  `rollMinesAttack` (a fixed Hit Number, no AR/DR, CAP-modifiable like any other roll, hits Soft/
+  Armored alike), `minesTargetsFor`/`minesOwnerSide` (pure preview helpers reused by both the store's
+  pre-dispatch dialog and the reducer's real resolution), `destroysBarbedWire`. `reducer.ts`: Mines
+  trigger is a side-effect appended inside `doMove`/`doPivot`/`doCloseCombat` (arriving Unit + any
+  Transported passenger; the Pivoting Unit; the CC-initiating attacker only — **not** the CC
+  defender, per §17.10's explicit exclusion), resolved *before* the acting Unit's own Spent Check,
+  matching the rulebook's own worked-example ordering; a Tracked vehicle destroys Barbed Wire on
+  entry. New store flow (`maybeMinesGate` in `store.ts`, `MinesConfirm.tsx`) since the Mines' CAP
+  choice belongs to the owning side, not necessarily the acting side, so it can't reuse the existing
+  `capDiceMod` pre-roll pattern — see §7 above. New non-canonical `Obstacles Sandbox`
+  (`data/missions/obstaclesSandbox.ts`) with all three kinds live-testable. §17.11 (destroying an
+  Obstacle/Fortification by ranged Attack/CC — a real combat-resolution wrinkle: two rolls, one Spent
+  Check) is deliberately deferred to Phase 2, since it's shared machinery with Fortifications.
+- **M10 Phase 2 — Fortifications (§17.1-§17.6, §17.11-§17.12)** ✅ Locked decisions: **occupancy is a
+  per-unit flag**, `Unit.occupyingFortification?: boolean`, not a hex-side occupant list — symmetric with the
+  existing `carriedBy`/`hastyDefense` pattern, no array bookkeeping in `destroyUnit`. **Hasty Defense
+  is per-Unit** (`Unit.hastyDefense?`), not a Hex feature — §17.6 places the marker "on top of the
+  Unit," and multiple Units in one Hex can each hold their own independently; Trenches/Bunkers ARE Hex
+  features (`Hex.features.fortification`), like Obstacles. A **transported Unit cannot build a Hasty
+  Defense in the first place** (`doHastyDefense` denies on `unit.carriedBy`), which makes "does a
+  carrier's Move strip a passenger's Hasty Defense" moot — `doLoad` also clears the flag defensively,
+  for the edge case of building one then being Loaded. **§17.11's two-roll flow needs no new `Action`
+  field** — `doFire` just re-derives the structure roll from `state.rng` itself after the occupant
+  roll(s) (same pattern as `rollStackFire`/`rollMinesAttack`), keeping "the reducer is the sole RNG
+  authority" (§3) intact rather than trusting a client-supplied roll result. **While occupying a
+  Bunker, PIVOT is not offered as a legal action at all** (locked facing, confirmed interpretation —
+  no no-op-pivot allowed); occupying a Bunker also **forces the occupant's facing to the Bunker's**
+  (missed on the first pass, caught by a live click-through test — an occupant's DR/arc math all reads
+  `unit.facing` directly, so without this the Bunker's whole facing-lock premise would silently not
+  hold). New `fortifications.ts`: `canOccupy` (Trench: Foot only, §17.4; Bunker: Foot + Field Gun,
+  §17.5 — never a Vehicle), `fortificationDrBonus` (Trench flat +2 any direction; Bunker +5 if the
+  attacker is in the occupant's own front arc — reuses the existing `attackerInTargetFront` concept,
+  no new arc math — else +3 Flank), `hastyDefenseDrBonus` (+1 any direction), `withinBunkerArc`/
+  `deniedByBunkerMortarRule`, `destructibleFeatureAt`/`destroyFeatureAt` (checks *either*
+  `features.fortification` or `features.obstacle` for a live `destroyDr` — only one can be on a Hex,
+  §17.0 — reused by both this Phase and a future destructible Obstacle), `rollStructureDestroy` (flat
+  `destroyDr − ar`, no terrain/smoke DR, no critical tier, no hit-marker pile — mirrors
+  `rollMinesAttack`'s "owns its own roll" shape), `closeCombatStructureAr` (§17.12: the AR half of
+  `closeCombatContext` with none of its DR half — a structure gets no Terrain modifiers in CC).
+  `movement.ts`: Trench is impassable to Wheeled + blocks Tracked Bonus Move in/out, same as Barbed
+  Wire; **Bunker gets neither restriction** (§17.5 explicitly lets wheeled Field Guns occupy one).
+  `combat.ts`/`mortar.ts`: Fortification/Hasty-Defense DR bonuses folded into `attackContext`,
+  `closeCombatContext`, and `rollIndirectFire`'s `drMods`; a Bunker occupant's Arc-of-Fire override
+  denies firing outside it **unconditionally** (placed before the Turreted-exception check, so a
+  Bunker's lock overrides Turreted too); Mortars are denied firing (Direct or Indirect) from within a
+  Bunker in `attackContext`/`directFireZone`/`indirectFireZone` alike. `reducer.ts`: `doMove` gained a
+  same-Hex branch (`toHexId === unit.hexId`) for occupying a Fortification "from within" per §17.3's
+  2nd paragraph (a real Move Action, base `eff.move` AP, no terrain — there's no hex transition);
+  `doCloseCombat` gained `targetKind: 'structure'` (an alternate, mutually-exclusive CC target,
+  §17.12); new `doHastyDefense`/`doRemoveHastyDefense` handlers. UI (`store.ts`/`ActionChooser.tsx`/
+  `Board.tsx`/`HoverPanel.tsx`/`Inspector.tsx`/`UnitCounter.tsx`) — see §7 above for the full detail.
+  New non-canonical `Fortifications Sandbox` (`data/missions/fortificationsSandbox.ts`) — a Trench, a
+  fixed-facing destructible Bunker (`destroyDr: 16`, matching the rulebook's own worked example), and
+  open ground for the Hasty Defense demo; every mechanic above was click-through-verified live in this
+  mission (occupy-from-within, Bunker facing-lock + no-Pivot + arc-restricted DR, the §17.11 two-roll
+  Fire sequence under one Spent Check) with zero console errors.
+- **M11 — Flamethrowers + Pioneers (§18.0-§18.1)** ✅ `UnitTemplate` gained `hasFlamethrower?` (Foot or
+  Vehicle Unit with a Flamethrower symbol; may choose it on an Attack instead of normal Firepower) and
+  `pioneer?` (a Foot Unit's extra §18.1 exceptions — distinct fields, since a Flame Tank has the
+  former without the latter). `FIRE`/`CLOSE_COMBAT` gained `useFlamethrower?: boolean` — a per-Action
+  choice, not a per-Unit mode, since the same Unit can still Fire normally too. `combat.ts`'s
+  `attackContext`/`closeCombatContext` (+ `rollAttack`/`rollCloseCombat`/`rollStackFire`) branch on it:
+  flat 3 red/3 blue FP (superseding the Unit's own FP and any white-box CC penalty), Max Range a fixed
+  1 Hex overriding the Unit's own Range stat entirely, always vs Flank DR (reusing the same
+  `!isHE`-style trick that already forces Mortars to flank), and — the one genuinely new piece of
+  math — **every DR modifier except Smoke is zeroed** (Terrain, Wall, Vehicle Cover, APC Transport,
+  Elevation, Fortification, Hasty Defense all skipped; the AR-side bonuses — range, Group Support,
+  Elevation, smoke-attack-penalty — are unaffected, since the rule's "ignore ALL DR Modifiers" is
+  about the DEFENSE side only). The existing `openTopped` field's doc comment had already anticipated
+  this ("vs HE/**Flamethrower**/red-FP CC") — the Open-Topped flip condition just needed extending
+  from `isHE` to `isHE || useFlamethrower`, already half-designed before this milestone existed.
+  `actions.ts` enumerates the Flamethrower FIRE/CLOSE_COMBAT variant as a genuinely separate legal
+  action alongside the normal one (its own `attackContext`/`closeCombatContext(..., true)` legality
+  check — max Range 1 makes it illegal far more often than the Unit's normal Attack). §18.1 Pioneer
+  exceptions: `reducer.ts`'s `resolveMines` now excludes Pioneer Units from the target list entirely
+  (not just favorable odds — no Attack at all, since Pioneers "may enter a Mines Hex without
+  triggering a Mines Attack"); `mortar.ts`'s `directFireZone` gained an optional `maxRange` param so
+  `actions.ts`/`doFireSmoke` can cap a Pioneer's own Fire Smoke to Range 1 without touching its normal
+  (longer) Fire range. UI: `Inspector.tsx`'s Fire/CC target lists show a distinct 🔥-prefixed row per
+  target when `legalActionsForUnit` offers both variants (own React key needed —
+  `${targetId}-${useFlamethrower ? 'ft' : 'n'}` — since the same target can now appear twice).
+  **Bug caught by live testing, now fixed:** `store.ts`'s `requestFireRoll`/`requestCcRoll` (the
+  dice-roller preview builders) initially ignored `action.useFlamethrower` entirely — a live
+  click-through showed the dice roller displaying the UNIT's normal AR/DR instead of the Flamethrower's,
+  even though the reducer's own `doFire`/`doCloseCombat` had it right — the preview and the commit had
+  silently diverged. Both now read `action.useFlamethrower` and thread it into `attackContext`/
+  `rollStackFire`/`closeCombatContext`/`rollCloseCombat`, matching the reducer exactly. New
+  `flamethrower.test.ts` reproduces the rulebook's own worked example (German Pioneers' Flamethrower
+  vs a Soviet Infantry Gun in a Stone Building: 6AR, 10DR flank — Stone Building's Terrain DM
+  correctly ignored — Hit Number 4). `Fortifications Sandbox` gained a German `ger-pioneer` and a
+  Soviet `sov-t34a` (both pre-existing templates, stats unchanged) as a live Flamethrower-vs-Armor
+  test bed. → M12 cards (§8, incl. OBA) → **M13 online multiplayer** (host the pure engine
+  authoritatively + WebSocket rooms; the client already speaks action objects) → **M8 Hidden Units**
+  (§11, now buildable for real).
 
 ---
 

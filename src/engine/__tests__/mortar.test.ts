@@ -143,6 +143,23 @@ describe('Mortar Indirect Attacks (§13.2)', () => {
     expect(r2.rng).not.toEqual(s.rng);
     expect(r1.rng).not.toEqual(r2.rng);
   });
+
+  it('§13.3/§12.3: the Elevation Combat Bonus is taken from the Spotter Hex, not the Mortar\'s own', () => {
+    const { s, mortar, target } = indirectScene();
+    s.hexes['1,-1']!.elevation = 1; // Spotter Hex elevated relative to the Target
+    const result = rollIndirectFire(s, mortar, target.hexId, '1,-1');
+    const roll = result.rolls[0]!;
+    expect(roll.ar).toBe(4 + 1); // FP + Elevation Bonus (from the Spotter, not the Mortar)
+    expect(roll.arMods.some((m) => m.section === '§12.3')).toBe(true);
+  });
+
+  it('ignores the Mortar\'s own Hex elevation for the Combat Bonus', () => {
+    const { s, mortar, target } = indirectScene();
+    s.hexes['0,0']!.elevation = 2; // Mortar's own hex is high, but irrelevant for Indirect Fire
+    const result = rollIndirectFire(s, mortar, target.hexId, '1,-1');
+    const roll = result.rolls[0]!;
+    expect(roll.ar).toBe(4); // no bonus — only the Spotter Hex's elevation counts (§13.3)
+  });
 });
 
 // §16.5 (Open-Topped) and §16.6 (APC Transport Bonus) previously only applied

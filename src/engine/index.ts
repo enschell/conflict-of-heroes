@@ -24,7 +24,7 @@ export {
   enemiesInHex,
   rollStackFire,
 } from './combat';
-export type { Modifier, AttackRoll } from './combat';
+export type { AttackRoll } from './combat';
 export type { IndirectAttackRoll } from './mortar';
 export { rollRally } from './rally';
 export { effectiveStats, templateOf, resolveHit } from './hits';
@@ -41,6 +41,22 @@ export {
   rollIndirectFire,
 } from './mortar';
 export { smokeAttackPenalty, smokeDefenseBonus, smokeLosDrBonus, smokeRallyBonus } from './smoke';
+export { rollMinesAttack, minesTargetsFor, minesOwnerSide, destroysBarbedWire } from './obstacles';
+export type { MinesAttackRoll } from './obstacles';
+export {
+  fortificationAt,
+  isOccupying,
+  canOccupy,
+  fortificationDrBonus,
+  hastyDefenseDrBonus,
+  withinBunkerArc,
+  deniedByBunkerMortarRule,
+  destructibleFeatureAt,
+  destroyFeatureAt,
+  rollStructureDestroy,
+  closeCombatStructureAr,
+} from './fortifications';
+export type { StructureDestroyRoll } from './fortifications';
 export { finalScores, computeWinner, otherSide, vpLeader, vpMargin, gainVp } from './victory';
 export {
   AXIAL_DIRECTIONS,

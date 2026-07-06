@@ -8,7 +8,8 @@
  * at least `cost` CAPs available.
  */
 import { HIT_MARKERS } from '../data/hitMarkers';
-import { attackContext } from './combat';
+import { attackContext, closeCombatContext } from './combat';
+import { canOccupy, fortificationAt, isOccupying } from './fortifications';
 import { idOf, neighbors, parseHexId } from './hex';
 import { effectiveStats, templateOf } from './hits';
 import { bestSpotterFor, directFireZone, indirectFireZone } from './mortar';
@@ -78,6 +79,12 @@ export function modifiedActionCost(state: GameState, action: Action): number | n
         : effectiveStats(state, u).apToFire;
       return base + stress(u);
     }
+    case 'HASTY_DEFENSE': {
+      const u = state.units[action.unitId];
+      return u ? 5 + stress(u) : null;
+    }
+    case 'REMOVE_HASTY_DEFENSE':
+      return 0;
     default:
       return null;
   }
@@ -105,9 +112,25 @@ export function legalActionsForUnit(state: GameState, unitId: UnitId): Action[] 
 
   const actions: Action[] = [];
   const eff = effectiveStats(state, unit);
+  const tmpl = templateOf(state, unit);
   // A Transported Unit rides along with its Vehicle's Move — it may not Move,
   // Pivot, or Attack on its own, but may still Rally, Stall, or Unload (§15.8).
   const carried = !!unit.carriedBy;
+
+  // §17.2: may this Unit occupy a live Fortification on `hexId`? Mirrors
+  // `fortifications.ts`'s `canOccupy`, but for a hypothetical destination Hex
+  // rather than the Unit's current one (that function assumes `unit.hexId`).
+  const canOccupyHex = (hexId: string): boolean => {
+    const hex = state.hexes[hexId];
+    const fort = hex && fortificationAt(hex);
+    if (!fort) return false;
+    if (tmpl.kind === 'vehicle') return false;
+    if (fort.kind === 'trench' && tmpl.kind === 'gun') return false;
+    const enemyOccupies = Object.values(state.units).some(
+      (u) => u.hexId === hexId && u.side !== unit.side && u.occupyingFortification,
+    );
+    return !enemyOccupies;
+  };
 
   if (eff.canMove && !carried) {
     for (const n of neighbors(parseHexId(unit.hexId))) {
@@ -117,10 +140,22 @@ export function legalActionsForUnit(state: GameState, unitId: UnitId): Action[] 
       if (mc.ap == null) continue;
       if (!actionable(mc.ap)) continue;
       actions.push({ type: 'MOVE', unitId, toHexId, ...cr(mc.ap) });
+      // §17.2/17.3: the same Move may occupy the destination Hex's
+      // Trench/Bunker on arrival — a distinct legal action from the plain
+      // "move here, don't occupy" one above, since occupying is optional.
+      if (canOccupyHex(toHexId)) {
+        actions.push({ type: 'MOVE', unitId, toHexId, occupyFortification: true, ...cr(mc.ap) });
+      }
+    }
+    // §17.3 (2nd paragraph): occupy this Hex's Fortification from within,
+    // ignoring Difficult Terrain (a same-hex "Move").
+    if (!isOccupying(state, unit) && canOccupy(state, unit)) {
+      const occupyCost = eff.move;
+      if (actionable(occupyCost)) {
+        actions.push({ type: 'MOVE', unitId, toHexId: unit.hexId, occupyFortification: true, ...cr(occupyCost) });
+      }
     }
   }
-
-  const tmpl = templateOf(state, unit);
   // §16.1: Wagons ('none') may not attack at all; Trucks ('closeCombatOnly')
   // may only attack in Close Combat, never with ranged FIRE.
   if (eff.canFire && !carried && tmpl.attackMode !== 'none') {
@@ -132,12 +167,26 @@ export function legalActionsForUnit(state: GameState, unitId: UnitId): Action[] 
         if (actionable(eff.apToFire)) {
           actions.push({ type: 'CLOSE_COMBAT', attackerId: unitId, targetId: target.id, ...cr(eff.apToFire) });
         }
+        // §18.0: a Flamethrower-capable Unit may choose to Close Combat with
+        // its Flamethrower instead — a distinct, separately-legal action.
+        if (tmpl.hasFlamethrower && closeCombatContext(state, unit, target, 0, true).legal && actionable(eff.apToFire)) {
+          actions.push({ type: 'CLOSE_COMBAT', attackerId: unitId, targetId: target.id, useFlamethrower: true, ...cr(eff.apToFire) });
+        }
       } else if (tmpl.attackMode !== 'closeCombatOnly') {
         const ctx = attackContext(state, unit, target);
         if (ctx.legal) {
           // §16.2: a Turreted Vehicle firing outside its Arc pays +2AP.
           const cost = eff.apToFire + (ctx.outOfArc && tmpl.turreted ? 2 : 0);
           if (actionable(cost)) actions.push({ type: 'FIRE', attackerId: unitId, targetId: target.id, ...cr(cost) });
+        }
+        // §18.0: same idea for ranged Fire (Flamethrower Max Range 1) — a
+        // separate legality check since its range/arc math differs (fixed
+        // Range 1 instead of the Unit's own Range stat).
+        if (tmpl.hasFlamethrower) {
+          const flameCtx = attackContext(state, unit, target, 0, 0, true);
+          if (flameCtx.legal && actionable(eff.apToFire)) {
+            actions.push({ type: 'FIRE', attackerId: unitId, targetId: target.id, useFlamethrower: true, ...cr(eff.apToFire) });
+          }
         }
       }
     }
@@ -166,9 +215,11 @@ export function legalActionsForUnit(state: GameState, unitId: UnitId): Action[] 
   // Fire Smoke (§14.0): unlike an Attack, this targets terrain, not a Unit —
   // "any Hex except Water," occupied or not (e.g. to screen your own advance).
   if (eff.canFire && !carried && tmpl.attackMode !== 'none' && tmpl.canFireSmoke) {
+    // §18.1: a Pioneer's Fire Smoke is capped to a max Range of 1 Hex.
+    const smokeMaxRange = tmpl.pioneer ? 1 : undefined;
     for (const targetHexId of Object.keys(state.hexes)) {
       if (state.hexes[targetHexId]!.terrain === 'water') continue;
-      const dz = directFireZone(state, unit, targetHexId, tmpl.minRange ?? 0);
+      const dz = directFireZone(state, unit, targetHexId, tmpl.minRange ?? 0, smokeMaxRange);
       if (dz.legal) {
         if (actionable(eff.apToFire))
           actions.push({ type: 'FIRE_SMOKE', unitId, targetHexId, ...cr(eff.apToFire) });
@@ -192,12 +243,21 @@ export function legalActionsForUnit(state: GameState, unitId: UnitId): Action[] 
     if (!enemyHere) actions.push({ type: 'RALLY', unitId, ...cr(RALLY_AP_COST) });
   }
 
-  if (eff.canPivot && !carried) {
+  // §17.5: a Bunker occupant's facing is locked — no Pivot at all.
+  if (eff.canPivot && !carried && isOccupying(state, unit)?.kind !== 'bunker') {
     for (let f = 0; f < 6; f++) {
       if (f !== unit.facing && actionable(pivotCost()))
         actions.push({ type: 'PIVOT', unitId, facing: f as Facing, ...cr(pivotCost()) });
     }
   }
+
+  // Hasty Defense (§17.6): a Foot Unit (not Field Gun/Vehicle), not
+  // Transported, without one already, may spend 5AP to build one on itself.
+  if (!carried && tmpl.kind !== 'vehicle' && tmpl.kind !== 'gun' && !unit.hastyDefense && actionable(5)) {
+    actions.push({ type: 'HASTY_DEFENSE', unitId, ...cr(5) });
+  }
+  // §17.6: free at-will removal, always legal whenever the marker is up.
+  if (unit.hastyDefense) actions.push({ type: 'REMOVE_HASTY_DEFENSE', unitId });
 
   // Stall (§2.8): the Unit does nothing but makes a Spent Check and is Stressed.
   if (actionable(1)) actions.push({ type: 'STALL', unitId, ...cr(1) });

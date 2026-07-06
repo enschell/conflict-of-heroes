@@ -15,11 +15,21 @@
 import { HIT_MARKERS, isArmoredMarker } from '../data/hitMarkers';
 import { applyUnitLoss, clampCapMod, reduceActionCost } from './cap';
 import { attackContext, closeCombatContext, rollCloseCombat, rollStackFire } from './combat';
+import {
+  canOccupy,
+  closeCombatStructureAr,
+  destroyFeatureAt,
+  destructibleFeatureAt,
+  fortificationAt,
+  isOccupying,
+  rollStructureDestroy,
+} from './fortifications';
 import { isInFrontArc, parseHexId } from './hex';
 import { effectiveStats, resolveHit, returnHitToPile, templateOf } from './hits';
 import { groupConnected, groupStress, isValidSupporter } from './groups';
 import { directFireZone, indirectFireZone, rollIndirectFire } from './mortar';
 import { directionTo, moveCost, pivotCost, planVehicleMove } from './movement';
+import { destroysBarbedWire, minesOwnerSide, minesTargetsFor, rollMinesAttack } from './obstacles';
 import { RALLY_AP_COST, rollRally } from './rally';
 import { legalEntryHexes } from './reinforcements';
 import { spentCheck } from './spent';
@@ -194,6 +204,47 @@ export function reduce(state: GameState, action: Action): ReduceResult {
     }
   };
 
+  /**
+   * §17.10: resolve a Mines Attack against every qualifying Unit id in
+   * `hexId` (see `minesTargetsFor` — no-op if the Hex has no live Mines),
+   * using the caller-supplied per-unit CAP mod (chosen by the Mines' owning
+   * side via the store's pre-dispatch confirm dialog).
+   */
+  const resolveMines = (hexId: string, unitIds: string[], capMods?: Record<string, number>) => {
+    const owner = minesOwnerSide(next, hexId);
+    // §18.1: a Pioneer, on foot, may enter a Mines Hex without triggering a
+    // Mines Attack at all — excluded from the target list entirely, not just
+    // given favorable odds.
+    const eligibleIds = unitIds.filter((id) => {
+      const u = next.units[id];
+      return !u || !templateOf(next, u).pioneer;
+    });
+    for (const { unitId, hitNumber } of minesTargetsFor(next, hexId, eligibleIds)) {
+      const target = next.units[unitId];
+      if (!target) continue;
+      // The Mines' owning side pays for its own Hit Number modification
+      // (§17.10) — the store's CAP-choice dialog already gates the player to
+      // an affordable mod, but clamp defensively here too rather than trust
+      // the UI alone (CLAUDE.md §3: legality lives in the engine).
+      let mod = capMods?.[unitId] ?? 0;
+      if (mod !== 0 && owner) {
+        const ownerPlayer = next.players[owner];
+        const affordable = Math.min(Math.abs(mod), ownerPlayer.capCurrent);
+        mod = Math.sign(mod) * affordable;
+        ownerPlayer.capCurrent -= affordable;
+      }
+      const roll = rollMinesAttack(next, target, hitNumber, mod);
+      next.rng = roll.rng;
+      log(
+        'mines',
+        `${target.id} triggers a Mines Attack: rolled ${roll.dice[0]}+${roll.dice[1]}=${roll.total} ` +
+          `vs Hit# ${roll.hitNumber} -> ${roll.critical ? 'CRITICAL' : roll.hit ? 'hit' : 'miss'}`,
+        target.side,
+      );
+      if (roll.hit) applyHit(target, roll.critical, roll.fpColor);
+    }
+  };
+
   // -- action handlers ------------------------------------------------------
 
   /** The foot Unit currently loaded on `vehicleId`, if any (§15.6). */
@@ -205,6 +256,35 @@ export function reduce(state: GameState, action: Action): ReduceResult {
     if (!unit) return deny('no such unit');
     if (unit.side !== next.currentSide) return deny('not your turn');
     if (unit.carriedBy) return deny('a transported Unit cannot move on its own (§15.8)');
+
+    // §17.3 (2nd paragraph): a Unit that begins its Turn in a Hex with a
+    // friendly/unoccupied Fortification, but isn't occupying it, may spend a
+    // Move Action to occupy it in place — ignoring Difficult Terrain Penalties
+    // (there's no hex transition here to charge terrain for in the first place).
+    if (a.toHexId === unit.hexId) {
+      if (unit.occupyingFortification) return deny('already occupying this Hex’s Fortification');
+      if (!a.occupyFortification || !canOccupy(next, unit))
+        return deny('nothing to occupy in this Hex (§17.3)');
+      const eff = effectiveStats(next, unit);
+      const player = next.players[unit.side];
+      const { cost, capsSpent } = planCost(unit, eff.move, a.capCostReduce ?? 0);
+      if (unit.status === 'spent' && cost > 0)
+        return deny('a Spent unit must spend CAPs to reduce its Action Cost to 0AP (§3.4)');
+      if (player.capCurrent < capsSpent) return deny('not enough CAP');
+      player.capCurrent -= capsSpent;
+      if (unit.hastyDefense) {
+        unit.hastyDefense = false;
+        log('hastyDefense', `${unit.id}'s Hasty Defense is stripped by moving (§17.6)`, unit.side);
+      }
+      unit.occupyingFortification = true;
+      // §17.5: a Bunker occupant must face the same direction as the Bunker.
+      const fort = fortificationAt(next.hexes[unit.hexId]!);
+      if (fort?.kind === 'bunker' && fort.facing != null) unit.facing = fort.facing;
+      log('fortification', `${unit.id} occupies the Fortification at ${unit.hexId} (§17.3)`, unit.side);
+      afterAction(unit, cost);
+      return finish();
+    }
+
     const tmpl = templateOf(next, unit);
     const path = a.path && a.path.length ? a.path : [a.toHexId];
 
@@ -212,12 +292,14 @@ export function reduce(state: GameState, action: Action): ReduceResult {
     let base: number;
     let finalHexId: string;
     let finalFacing: Facing;
+    let wireApRolled: number | undefined; // §17.8: revealed in the log once resolved, not before
     if (tmpl.kind === 'vehicle') {
       const plan = planVehicleMove(next, unit, path);
       if (plan.ap == null) return deny(plan.reason ?? 'illegal move');
       base = plan.ap;
       finalHexId = plan.finalHexId;
       finalFacing = plan.finalFacing;
+      if (plan.rng) next.rng = plan.rng;
     } else {
       if (path.length !== 1) return deny('only vehicles may take Bonus Moves');
       const mc = moveCost(next, unit, path[0]!);
@@ -227,6 +309,12 @@ export function reduce(state: GameState, action: Action): ReduceResult {
       const dir = directionTo(unit.hexId, finalHexId);
       const forward = isInFrontArc(parseHexId(unit.hexId), unit.facing, parseHexId(finalHexId));
       finalFacing = forward && dir >= 0 ? (dir as Facing) : unit.facing;
+      // §17.8: Barbed Wire's 1d6 Move Cost roll (`moveCost` itself rolls the
+      // die, matching the "compute then commit the RNG" pattern used by
+      // combat's rollStackFire etc.). The result is hidden from the pre-move
+      // popup (Board.tsx) but revealed here once the move actually commits.
+      if (mc.rng) next.rng = mc.rng;
+      wireApRolled = mc.mods?.find((m) => m.random)?.value;
     }
     // §4.5: the mover may pick a facing explicitly; otherwise the direction of
     // travel above is just a default — either way it's still freely correctable
@@ -240,6 +328,15 @@ export function reduce(state: GameState, action: Action): ReduceResult {
     if (player.capCurrent < capsSpent) return deny('not enough CAP');
     player.capCurrent -= capsSpent;
 
+    // §17.6: Moving strips this Unit's own Hasty Defense (own-unit only — a
+    // dragged passenger cannot itself hold one, §17.6/doLoad's decision #3).
+    if (unit.hastyDefense) {
+      unit.hastyDefense = false;
+      log('hastyDefense', `${unit.id}'s Hasty Defense is stripped by moving (§17.6)`, unit.side);
+    }
+    // §17.3: moving away from a Hex always exits any Fortification occupied there.
+    unit.occupyingFortification = false;
+
     unit.hexId = finalHexId;
     unit.facing = finalFacing;
     grantFacingChoice(unit.id);
@@ -252,8 +349,37 @@ export function reduce(state: GameState, action: Action): ReduceResult {
       grantFacingChoice(passenger.id);
     }
     const bonus = path.length > 1 ? ` (+${path.length - 1} bonus)` : '';
-    log('move', `${unit.id} -> ${finalHexId}${bonus} (cost ${cost})`, unit.side);
+    const wireNote = wireApRolled != null ? `, incl. +${wireApRolled}AP, Barbed Wire (§17.8)` : '';
+    log('move', `${unit.id} -> ${finalHexId}${bonus} (cost ${cost}${wireNote})`, unit.side);
     updateVictoryHexControl(next);
+
+    // §17.8: a Tracked Vehicle moving into Barbed Wire destroys it.
+    const destHex = next.hexes[finalHexId]!;
+    if (tmpl.kind === 'vehicle' && destroysBarbedWire(destHex, tmpl.propulsion ?? 'tracked')) {
+      destHex.features.obstacle!.destroyed = true;
+      log('obstacle', `Barbed Wire at ${finalHexId} destroyed by ${unit.id}`, unit.side);
+    }
+    // §17.10: Mines attack every Unit that just moved into the Hex (incl. a
+    // Transported passenger riding along). Note: only the FINAL Hex of a
+    // multi-hex vehicle Bonus-Move path is checked here — a path that merely
+    // passes THROUGH a Mines Hex without ending there isn't handled yet.
+    resolveMines(finalHexId, passenger ? [unit.id, passenger.id] : [unit.id], a.minesCapMods);
+
+    // §17.2/17.3: occupy the destination Hex's Fortification — entering never
+    // auto-occupies, it's the player's choice (`a.occupyFortification`).
+    if (a.occupyFortification && canOccupy(next, unit)) {
+      unit.occupyingFortification = true;
+      // §17.5: a Bunker occupant must face the same direction as the Bunker —
+      // overrides the free facing-choice window `grantFacingChoice` opened
+      // above, since the Bunker's lock isn't something to freely correct away.
+      const fort = fortificationAt(destHex);
+      if (fort?.kind === 'bunker' && fort.facing != null) {
+        unit.facing = fort.facing;
+        next.pendingFacingChoices = (next.pendingFacingChoices ?? []).filter((id) => id !== unit.id);
+      }
+      log('fortification', `${unit.id} occupies the Fortification at ${finalHexId} (§17.2/17.3)`, unit.side);
+    }
+
     if (passenger) afterGroupAction([unit, passenger], cost);
     else afterAction(unit, cost);
     return finish();
@@ -264,6 +390,10 @@ export function reduce(state: GameState, action: Action): ReduceResult {
     if (!unit) return deny('no such unit');
     if (unit.side !== next.currentSide) return deny('not your turn');
     if (unit.carriedBy) return deny('a transported Unit cannot pivot on its own (§15.8)');
+    // §17.5: a Bunker occupant's facing is locked to the Bunker's — Pivot is
+    // not offered at all (no no-op-pivot allowed).
+    if (isOccupying(next, unit)?.kind === 'bunker')
+      return deny('a Bunker occupant may not Pivot — facing is locked to the Bunker (§17.5)');
     const eff = effectiveStats(next, unit);
     if (!eff.canPivot) return deny('unit cannot pivot');
     const player = next.players[unit.side];
@@ -273,6 +403,11 @@ export function reduce(state: GameState, action: Action): ReduceResult {
     if (player.capCurrent < capsSpent) return deny('not enough CAP');
     player.capCurrent -= capsSpent;
     unit.facing = a.facing;
+    // §17.6: Pivoting also strips this Unit's own Hasty Defense.
+    if (unit.hastyDefense) {
+      unit.hastyDefense = false;
+      log('hastyDefense', `${unit.id}'s Hasty Defense is stripped by pivoting (§17.6)`, unit.side);
+    }
     // §15.7: a loaded Unit sits "on top of" its Vehicle, facing the same
     // direction — so pivoting the Vehicle pivots its passenger along with it
     // (the rules don't give the passenger an independent facing choice here;
@@ -280,6 +415,9 @@ export function reduce(state: GameState, action: Action): ReduceResult {
     const passenger = passengerOf(unit.id);
     if (passenger) passenger.facing = a.facing;
     log('pivot', `${unit.id} pivots to ${a.facing} (cost ${cost})`, unit.side);
+    // §17.10: Mines attack the Unit Pivoting in Place (not its passenger,
+    // which isn't itself "Pivoting" — it just rides along).
+    resolveMines(unit.hexId, [unit.id], a.minesCapMods);
     if (passenger) afterGroupAction([unit, passenger], cost);
     else afterAction(unit, cost);
     return finish();
@@ -315,7 +453,8 @@ export function reduce(state: GameState, action: Action): ReduceResult {
     if (attackerTmpl.attackMode === 'none' || attackerTmpl.attackMode === 'closeCombatOnly')
       return deny('this Unit cannot make a ranged Attack (§16.1)');
     const diceMod = clampCapMod(a.capDiceMod ?? 0);
-    const ctx = attackContext(next, attacker, target, diceMod);
+    const useFlamethrower = a.useFlamethrower ?? false;
+    const ctx = attackContext(next, attacker, target, diceMod, 0, useFlamethrower);
     if (!ctx.legal) return deny(ctx.reason ?? 'illegal attack');
 
     const player = next.players[attacker.side];
@@ -331,13 +470,13 @@ export function reduce(state: GameState, action: Action): ReduceResult {
 
     // §7.5.1: one shot at a hex resolves against every enemy stacked there, each
     // with its own roll, for the single fire cost already paid above.
-    const stack = rollStackFire(next, attacker, target.hexId, diceMod);
+    const stack = rollStackFire(next, attacker, target.hexId, diceMod, 0, useFlamethrower);
     next.rng = stack.rng;
     for (const { targetId, roll } of stack.rolls) {
       log(
         'fire',
-        `${attacker.id} fires at ${targetId}: rolled ${roll.dice[0]}+${roll.dice[1]}=` +
-          `${roll.total} vs Hit# ${roll.hitNumber} (AR ${roll.ar} / DR ${roll.dr})` +
+        `${attacker.id} fires${useFlamethrower ? ' (Flamethrower, §18.0)' : ''} at ${targetId}: rolled ` +
+          `${roll.dice[0]}+${roll.dice[1]}=${roll.total} vs Hit# ${roll.hitNumber} (AR ${roll.ar} / DR ${roll.dr})` +
           `${roll.isFlank ? ' (flank)' : ''} -> ` +
           `${roll.critical ? 'CRITICAL' : roll.hit ? 'hit' : 'miss'}`,
         attacker.side,
@@ -347,20 +486,75 @@ export function reduce(state: GameState, action: Action): ReduceResult {
         if (t) applyHit(t, roll.critical, roll.fpColor);
       }
     }
+    // §17.11: ranged Fire also resolves a second roll against the target Hex's
+    // destructible Fortification/Obstacle, if any — automatic, not a player
+    // choice, under this SAME Spent Check (one already-paid-for cost above).
+    // Reuses the SAME AR (`ctx.ar`) and CAP dice mod the occupant roll(s) just
+    // used; the structure's own DR is a flat `destroyDr`, no terrain/smoke.
+    const targetHex = next.hexes[target.hexId];
+    const feature = targetHex && destructibleFeatureAt(targetHex);
+    if (feature) {
+      const structRoll = rollStructureDestroy(next, ctx.ar, feature.destroyDr!, diceMod);
+      next.rng = structRoll.rng;
+      log(
+        'fireStructure',
+        `${attacker.id}'s Fire also targets the Fortification/Obstacle at ${target.hexId}: rolled ` +
+          `${structRoll.dice[0]}+${structRoll.dice[1]}=${structRoll.total} vs Hit# ${structRoll.hitNumber} ` +
+          `(AR ${ctx.ar}) -> ${structRoll.hit ? 'DESTROYED' : 'survives'}`,
+        attacker.side,
+      );
+      if (structRoll.hit) destroyFeatureAt(targetHex!);
+    }
     afterAction(attacker, cost);
     return finish();
   };
 
   const doCloseCombat = (a: Extract<Action, { type: 'CLOSE_COMBAT' }>): ReduceResult => {
     const attacker = next.units[a.attackerId];
-    const target = next.units[a.targetId];
-    if (!attacker || !target) return deny('no such unit');
+    if (!attacker) return deny('no such unit');
     if (attacker.side !== next.currentSide) return deny('not your turn');
     if (attacker.carriedBy) return deny('a transported Unit cannot attack (§15.8)');
     // §16.1: Wagons may not attack at all (Trucks may still Close Combat).
     if (templateOf(next, attacker).attackMode === 'none') return deny('this Unit cannot Attack (§16.1)');
+
+    // §17.12: a CC Attack picks ONE target — the occupant Unit or the
+    // Fortification/Obstacle itself, never both (unlike ranged Fire's §17.11
+    // automatic two rolls). A structure targeted by CC gets no Terrain mods.
+    if (a.targetKind === 'structure') {
+      const hex = next.hexes[attacker.hexId];
+      const feature = hex && destructibleFeatureAt(hex);
+      if (!feature) return deny('nothing destructible to Close Combat here (§17.11/17.12)');
+      const diceMod = clampCapMod(a.capDiceMod ?? 0);
+      const { ar } = closeCombatStructureAr(next, attacker);
+      const player = next.players[attacker.side];
+      const eff = effectiveStats(next, attacker);
+      const { cost, capsSpent } = planCost(attacker, eff.apToFire, a.capCostReduce ?? 0);
+      if (attacker.status === 'spent' && cost > 0)
+        return deny('a Spent unit must spend CAPs to reduce its Action Cost to 0AP (§3.4)');
+      const capNeeded = capsSpent + Math.abs(diceMod);
+      if (player.capCurrent < capNeeded) return deny('not enough CAP for close combat');
+      player.capCurrent -= capNeeded;
+
+      const roll = rollStructureDestroy(next, ar, feature.destroyDr!, diceMod);
+      next.rng = roll.rng;
+      log(
+        'ccStructure',
+        `${attacker.id} close-combats the Fortification/Obstacle at ${attacker.hexId}: rolled ` +
+          `${roll.dice[0]}+${roll.dice[1]}=${roll.total} vs Hit# ${roll.hitNumber} (AR ${ar}) -> ` +
+          `${roll.hit ? 'DESTROYED' : 'survives'}`,
+        attacker.side,
+      );
+      if (roll.hit) destroyFeatureAt(hex!);
+      resolveMines(attacker.hexId, [attacker.id], a.minesCapMods);
+      afterAction(attacker, cost);
+      return finish();
+    }
+
+    const target = next.units[a.targetId!];
+    if (!target) return deny('no such unit');
     const diceMod = clampCapMod(a.capDiceMod ?? 0);
-    const ctx = closeCombatContext(next, attacker, target);
+    const useFlamethrower = a.useFlamethrower ?? false;
+    const ctx = closeCombatContext(next, attacker, target, 0, useFlamethrower);
     if (!ctx.legal) return deny(ctx.reason ?? 'illegal close combat');
 
     const player = next.players[attacker.side];
@@ -372,16 +566,19 @@ export function reduce(state: GameState, action: Action): ReduceResult {
     if (player.capCurrent < capNeeded) return deny('not enough CAP for close combat');
     player.capCurrent -= capNeeded;
 
-    const roll = rollCloseCombat(next, attacker, target, diceMod);
+    const roll = rollCloseCombat(next, attacker, target, diceMod, 0, useFlamethrower);
     next.rng = roll.rng;
     log(
       'cc',
-      `${attacker.id} close-combats ${target.id}: rolled ${roll.dice[0]}+${roll.dice[1]}=` +
-        `${roll.total} vs flank Hit# ${roll.hitNumber} (AR ${roll.ar} / DR ${roll.dr}) -> ` +
+      `${attacker.id} close-combats${useFlamethrower ? ' (Flamethrower, §18.0)' : ''} ${target.id}: rolled ` +
+        `${roll.dice[0]}+${roll.dice[1]}=${roll.total} vs flank Hit# ${roll.hitNumber} (AR ${roll.ar} / DR ${roll.dr}) -> ` +
         `${roll.critical ? 'CRITICAL' : roll.hit ? 'hit' : 'miss'}`,
       attacker.side,
     );
     if (roll.hit) applyHit(target, roll.critical, roll.fpColor);
+    // §17.10: Mines attack the Unit initiating Close Combat here — NOT the
+    // Unit defending it (explicitly excluded, since it isn't "initiating").
+    resolveMines(attacker.hexId, [attacker.id], a.minesCapMods);
     afterAction(attacker, cost);
     return finish();
   };
@@ -433,10 +630,12 @@ export function reduce(state: GameState, action: Action): ReduceResult {
     const tmpl = templateOf(next, unit);
     if (!tmpl.canFireSmoke) return deny('this Unit cannot Fire Smoke (§14.0)');
     const minRange = tmpl.minRange ?? 0;
+    // §18.1: a Pioneer's Fire Smoke is capped to a max Range of 1 Hex.
+    const smokeMaxRange = tmpl.pioneer ? 1 : undefined;
     const indirect = a.spotterHexId != null;
     const zone = indirect
       ? indirectFireZone(next, unit, a.targetHexId, a.spotterHexId!, minRange)
-      : directFireZone(next, unit, a.targetHexId, minRange);
+      : directFireZone(next, unit, a.targetHexId, minRange, smokeMaxRange);
     if (!zone.legal) return deny(zone.reason ?? 'illegal Fire Smoke');
 
     const player = next.players[unit.side];
@@ -775,6 +974,13 @@ export function reduce(state: GameState, action: Action): ReduceResult {
     unit.hexId = vehicle.hexId;
     unit.facing = vehicle.facing;
     unit.carriedBy = vehicle.id;
+    // §17.6: a transported Unit cannot hold a Hasty Defense (it's normally
+    // denied at build time — see doHastyDefense — but strip it here too for
+    // the edge case of a Unit that built one, then was Loaded afterward).
+    if (unit.hastyDefense) {
+      unit.hastyDefense = false;
+      log('hastyDefense', `${unit.id}'s Hasty Defense is stripped by loading onto ${vehicle.id} (§17.6)`, unit.side);
+    }
     log('load', `${unit.id} loads onto ${vehicle.id} (cost ${cost})`, unit.side);
     afterGroupAction(members, cost); // §15.7 step 3: one Group Spent Check
     return finish();
@@ -880,6 +1086,37 @@ export function reduce(state: GameState, action: Action): ReduceResult {
     return finish();
   };
 
+  /** §17.6: a Foot Unit spends 5AP to build a Hasty Defense on itself. */
+  const doHastyDefense = (a: Extract<Action, { type: 'HASTY_DEFENSE' }>): ReduceResult => {
+    const unit = next.units[a.unitId];
+    if (!unit) return deny('no such unit');
+    if (unit.side !== next.currentSide) return deny('not your turn');
+    if (unit.carriedBy) return deny('a transported Unit cannot build a Hasty Defense (§17.6)');
+    const kind = templateOf(next, unit).kind;
+    if (kind === 'vehicle' || kind === 'gun') return deny('only Foot Units may build a Hasty Defense (§17.6)');
+    if (unit.hastyDefense) return deny('this Unit already has a Hasty Defense');
+    const player = next.players[unit.side];
+    const { cost, capsSpent } = planCost(unit, 5, a.capCostReduce ?? 0);
+    if (unit.status === 'spent' && cost > 0)
+      return deny('a Spent unit must spend CAPs to reduce its Action Cost to 0AP (§3.4)');
+    if (player.capCurrent < capsSpent) return deny('not enough CAP');
+    player.capCurrent -= capsSpent;
+    unit.hastyDefense = true;
+    log('hastyDefense', `${unit.id} builds a Hasty Defense (§17.6)`, unit.side);
+    afterAction(unit, cost);
+    return finish();
+  };
+
+  /** §17.6: "a player may freely remove their Hasty Defense at will" — 0AP, no Spent Check, no CAP check. */
+  const doRemoveHastyDefense = (a: Extract<Action, { type: 'REMOVE_HASTY_DEFENSE' }>): ReduceResult => {
+    const unit = next.units[a.unitId];
+    if (!unit) return deny('no such unit');
+    if (!unit.hastyDefense) return deny('this Unit has no Hasty Defense to remove');
+    unit.hastyDefense = false;
+    log('hastyDefense', `${unit.id} freely removes its Hasty Defense (§17.6)`, unit.side);
+    return finish();
+  };
+
   // -- dispatch -------------------------------------------------------------
 
   switch (action.type) {
@@ -913,6 +1150,10 @@ export function reduce(state: GameState, action: Action): ReduceResult {
       return doUnload(action);
     case 'ENTER':
       return doEnter(action);
+    case 'HASTY_DEFENSE':
+      return doHastyDefense(action);
+    case 'REMOVE_HASTY_DEFENSE':
+      return doRemoveHastyDefense(action);
     case 'PASS':
       return doPass();
     default:

@@ -6,11 +6,20 @@
 import {
   attackContext,
   closeCombatContext,
+  destructibleFeatureAt,
   legalActionsForUnit,
   moveCost,
 } from '../engine';
 import { useGame } from '../state/store';
-import { fireOdds, pct } from './odds';
+import { fireOdds, isHopelessShot, pct } from './odds';
+
+const FORTIFICATION_NAMES: Record<string, string> = {
+  trench: 'Trench',
+  bunker: 'Bunker',
+  barbedWire: 'Barbed Wire',
+  mines: 'Mines',
+  roadBlock: 'Road Block',
+};
 
 export function ActionChooser() {
   const game = useGame((s) => s.game);
@@ -19,6 +28,7 @@ export function ActionChooser() {
   const move = useGame((s) => s.move);
   const fire = useGame((s) => s.fire);
   const closeCombat = useGame((s) => s.closeCombat);
+  const closeCombatStructure = useGame((s) => s.closeCombatStructure);
   const load = useGame((s) => s.load);
   const unload = useGame((s) => s.unload);
   const indirectFire = useGame((s) => s.indirectFire);
@@ -44,10 +54,17 @@ export function ActionChooser() {
   // CAP-gated via `acts` — they're not part of this fix.
   const moveAp = !unit.carriedBy ? moveCost(game, unit, hexId).ap : null;
   const canMove = moveAp != null;
+  // §2.6: Stress adds +1AP to the next Action Cost — `moveCost()` only knows
+  // the Move's own terrain/backwards/wall component, so add it here for
+  // display (same gap as Board.tsx's move-cost popup had).
+  const moveApDisplay = moveAp != null ? moveAp + (unit.stressed ? 1 : 0) : null;
+  // §3.2: a shot with no chance to Hit even with the max 2-CAP dice mod is
+  // excluded here too — same UI convenience as store.ts's hexClick, not a
+  // rules illegality.
   const fireCtx = enemy && !unit.carriedBy ? attackContext(game, unit, enemy) : null;
-  const canFire = !!fireCtx?.legal;
+  const canFire = !!fireCtx?.legal && !isHopelessShot(fireCtx.hitNumber);
   const ccCtx = enemy && !unit.carriedBy ? closeCombatContext(game, unit, enemy) : null;
-  const canCC = !!ccCtx?.legal;
+  const canCC = !!ccCtx?.legal && !isHopelessShot(ccCtx.hitNumber);
   const indirectAct = acts.find((a) => a.type === 'INDIRECT_FIRE' && a.targetHexId === hexId);
   const smokeAct = acts.find((a) => a.type === 'FIRE_SMOKE' && a.targetHexId === hexId);
   const loadAct =
@@ -60,6 +77,20 @@ export function ActionChooser() {
   const carrier = unit.carriedBy ? game.units[unit.carriedBy] : undefined;
   const sameHexUnload =
     carrier && hexId === carrier.hexId ? acts.find((a) => a.type === 'UNLOAD' && a.toHexId === hexId) : undefined;
+
+  // §17.2/17.3: a Move into (or, same-hex, occupy-from-within) this Hex may
+  // also occupy its Trench/Bunker — a separate choice from a plain Move here.
+  const occupyAct = acts.find(
+    (a): a is Extract<typeof a, { type: 'MOVE' }> =>
+      a.type === 'MOVE' && a.toHexId === hexId && a.occupyFortification === true,
+  );
+  const occupyKind = game.hexes[hexId]?.features.fortification?.kind;
+  // §17.12: CC against the Fortification/Obstacle itself — only in the Unit's
+  // own Hex, and mutually exclusive with attacking an occupant there.
+  const structureFeature =
+    hexId === unit.hexId && !unit.carriedBy ? destructibleFeatureAt(game.hexes[hexId]!) : undefined;
+  const structureKind =
+    game.hexes[hexId]?.features.fortification?.kind ?? game.hexes[hexId]?.features.obstacle?.kind;
 
   const fireHit = fireCtx?.legal ? pct(fireOdds(fireCtx.ar, fireCtx.dr).hit) : null;
   const ccHit = ccCtx?.legal ? pct(fireOdds(ccCtx.ar, ccCtx.dr).hit) : null;
@@ -74,7 +105,17 @@ export function ActionChooser() {
       <div className="unit-picker__head">Action @ {hexId}</div>
       {canMove && (
         <button className="unit-picker__row" onClick={() => run(() => move(unit.id, hexId))}>
-          ➜ Move here{moveAp != null ? ` (${moveAp} AP)` : ''}
+          ➜ Move here{moveApDisplay != null ? ` (${moveApDisplay} AP)` : ''}
+        </button>
+      )}
+      {occupyAct && (
+        <button className="unit-picker__row" onClick={() => run(() => move(unit.id, hexId, true))}>
+          🛡 Move & occupy {occupyKind ? FORTIFICATION_NAMES[occupyKind] : 'Fortification'} (§17.2/17.3)
+        </button>
+      )}
+      {structureFeature && (
+        <button className="unit-picker__row cc-btn" onClick={() => run(() => closeCombatStructure(unit.id))}>
+          ⚔ Close combat the {structureKind ? FORTIFICATION_NAMES[structureKind] : 'Fortification/Obstacle'} (§17.12)
         </button>
       )}
       {canFire && enemy && (

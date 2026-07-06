@@ -28,7 +28,10 @@ function buildHex(def: FirefightDef['hexes'][number]): Hex {
     elevation: def.elevation ?? 0,
     walls,
     road: def.road ?? false,
-    features: {},
+    features: {
+      obstacle: def.obstacle ? { ...def.obstacle, destroyed: false } : undefined,
+      fortification: def.fortification ? { ...def.fortification, destroyed: false } : undefined,
+    },
   };
 }
 

@@ -8,10 +8,14 @@ A personal, browser-based implementation of the Academy Games tactical wargame
   rooms can be added later.
 - **Vertical slice: infantry + vehicles**, **Mission 1 ("Partisans")** playable end-to-end —
   Spent Die/Check, Fresh/Spent + Stress, CAPs, AR/DR combat, Group Actions (incl. Group Close
-  Combat), vehicle movement/combat/transport, and all of Special Units §16 (Turreted, Self-Propelled
-  Guns, Mobile Vehicles, Open-Topped, APCs, Trucks/Wagons, Field Guns), and Mortars + Smoke are all
-  built. OBA, hidden units, hills, and fortifications come later (see `CLAUDE.md` §8) — Hidden Units
-  specifically is deferred to online play, not hotseat.
+  Combat), vehicle movement/combat/transport, all of Special Units §16 (Turreted, Self-Propelled
+  Guns, Mobile Vehicles, Open-Topped, APCs, Trucks/Wagons, Field Guns), Mortars + Smoke,
+  Hills/Elevation §12 (move cost, elevation-aware LOS incl. Plateau Effect/Blind Spots, Elevation
+  Combat Bonus), Fortifications and Obstacles §17 (Barbed Wire, Mines, Road Block, Trenches, Bunkers,
+  Hasty Defenses, and §17.11/17.12 destroying one by Attack), and Flamethrowers + Pioneers §18 are
+  all built. OBA (Battle/Weapon Cards) and hidden units are the only pieces left (see `CLAUDE.md` §8)
+  — Hidden Units specifically is deferred to online play, not hotseat (Mines follow the same
+  always-visible rule for the same reason).
 - **Stack:** Vite + React + TypeScript, client-only. SVG hex board (real pointy-top hexes with
   per-hex artwork). Pure-function rules engine with a seeded RNG (deterministic saves / undo /
   replay).
@@ -39,8 +43,11 @@ npm run play         # optional: interactive hotseat in the terminal (text board
 > `$env:Path = "C:\Program Files\nodejs;" + $env:Path` (Git Bash doesn't have it on PATH).
 
 ## Playing
-Run `npm run dev` and open http://localhost:5173. Select **Start Mission 1** (or the non-canonical
-**Armor Sandbox** to try vehicles), then select one of the current side's units and:
+Run `npm run dev` and open http://localhost:5173. Select **Start Mission 1** (or one of the
+non-canonical test sandboxes — **Armor Sandbox** for vehicles, **Fire Support Sandbox** for mortars/
+smoke, **Hills Sandbox** for elevation, **Obstacles Sandbox** for Barbed Wire/Mines/Road Block,
+**Fortifications Sandbox** for Trenches/Bunkers/Hasty Defenses/Flamethrowers, incl. a German Pioneers
+Squad and a Soviet T-34), then select one of the current side's units and:
 - **Move / fire / close combat / load-unload onto a Vehicle** by clicking the board; if a hex
   offers more than one option (e.g. move *into* an enemy hex vs attack it), a chooser pops up.
 - **Reinforcements** (left sidebar, per side): once a wave's Round arrives, click **Enter now** to
@@ -68,10 +75,14 @@ v3 cutover (Spent Die/Check, Fresh/Spent + Stress, CAP floor 3, AR/DR combat, v3
 no-tie VP) ✅ · M5 Group Actions incl. Group Close Combat ✅ · M6 Vehicles + all of Special Units §16
 ✅ (movement, combat specifics, Transport/Towing, Turreted/SPG/Mobile-Vehicles/Open-Topped/APC/
 Trucks-Wagons/Field-Guns) · Mission 1 reinforcements (§4.12, map-edge/Group entry, manual per-hex
-placement) ✅ · M7 Mortars + Smoke ✅ (OBA deferred pending Cards) ·
-next: M9 hills → M10 fortifications → M11 flamethrowers → M12 cards →
-M13 online multiplayer → M8 hidden units (deferred to online play). See `CLAUDE.md` §8 for the
-full milestone roadmap.
+placement) ✅ · M7 Mortars + Smoke ✅ (OBA deferred pending Cards) · M9 Hills/Elevation §12 ✅
+(move cost, elevation-aware LOS, Elevation Combat Bonus, Hills Sandbox test mission) ·
+M10 Fortifications and Obstacles §17 ✅ (Phase 1: Barbed Wire, Mines — always visible, Road Block;
+Phase 2: Trenches, Bunkers, Hasty Defenses, §17.11/17.12 destroying one by Attack; Fortifications
+Sandbox test mission) · M11 Flamethrowers + Pioneers §18 ✅ (Flamethrower attack profile on Fire/Close
+Combat, Pioneer Mines-immunity + Range-1 Fire Smoke) ·
+next: M12 cards (incl. OBA) → M13 online multiplayer → M8 hidden units (deferred to online play).
+See `CLAUDE.md` §8 for the full milestone roadmap.
 
 A **rules-conformance audit** (`npm run conformance`) self-plays several full games and re-derives
 every move against the rules (0 violations).

@@ -11,6 +11,7 @@
  *  static Attack/Defense Ratings AR/DR and compares the dice to DR − AR.)
  */
 import { distance, idOf, lineDraw, parseHexId } from './hex';
+import { deniedByBunkerMortarRule, fortificationDrBonus, hastyDefenseDrBonus, isOccupying } from './fortifications';
 import { effectiveStats, templateOf } from './hits';
 import { hasLOS, inArc } from './los';
 import { fpRangeModifier, rangeBand, type RangeBand } from './range';
@@ -18,20 +19,7 @@ import { roll2d6 } from './rng';
 import { smokeAttackPenalty, smokeDefenseBonus, smokeLosDrBonus } from './smoke';
 import { terrainDM, terrainOf } from './terrain';
 import { directionTo } from './movement';
-import type { DRColor, GameState, RngState, SideId, Unit, UnitId } from './types';
-
-/**
- * One line-item contributing to an AR or DR total — for the dice-roller UI, so
- * a player can see not just the number but why it's there and where the rule
- * lives. `value` is signed (already the sign it contributes with); a `value`
- * of 0 is still worth listing when it explains an EXPECTED bonus that didn't
- * apply (e.g. Air Burst zeroing Heavy Woods, §13.9).
- */
-export interface Modifier {
-  label: string;
-  value: number;
-  section: string;
-}
+import type { DRColor, GameState, Modifier, RngState, SideId, Unit, UnitId } from './types';
 
 /** +1 DM if the shot crosses a wall in/bordering the target hex (§5.0.2). */
 export function wallDMForFire(state: GameState, attackerHexId: string, targetHexId: string): number {
@@ -73,6 +61,24 @@ export function apcTransportBonus(state: GameState, target: Unit): number {
   if (!target.carriedBy) return 0;
   const carrier = state.units[target.carriedBy];
   return carrier && templateOf(state, carrier).apcTransport ? 2 : 0;
+}
+
+/**
+ * §12.3 Elevation Combat Bonus: +1AR if the attacker's hex is higher than the
+ * target's; +1DR if the target's hex is higher than the attacker's (never
+ * both — they're always resolved from different hexes' elevations). Exported
+ * so `mortar.ts`'s Indirect Attack can reuse it with the Spotter Hex standing
+ * in for the Mortar's own hex (§13.3). Not applicable to Close Combat, where
+ * attacker and target always share a hex (and thus always tie).
+ */
+export function elevationCombatMods(
+  state: GameState,
+  attackerHexId: string,
+  targetHexId: string,
+): { elevAr: number; elevDr: number } {
+  const aElev = state.hexes[attackerHexId]?.elevation ?? 0;
+  const tElev = state.hexes[targetHexId]?.elevation ?? 0;
+  return { elevAr: aElev > tElev ? 1 : 0, elevDr: tElev > aElev ? 1 : 0 };
 }
 
 /**
@@ -123,25 +129,33 @@ export function attackContext(
   target: Unit,
   _capMod = 0,
   arBonus = 0,
+  useFlamethrower = false,
 ): AttackContext {
   const aEff = effectiveStats(state, attacker);
   const tEff = effectiveStats(state, target);
+  const attackerTmpl = templateOf(state, attacker);
   const dist = distance(parseHexId(attacker.hexId), parseHexId(target.hexId));
-  const band = rangeBand(dist, aEff.range);
+  // §18.0: a Flamethrower's Max Range is a fixed 1 Hex, overriding the Unit's
+  // own Range stat entirely (a Pioneer's normal 3-Hex range doesn't apply here).
+  const band: RangeBand = useFlamethrower ? (dist <= 1 ? 'short' : 'out') : rangeBand(dist, aEff.range);
   // §13.0/§13.9: Mortars fire High Explosive — always vs the target's Flank
   // Defense (both Direct and Indirect Attacks), with the Air Burst exception
   // above; they also may not fire closer than their Minimum Range (§13.1).
-  const attackerTmpl = templateOf(state, attacker);
   const isHE = attackerTmpl.kind === 'mortar';
   const minRange = attackerTmpl.minRange ?? 0;
-  // §16.5: an Open-Topped Vehicle defends an HE Attack (always vs Flank
-  // Defense, per §13.9 above) with its blue Flank Defense treated as red —
+  // §16.5: an Open-Topped Vehicle defends an HE or Flamethrower Attack (both
+  // always vs Flank Defense) with its blue Flank Defense treated as red —
   // pulls a Soft Target Hit Marker, the same as a red-FP Close Combat attack
   // against it (closeCombatContext does the equivalent flip for CC).
-  const openToppedHeFlip = isHE && templateOf(state, target).openTopped;
-  const fpColor = openToppedHeFlip ? 'red' : tEff.dr.color;
+  const openToppedFlip = (isHE || useFlamethrower) && templateOf(state, target).openTopped;
+  const fpColor = openToppedFlip ? 'red' : tEff.dr.color;
 
+  if (useFlamethrower && !attackerTmpl.hasFlamethrower) return fail('this Unit has no Flamethrower (§18.0)', band, fpColor);
   if (!aEff.canFire) return fail('unit cannot fire', band, fpColor);
+  // §17.5: Mortars may not fire — Direct or Indirect — from within a Bunker.
+  if (attackerTmpl.kind === 'mortar' && deniedByBunkerMortarRule(state, attacker)) {
+    return fail('Mortars may not fire from within a Bunker (§17.5)', band, fpColor);
+  }
   if (attacker.id === target.id) return fail('cannot fire at self', band, fpColor);
   if (attacker.side === target.side) return fail('friendly target', band, fpColor);
   // While an enemy shares your hex you may not fire/sight out of it (§7.7.3) —
@@ -155,49 +169,79 @@ export function attackContext(
   // §16.2: a Turreted Vehicle may fire outside its Arc without pivoting (for a
   // +2AP Attack Cost the caller applies); everyone else is denied out of arc.
   const outOfArc = !inArc(attacker.hexId, attacker.facing, target.hexId);
+  // §17.5: a Bunker occupant may ONLY attack within the Bunker's Arc of Fire —
+  // no Turreted exception (the Bunker's arc lock overrides it unconditionally).
+  if (outOfArc && isOccupying(state, attacker)?.kind === 'bunker') {
+    return fail('Bunker occupant may only attack within the Bunker Arc of Fire (§17.5)', band, fpColor);
+  }
   if (outOfArc && !attackerTmpl.turreted) return fail('target out of arc', band, fpColor);
   if (!hasLOS(state, attacker.hexId, target.hexId)) return fail('no line of sight', band, fpColor);
-  if (band === 'out') return fail('out of range', band, fpColor);
+  if (band === 'out') {
+    return fail(useFlamethrower ? 'out of Flamethrower range (max 1 Hex, §18.0)' : 'out of range', band, fpColor);
+  }
 
-  const attackerInTargetFront = !isHE && inArc(target.hexId, target.facing, attacker.hexId);
+  const attackerInTargetFront = !isHE && !useFlamethrower && inArc(target.hexId, target.facing, attacker.hexId);
   const isFlank = !attackerInTargetFront;
-  const defense = attackerInTargetFront ? tEff.dr.front : tEff.dr.flank;
-  const smokeDr = Math.min(
-    2,
-    smokeDefenseBonus(state, target.hexId) + smokeLosDrBonus(state, attacker.hexId, target.hexId),
-  ); // §14.3 stacking cap
-  const wallDr = wallDMForFire(state, attacker.hexId, target.hexId);
-  const coverDr = vehicleCoverBonus(state, target);
-  const apcDr = apcTransportBonus(state, target);
-  const terrainDr = terrainDMForAttack(state, target.hexId, fpColor, isHE);
   const rangeAr = fpRangeModifier(band);
   const smokeAr = smokeAttackPenalty(state, attacker.hexId);
-  const fp = fpColor === 'red' ? aEff.fp.red : aEff.fp.blue;
+  const fp = useFlamethrower ? 3 : fpColor === 'red' ? aEff.fp.red : aEff.fp.blue;
+  const { elevAr, elevDr } = elevationCombatMods(state, attacker.hexId, target.hexId);
 
-  const drMods: Modifier[] = [
-    { label: `${attackerInTargetFront ? 'Front' : 'Flank'} Defense`, value: defense, section: attackerInTargetFront ? '§6.1' : '§6.3' },
-  ];
-  const targetHex = state.hexes[target.hexId];
-  if (isHE && fpColor === 'red' && targetHex?.terrain === 'woodsHeavy') {
-    drMods.push({ label: 'Heavy Woods negated by Air Burst', value: 0, section: '§13.9' });
-  } else if (terrainDr !== 0) {
-    drMods.push({ label: `${targetHex ? terrainOf(targetHex).name : 'Terrain'} DM`, value: terrainDr, section: '§6.4' });
+  // §18.0: a Flamethrower ignores ALL DR modifiers except Smoke — no Terrain,
+  // Wall, Vehicle Cover, APC Transport, Elevation, Fortification, or Hasty
+  // Defense bonus (all of those are DEFENSE-side; the AR-side bonuses below —
+  // range, elevation, Group Support, smoke-attack-penalty — are unaffected).
+  let drMods: Modifier[];
+  if (useFlamethrower) {
+    drMods = [{ label: 'Flank Defense (Flamethrower always targets flank)', value: tEff.dr.flank, section: '§18.0' }];
+    const smokeDr = Math.min(
+      2,
+      smokeDefenseBonus(state, target.hexId) + smokeLosDrBonus(state, attacker.hexId, target.hexId),
+    );
+    if (smokeDr) drMods.push({ label: 'Smoke (defending in/behind it)', value: smokeDr, section: '§14.3' });
+  } else {
+    const defense = attackerInTargetFront ? tEff.dr.front : tEff.dr.flank;
+    const smokeDr = Math.min(
+      2,
+      smokeDefenseBonus(state, target.hexId) + smokeLosDrBonus(state, attacker.hexId, target.hexId),
+    ); // §14.3 stacking cap
+    const wallDr = wallDMForFire(state, attacker.hexId, target.hexId);
+    const coverDr = vehicleCoverBonus(state, target);
+    const apcDr = apcTransportBonus(state, target);
+    const terrainDr = terrainDMForAttack(state, target.hexId, fpColor, isHE);
+    const targetHex = state.hexes[target.hexId];
+    drMods = [
+      { label: `${attackerInTargetFront ? 'Front' : 'Flank'} Defense`, value: defense, section: attackerInTargetFront ? '§6.1' : '§6.3' },
+    ];
+    if (isHE && fpColor === 'red' && targetHex?.terrain === 'woodsHeavy') {
+      drMods.push({ label: 'Heavy Woods negated by Air Burst', value: 0, section: '§13.9' });
+    } else if (terrainDr !== 0) {
+      drMods.push({ label: `${targetHex ? terrainOf(targetHex).name : 'Terrain'} DM`, value: terrainDr, section: '§6.4' });
+    }
+    if (wallDr) drMods.push({ label: 'Wall Cover (shot crosses a wall)', value: wallDr, section: '§6.5' });
+    if (coverDr) drMods.push({ label: 'Vehicle Cover (shares hex with a friendly Vehicle)', value: coverDr, section: '§15.15' });
+    if (apcDr) drMods.push({ label: 'APC Transport Bonus', value: apcDr, section: '§16.6' });
+    if (smokeDr) drMods.push({ label: 'Smoke (defending in/behind it)', value: smokeDr, section: '§14.3' });
+    if (elevDr) drMods.push({ label: 'Elevation Bonus (target on higher ground)', value: elevDr, section: '§12.3' });
+    const fortDr = fortificationDrBonus(state, target, attacker.hexId);
+    if (fortDr) drMods.push(fortDr);
+    const hastyDr = hastyDefenseDrBonus(target);
+    if (hastyDr) drMods.push(hastyDr);
   }
-  if (wallDr) drMods.push({ label: 'Wall Cover (shot crosses a wall)', value: wallDr, section: '§6.5' });
-  if (coverDr) drMods.push({ label: 'Vehicle Cover (shares hex with a friendly Vehicle)', value: coverDr, section: '§15.15' });
-  if (apcDr) drMods.push({ label: 'APC Transport Bonus', value: apcDr, section: '§16.6' });
-  if (smokeDr) drMods.push({ label: 'Smoke (defending in/behind it)', value: smokeDr, section: '§14.3' });
 
   const arMods: Modifier[] = [
     {
-      label: `${fpColor === 'red' ? 'Red' : 'Blue'} Firepower${openToppedHeFlip ? ' (Open-Topped target)' : ''}`,
+      label: useFlamethrower
+        ? `${fpColor === 'red' ? 'Red' : 'Blue'} Firepower (Flamethrower)`
+        : `${fpColor === 'red' ? 'Red' : 'Blue'} Firepower${openToppedFlip ? ' (Open-Topped target)' : ''}`,
       value: fp,
-      section: openToppedHeFlip ? '§16.5' : '§6.6',
+      section: useFlamethrower ? '§18.0' : openToppedFlip ? '§16.5' : '§6.6',
     },
   ];
   if (rangeAr) arMods.push({ label: rangeAr > 0 ? 'Short Range Bonus (adjacent)' : 'Long Range Penalty', value: rangeAr, section: '§6.7' });
   if (arBonus) arMods.push({ label: 'Group Support (+1 per supporter)', value: arBonus, section: '§10.7' });
   if (smokeAr) arMods.push({ label: 'Smoke (firing out of it)', value: smokeAr, section: '§14.3' });
+  if (elevAr) arMods.push({ label: 'Elevation Bonus (attacker on higher ground)', value: elevAr, section: '§12.3' });
 
   const dr = drMods.reduce((s, m) => s + m.value, 0);
   const ar = arMods.reduce((s, m) => s + m.value, 0);
@@ -243,8 +287,9 @@ export function rollAttack(
   target: Unit,
   capMod = 0,
   arBonus = 0,
+  useFlamethrower = false,
 ): AttackRoll {
-  const ctx = attackContext(state, attacker, target, capMod, arBonus);
+  const ctx = attackContext(state, attacker, target, capMod, arBonus, useFlamethrower);
   if (!ctx.legal) {
     return {
       legal: false,
@@ -304,44 +349,76 @@ export function closeCombatContext(
   attacker: Unit,
   target: Unit,
   arBonus = 0,
+  useFlamethrower = false,
 ): AttackContext {
   const aEff = effectiveStats(state, attacker);
   const tEff = effectiveStats(state, target);
+  const attackerTmpl = templateOf(state, attacker);
   // §16.5: an Open-Topped Vehicle defends Close Combat with its blue Flank
   // Defense treated as RED (pulls a Soft Target Hit Marker) — infantry can lob
   // grenades/fire straight into the open top, unlike a closed vehicle.
   const fpColor = templateOf(state, target).openTopped ? 'red' : tEff.dr.color;
 
+  if (useFlamethrower && !attackerTmpl.hasFlamethrower) return fail('this Unit has no Flamethrower (§18.0)', 'short', fpColor);
   if (!aEff.canFire) return fail('unit cannot fight', 'short', fpColor);
   if (attacker.id === target.id) return fail('cannot close-combat self', 'short', fpColor);
   if (attacker.side === target.side) return fail('friendly target', 'short', fpColor);
   if (attacker.hexId !== target.hexId) return fail('not in the same hex', 'short', fpColor);
 
-  const whiteBox = templateOf(state, attacker).whiteBoxFp;
-  const ccMod = whiteBox ? -2 : 4;
+  const whiteBox = attackerTmpl.whiteBoxFp;
+  // §18.0: Flamethrower substitutes a flat 3FP and its own +4 CC bonus,
+  // superseding the normal FP and any white-box crewed-weapon CC penalty.
+  const ccMod = useFlamethrower ? 4 : whiteBox ? -2 : 4;
   const smokeAr = smokeAttackPenalty(state, attacker.hexId);
-  const fp = fpColor === 'red' ? aEff.fp.red : aEff.fp.blue;
+  const fp = useFlamethrower ? 3 : fpColor === 'red' ? aEff.fp.red : aEff.fp.blue;
   // §15.14: Vehicles get NO defensive terrain bonus in close combat (foot do, §6.10).
   const targetIsVehicle = templateOf(state, target).kind === 'vehicle';
-  const terrain = targetIsVehicle ? 0 : terrainDM(state, target.hexId);
-  const coverDr = vehicleCoverBonus(state, target);
-  const apcDr = apcTransportBonus(state, target);
-  const smokeDr = smokeDefenseBonus(state, target.hexId);
+
+  // §18.0: a Flamethrower ignores ALL DR modifiers except Smoke.
+  let drMods: Modifier[];
+  if (useFlamethrower) {
+    drMods = [{ label: 'Flank Defense (always, in CC)', value: tEff.dr.flank, section: '§6.10' }];
+    const smokeDr = smokeDefenseBonus(state, target.hexId);
+    if (smokeDr) drMods.push({ label: 'Smoke (defending in it)', value: smokeDr, section: '§14.3' });
+  } else {
+    const terrain = targetIsVehicle ? 0 : terrainDM(state, target.hexId);
+    const coverDr = vehicleCoverBonus(state, target);
+    const apcDr = apcTransportBonus(state, target);
+    const smokeDr = smokeDefenseBonus(state, target.hexId);
+    drMods = [{ label: 'Flank Defense (always, in CC)', value: tEff.dr.flank, section: '§6.10' }];
+    if (targetIsVehicle) drMods.push({ label: 'No Vehicle terrain bonus in CC', value: 0, section: '§15.14' });
+    else if (terrain) drMods.push({ label: `${terrainOf(state.hexes[target.hexId]!).name} DM`, value: terrain, section: '§6.4' });
+    if (coverDr) drMods.push({ label: 'Vehicle Cover (shares hex with a friendly Vehicle)', value: coverDr, section: '§15.15' });
+    if (apcDr) drMods.push({ label: 'APC Transport Bonus', value: apcDr, section: '§16.6' });
+    if (smokeDr) drMods.push({ label: 'Smoke (defending in it)', value: smokeDr, section: '§14.3' });
+    // §17.5 note: a Bunker's own Flank Bonus (+3) still applies to a CC-attacked
+    // occupant (attacker is always "in the hex," i.e. never in the occupant's
+    // own arc from a same-hex vantage — `fortificationDrBonus` naturally returns
+    // the Flank value here since `inArc(unit.hexId, unit.facing, attacker.hexId)`
+    // with attacker.hexId === unit.hexId is never true).
+    const fortDr = fortificationDrBonus(state, target, attacker.hexId);
+    if (fortDr) drMods.push(fortDr);
+    const hastyDr = hastyDefenseDrBonus(target);
+    if (hastyDr) drMods.push(hastyDr);
+  }
 
   const openToppedFlip = templateOf(state, target).openTopped && tEff.dr.color !== 'red';
   const arMods: Modifier[] = [
-    { label: `${fpColor === 'red' ? 'Red' : 'Blue'} Firepower${openToppedFlip ? ' (Open-Topped target)' : ''}`, value: fp, section: openToppedFlip ? '§16.5' : '§6.6' },
-    { label: whiteBox ? 'Crewed Unit penalty in CC' : 'Close Combat Bonus', value: ccMod, section: whiteBox ? '§6.11' : '§6.10/§6.7' },
+    {
+      label: useFlamethrower
+        ? `${fpColor === 'red' ? 'Red' : 'Blue'} Firepower (Flamethrower)`
+        : `${fpColor === 'red' ? 'Red' : 'Blue'} Firepower${openToppedFlip ? ' (Open-Topped target)' : ''}`,
+      value: fp,
+      section: useFlamethrower ? '§18.0' : openToppedFlip ? '§16.5' : '§6.6',
+    },
+    {
+      label: useFlamethrower ? 'Flamethrower Close Combat Bonus' : whiteBox ? 'Crewed Unit penalty in CC' : 'Close Combat Bonus',
+      value: ccMod,
+      section: useFlamethrower ? '§18.0' : whiteBox ? '§6.11' : '§6.10/§6.7',
+    },
   ];
   if (arBonus) arMods.push({ label: 'Group Support (+1 per supporter)', value: arBonus, section: '§10.7' });
   if (smokeAr) arMods.push({ label: 'Smoke (firing out of it)', value: smokeAr, section: '§14.3' });
-
-  const drMods: Modifier[] = [{ label: 'Flank Defense (always, in CC)', value: tEff.dr.flank, section: '§6.10' }];
-  if (targetIsVehicle) drMods.push({ label: 'No Vehicle terrain bonus in CC', value: 0, section: '§15.14' });
-  else if (terrain) drMods.push({ label: `${terrainOf(state.hexes[target.hexId]!).name} DM`, value: terrain, section: '§6.4' });
-  if (coverDr) drMods.push({ label: 'Vehicle Cover (shares hex with a friendly Vehicle)', value: coverDr, section: '§15.15' });
-  if (apcDr) drMods.push({ label: 'APC Transport Bonus', value: apcDr, section: '§16.6' });
-  if (smokeDr) drMods.push({ label: 'Smoke (defending in it)', value: smokeDr, section: '§14.3' });
 
   const ar = arMods.reduce((s, m) => s + m.value, 0);
   const dr = drMods.reduce((s, m) => s + m.value, 0);
@@ -354,8 +431,9 @@ export function rollCloseCombat(
   target: Unit,
   capMod = 0,
   arBonus = 0,
+  useFlamethrower = false,
 ): AttackRoll {
-  const ctx = closeCombatContext(state, attacker, target, arBonus);
+  const ctx = closeCombatContext(state, attacker, target, arBonus, useFlamethrower);
   if (!ctx.legal) {
     return {
       legal: false,
@@ -435,12 +513,13 @@ export function rollStackFire(
   targetHexId: string,
   capMod = 0,
   arBonus = 0,
+  useFlamethrower = false,
 ): StackFireResult {
   const targets = enemiesInHex(state, attacker.side, targetHexId);
   const rolls: StackFireRoll[] = [];
   let rng = state.rng;
   for (const t of targets) {
-    const roll = rollAttack({ ...state, rng }, attacker, t, capMod, arBonus);
+    const roll = rollAttack({ ...state, rng }, attacker, t, capMod, arBonus, useFlamethrower);
     rolls.push({ targetId: t.id, roll });
     rng = roll.rng;
   }

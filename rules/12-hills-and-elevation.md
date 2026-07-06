@@ -11,26 +11,29 @@
 ## 12.0 Elevation
 
 Each Hex has an Elevation relative to Level 0 Ground.
+
 Elevation ranges between Level 0 Ground up to Level 2 Hills
-( ). All Hexes that do not have an Elevation symbol ( )
+(^^). All Hexes that do not have an Elevation symbol (^)
 are at Level 0 Ground.
+
 The Elevation printed next to the Hex coordinates apply to
 the entire Hex.
 
 ## 12.1 Hills
 
 Hills are marked on the Map as:
-• indicates a Level 1 Hill (L1)
-• indicates a Level 2 Hill (L2)
+• ^ indicates a Level 1 Hill (L1)
+• ^^ indicates a Level 2 Hill (L2)
+
 A Hill Hex may have any Terrain Type such as Open Terrain,
 Woods, or Buildings.
-i t
-ave
+
 
 ## 12.2 Elevation Move Cost Penalties
 
 When a Foot Unit or Field Gun (16.7) moves into a higher
 Elevation Hex, it suffers a Move Cost Penalty.
+
 Elevation Move Cost Penalties:
 • Sloping Terrain: 1 Level Elevation Change
 Ascending: +1AP for Foot Units and Field Guns
@@ -38,26 +41,32 @@ when moving into an adjacent Hex that is one
 Elevation level higher.
 Descending: No penalty when moving into an
 adjacent Hex that is one Elevation level lower.
+
 • Steep Terrain: 2 Level Elevation Change
 Ascending or Descending:
 +2AP for Foot Units and Field Guns .
 Impassable to ALL Wheeled and Tracked Vehicles.
+
 Roads do not negate Elevation Move Cost Penalties.
 
 ## 12.3 Elevation Combat Modifiers
 
 If the Attacker or Target occupies higher ground (Elevation)
 than the opponent, it gains a Combat Bonus.
+
 Elevation AR and DR Modifiers:
+
 • Attacker Elevation Bonus: +1AR if the Attacker is at a
 higher Elevation than the Target.
+
 • Target Elevation Bonus: +1DR if the Target is at higher
 Elevation than the Attacker.
 
-Elevation
+[Example play:
 Changing Elevation
 Over several Turns, the German Rifles take the following
 path. Only Move Cost Penalties are shown.
+
 L0 Ground
 ill
 L 1
@@ -65,93 +74,109 @@ ill
 B L
 ill
 C L
-A +1AP Ground L0 to Hill L1 (Ascending Slope)
-B +1AP Hill L1 to Hill L2 (Ascending Slope)
-C +0AP Hill L2 to Hill L1 (Descending Slope)
-D +0AP Hill L1 to Ground L0 (Descending Slope)
+
+A +1AP Ground L0 to Hill L1 ^ (Ascending Slope)
+B +1AP Hill L1 ^ to Hill L2 ^^ (Ascending Slope)
+C +0AP Hill L2 ^^ to Hill L1 ^ (Descending Slope)
+D +0AP Hill L1 ^ to Ground L0 (Descending Slope)
+]
+
+[Example play:
 Steep Terrain
 The German Rifles
 move from Ground
-L0 to a L2 Hill
+L0 to a L2 Hill ^^
 A . They suffer
 a +2AP Steep
-Terrain penalty, for 1
+Terrain penalty, for 
 a total Move Action
 Cost of 3AP.
+[IMAGE: image content here shows map and units not OCR'd - illustrates unit moving up hill to A and then back down hill to B - pg.23 or 24, right side]
 On a later Turn the
-Rifles move back A
-down to Ground 2 11
-L0 from the Hill B . 0 5 12
+Rifles move back 
+down to Ground 
+L0 from the Hill B. 
+
 They suffer a +2AP
 Move penalty.
+]
+[Example play:
 Roads and Hills
+
 The German Rifles
-move from Ground L0 0
-following a Road. 21
+move from Ground L0 
+[IMAGE: image content here shows map and units not OCR'd - illustrates road and hill with A and B on them - pg.23 or 24, right side]
+to a L1 Hill ^ A,
+following a Road.
 Even on the Road,
-they suffer a +1AP 0
+they suffer a +1AP
 Sloping Terrain
-penalty, for a 2AP B
-Move Cost. 10
+penalty, for a 2AP
+Move Cost. 
+
 On their next Turn, the
-Rifles continue along the Road into the Light Woods B .
-They are still on a L1 Hill so they suffer no Elevation
+Rifles continue along the Road into the Light Woods B.
+They are still on a L1 Hill ^ so they suffer no Elevation
 penalty, but do have a Stress Penalty for a total 2AP Move
 Cost.
+]
 
 ## 12.4 LOS between different level Hexes
 
 1. Determine the Elevation Levels of the Attack and Target
 Hexes. Whichever is highest is the High Ground Hex.
+
 2. LOS is established, if no intervening Hex is of equal or
 higher Level than the High Ground Hex.
+
 LOS rules apply in both directions. If Hex A has LOS to Hex
 B, then Hex B always has LOS to Hex A.
+
+[Example play:
 The Plateau Effect
+[IMAGE: image content here shows adjacent hill levels not OCR'd - illustrates A at L0, B at L1 on right of A, C at L1 on right of B, D at L2 on right of C, and E at L2 on right of D - pg.24 or 25, left column]
 LOS between Hexes ‘A’ and ‘C’:
 L1 Hex C is determined to be the High Ground Hex.
+
 No LOS is established, because intervening Hex ‘B’ is the
 same elevation as High Ground Hex C.
+
 We call this the Plateau Effect.
+
 LOS between Hexes ‘A’ and ‘D’:
 L2 Hex D is determined to be the High Ground Hex.
+
 LOS is established, because neither intervening L1 Hexes
 B or C are as high as High Ground Hex D.
+
 Hex A has no LOS beyond L2 Hex D to L2 Hex E, because
 of the Plateau Effect.
+]
+[Example play: 
 LOS from a L1 Hill
-L1 Hill 2
-Blocked
-LOS Clear
-LOS
-0 L0
-5 1 Ground
-The German MG34 on L1 Hill cannot see the Soviet
-Rifles on L0 Ground, because there is a L1 Hill Hex
+[IMAGE: image of units with L0 and L1 Hill not OCR'd - illustrates what units on L0 the unit on L1 has blocked LOS to and clear LOS to - pg.24 or 25, left column]
+The German MG34 on L1 Hill ^ cannot see the Soviet
+Rifles on L0 Ground, because there is a L1 Hill ^ Hex
 between the two of them.
+
 The MG34 can see the ATG on L0 Ground since there is
 no terrain of equal or higher level between the two.
+]
 
 ## 12.5 Elevation and LOS-Blocking Terrain
 
 LOS-Blocking Terrain (Woods or Buildings 5.2 ) adds 1 Level
 to the Hex it appears on for LOS-blocking purposes only.
+
 Buildings on a L0 Ground Hex make it a L1 LOS-Blocking
 Hex. Woods on a L1 Hill Hex make it a L2 LOS-Blocking Hex.
-Blocked
-L LOS 5
-L o
-O o
-S d
-04 s
-09 B =
-l o
-9 1 c
-L1 Hill
-The German MG34 on the L1 Hill cannot see the Soviet
+
+[Example play:
+The German MG34 on the L1 Hill ^ cannot see the Soviet
 Rifles, because of the Woods in between. If the German
 MG34 was instead on a L2 Hill , they would be able to
 see the Rifles.
+]
 
 ## 12.6 Blind Spots
 
@@ -159,27 +184,35 @@ LOS-Blocking Terrain creates a Blind Spot Hex directly
 behind it from the perspective of the High Ground Hex. A High 12
 Ground Hex, regardless of its Elevation, never has LOS to a
 Blind Spot Hex (and vice versa), . |
-l eva
-L2 Hill t
-i on
-n d
-l u
-i l o
-H r
-L 1 G
+
+[Example play:
+  [IMAGE: hills and forest not OCR'd -- illustrates Units on the L2 Hill have long, unobstructed sight lines down to many red hexes.
+  The L1 Hill has partial visibility—some arrows reach targets, others stop short.
+  L0 Ground hexes are often blocked by hills or trees.
+  This looks like a study of:
+  Which hexes can be targeted from each elevation
+  How terrain blocks or allows LOS
+  Tactical advantages of high ground
+  ]
+
 Hex 1 (the L2 Hill) has a clear LOS into the green numbered
 Hexes, but no LOS to red numbered Blind Spot Hexes
 because of L1 Blocking Terrain along the LOS path (Woods
 Hexes 10 and 4 and Building Hexes 6 and 8).
+
 Blind Spots simulate Units hugging a tree line or row of
 buildings to stay out of sight of a high-ground shooter.
+
 Side View Example of LOS from Hex 1 to Hex 7
+[IMAGE: illustrating hills adjacent to one another along with woods]
 Hex 1 has LOS to Hexes 2, 3, 4, and 6, and vice versa.
+
 L1 Hex 3 above has LOS into Hex 4, but nothing beyond,
 because the Woods act as a L1 Blocking Terrain and thus
 is the same elevation as Hex 3, creating a plateau effect.
 Anything beyond the woods is not visible.
-Mortars and
+]
+
 
 
 ---

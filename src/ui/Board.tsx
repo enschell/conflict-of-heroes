@@ -6,11 +6,11 @@
  * Hovering a targetable enemy shows a fire-odds popup; Ctrl+click a stacked hex
  * opens a unit picker. Clicks/hover route through the store.
  */
-import { attackContext, legalActionsForUnit, legalEntryHexes, neighbor, neighbors, parseHexId, idOf, planVehicleMove, templateOf, visibleHexesFrom } from '../engine';
-import type { Facing, Unit } from '../engine/types';
+import { attackContext, directionTo, effectiveStats, fortificationAt, legalActionsForUnit, legalEntryHexes, moveCost, neighbor, neighbors, parseHexId, idOf, planVehicleMove, templateOf, visibleHexesFrom } from '../engine';
+import type { Action, Facing, FortificationKind, Unit } from '../engine/types';
 import { useGame } from '../state/store';
 import { artForHex } from '../data/hexArt';
-import { fireOdds, pct } from './odds';
+import { fireOdds, isHopelessShot, pct } from './odds';
 import {
   EDGE_CORNERS,
   HEX_SIZE,
@@ -34,6 +34,7 @@ export function Board() {
   const losMode = useGame((s) => s.losMode);
   const losSource = useGame((s) => s.losSource);
   const shiftHeld = useGame((s) => s.shiftHeld);
+  const pivotPicker = useGame((s) => s.pivotPicker);
   const hover = useGame((s) => s.hover);
   const picker = useGame((s) => s.picker);
   const setHover = useGame((s) => s.setHover);
@@ -107,11 +108,16 @@ export function Board() {
   // Free facing correction (§4.5/§15.11): the six neighbor Hexes of a Unit
   // awaiting CHOOSE_FACING, clickable to face that direction (the arrow-button
   // picker in Inspector.tsx still works too — this is an additional way in).
+  // Also reused for the Pivot picker (P key, §4.6): same blue highlight, but
+  // clicking issues a real (AP-costed) PIVOT instead — see store.ts's
+  // `hexClick`, which branches on `pivotPicker` independently of this render.
   const facingTargets = new Set<string>();
   const facingChoiceUnit =
     selectedUnitId && game.pendingFacingChoices?.includes(selectedUnitId) ? game.units[selectedUnitId] : null;
-  if (facingChoiceUnit) {
-    for (const n of neighbors(parseHexId(facingChoiceUnit.hexId))) {
+  const pivotPickerUnit = pivotPicker && selectedUnitId ? game.units[selectedUnitId] : null;
+  const facingHighlightUnit = facingChoiceUnit ?? pivotPickerUnit;
+  if (facingHighlightUnit) {
+    for (const n of neighbors(parseHexId(facingHighlightUnit.hexId))) {
       const nid = idOf(n);
       if (game.hexes[nid]) facingTargets.add(nid);
     }
@@ -133,7 +139,7 @@ export function Board() {
   // Fire-odds popup when hovering a hex with a selected attacker. A shot resolves
   // the whole hex (§7.5.1), so show one row per targetable enemy (in the same
   // deterministic id order the engine rolls them).
-  type OddsRow = { targetId: string; ar: number; dr: number; hitNumber: number; flank: boolean; hit: number; crit: number };
+  type OddsRow = { targetId: string; ar: number; dr: number; hitNumber: number; flank: boolean; hit: number; crit: number; hopeless: boolean };
   const odds: { x: number; y: number; targets: OddsRow[] } | null = (() => {
     if (!hover || !selectedUnitId || !game.units[selectedUnitId]) return null;
     const sel = game.units[selectedUnitId]!;
@@ -146,9 +152,99 @@ export function Board() {
       const ctx = attackContext(game, sel, enemy);
       if (!ctx.legal) continue;
       const o = fireOdds(ctx.ar, ctx.dr);
-      rows.push({ targetId: enemy.id, ar: ctx.ar, dr: ctx.dr, hitNumber: ctx.hitNumber, flank: ctx.isFlank, hit: o.hit, crit: o.crit });
+      rows.push({
+        targetId: enemy.id,
+        ar: ctx.ar,
+        dr: ctx.dr,
+        hitNumber: ctx.hitNumber,
+        flank: ctx.isFlank,
+        hit: o.hit,
+        crit: o.crit,
+        // §3.2: even a full 2-CAP dice mod can't ever exceed a natural 12, so
+        // this is a genuinely impossible shot, not just an unlikely one.
+        hopeless: isHopelessShot(ctx.hitNumber),
+      });
     }
     return rows.length ? { x: hover.x, y: hover.y, targets: rows } : null;
+  })();
+
+  // Move-cost popup when hovering a legal Move-target hex with a unit selected
+  // (§4.7/§12.2): itemizes every AP modifier, not just the total. Independent
+  // of the fire-odds popup above — both can render at once for the same hex.
+  const moveCostPopup: {
+    x: number;
+    y: number;
+    hexId: string;
+    knownAp: number;
+    hasRandom: boolean;
+    mods: { label: string; value: number; random?: boolean }[];
+    willStripHastyDefense: boolean;
+    /** §17.3: this is the occupy-from-within case (hovering the Unit's own
+     *  Hex), not a real Move — the popup should say "Occupy X", not "Move to X". */
+    occupyKind?: FortificationKind;
+  } | null = (() => {
+    if (!hover || !selectedUnitId || !game.units[selectedUnitId] || !moveTargets.has(hover.id)) return null;
+    const sel = game.units[selectedUnitId]!;
+    if (sel.side !== game.currentSide) return null;
+
+    // §17.3 (2nd paragraph): hovering the Unit's own Hex is the occupy-from-
+    // within Move — `moveCost()` only understands adjacent Hexes (it returns
+    // null, "not adjacent", for this case), so read the AP cost from the
+    // engine's own legal-action list instead of calling it.
+    // §2.6: Stress adds +1AP to the next Action Cost — `moveCost()` (and the
+    // occupy-from-within branch below) only compute the Move's own terrain/
+    // backwards/wall/elevation component; Stress is folded in later by the
+    // reducer's `planCost`, so the popup has to add it itself or it silently
+    // under-reports the real cost for a Stressed Unit.
+    const stressMod: { label: string; value: number; random?: boolean; section: string }[] = sel.stressed
+      ? [{ label: 'Stress', value: 1, section: '§2.6' }]
+      : [];
+
+    if (hover.id === sel.hexId) {
+      const occupyAct = legalActionsForUnit(game, sel.id).find(
+        (a): a is Extract<Action, { type: 'MOVE' }> =>
+          a.type === 'MOVE' && a.toHexId === sel.hexId && a.occupyFortification === true,
+      );
+      if (!occupyAct) return null;
+      const fort = fortificationAt(game.hexes[hover.id]!);
+      const occMods = [{ label: 'Move', value: effectiveStats(game, sel).move, section: '§4.5' }, ...stressMod];
+      return {
+        x: hover.x,
+        y: hover.y,
+        hexId: hover.id,
+        knownAp: occMods.reduce((n, m) => n + m.value, 0),
+        hasRandom: false,
+        mods: occMods,
+        willStripHastyDefense: false,
+        occupyKind: fort?.kind,
+      };
+    }
+
+    const cost = moveCost(game, sel, hover.id);
+    if (cost.ap == null) return null;
+    const mods = [...(cost.mods ?? []), ...stressMod];
+    // §17.8 Barbed Wire's 1d6 is deterministic from the seeded RNG (so `cost.ap`
+    // is already the real, exact number), but the popup deliberately hides it
+    // until the move actually executes — same "don't spoil the roll" principle
+    // as the dice-roller showing "?" before a click (CLAUDE.md §7).
+    const hasRandom = mods.some((m) => m.random);
+    const knownAp = mods.filter((m) => !m.random).reduce((n, m) => n + m.value, 0);
+    // §17.6: Moving always strips this Unit's own Hasty Defense — warn before
+    // the click, since the marker's +1DR is easy to forget about mid-game.
+    return { x: hover.x, y: hover.y, hexId: hover.id, knownAp, hasRandom, mods, willStripHastyDefense: !!sel.hastyDefense };
+  })();
+
+  // Illegal-move popup: hovering an adjacent Hex the selected Unit CANNOT
+  // move into shows why, citing the same rule `moveCost`/`planVehicleMove`
+  // already denied it for — rather than the hex just doing nothing.
+  const moveIllegalPopup: { x: number; y: number; hexId: string; reason: string } | null = (() => {
+    if (!hover || !selectedUnitId || !game.units[selectedUnitId] || moveTargets.has(hover.id)) return null;
+    const sel = game.units[selectedUnitId]!;
+    if (sel.side !== game.currentSide || sel.carriedBy) return null;
+    if (directionTo(sel.hexId, hover.id) < 0) return null; // only adjacent Hexes are a real "why not"
+    const cost = moveCost(game, sel, hover.id);
+    if (cost.ap != null || !cost.reason) return null;
+    return { x: hover.x, y: hover.y, hexId: hover.id, reason: cost.reason };
   })();
 
   return (
@@ -269,6 +365,105 @@ export function Board() {
             });
           })}
 
+          {/* Elevation (§12.1): a small ▲/▲▲ glyph per Hill Hex so Steep drop-offs are legible. */}
+          {ids.map((id) => {
+            const hex = game.hexes[id]!;
+            if (!hex.elevation) return null;
+            const c = hexCenter(id);
+            return (
+              <text
+                key={`elev-${id}`}
+                x={c.x}
+                y={c.y - HEX_SIZE * 0.62}
+                fontSize={HEX_SIZE * 0.32}
+                fill="#5a4322"
+                textAnchor="middle"
+                fontWeight={700}
+                pointerEvents="none"
+              >
+                {hex.elevation === 2 ? '▲▲' : '▲'}
+              </text>
+            );
+          })}
+
+          {/* Obstacles (§17.7): a short label per Hex — Mines are NOT hidden in
+              this build (locked decision, mirrors the Hidden Units deferral —
+              a hotseat render-layer hide would be trivially defeated). */}
+          {ids.map((id) => {
+            const obstacle = game.hexes[id]?.features.obstacle;
+            if (!obstacle) return null;
+            const c = hexCenter(id);
+            const label = obstacle.kind === 'barbedWire' ? 'WIRE' : obstacle.kind === 'mines' ? 'MINES' : 'BLOCK';
+            return (
+              <text
+                key={`obstacle-${id}`}
+                x={c.x}
+                y={c.y + HEX_SIZE * 0.68}
+                fontSize={HEX_SIZE * 0.24}
+                fill={obstacle.destroyed ? '#888' : '#b23a3a'}
+                textAnchor="middle"
+                fontWeight={700}
+                textDecoration={obstacle.destroyed ? 'line-through' : undefined}
+                pointerEvents="none"
+              >
+                {label}
+              </text>
+            );
+          })}
+
+          {/* Fortifications (§17.1): Trenches/Bunkers, same label styling as
+              Obstacles above but blue rather than red. Hasty Defense markers
+              are per-Unit, not a Hex feature — rendered on the counter itself. */}
+          {ids.map((id) => {
+            const fort = game.hexes[id]?.features.fortification;
+            if (!fort) return null;
+            const c = hexCenter(id);
+            const label = fort.kind === 'trench' ? 'TRENCH' : 'BUNKER';
+            return (
+              <text
+                key={`fort-${id}`}
+                x={c.x}
+                y={c.y + HEX_SIZE * 0.68}
+                fontSize={HEX_SIZE * 0.24}
+                fill={fort.destroyed ? '#888' : '#3a6ab2'}
+                textAnchor="middle"
+                fontWeight={700}
+                textDecoration={fort.destroyed ? 'line-through' : undefined}
+                pointerEvents="none"
+              >
+                {label}
+              </text>
+            );
+          })}
+
+          {/* §17.5 Bunker Arc of Fire: highlight the 3 frontal hexsides (facing
+              ±1) a Bunker occupant may fire out of / be attacked "within Arc"
+              through, so it's visible at a glance without hovering/selecting. */}
+          {ids.map((id) => {
+            const fort = game.hexes[id]?.features.fortification;
+            if (!fort || fort.kind !== 'bunker' || fort.destroyed || fort.facing == null) return null;
+            const corners = hexCorners(hexCenter(id));
+            const arcDirs = [((fort.facing + 5) % 6) as Facing, fort.facing, ((fort.facing + 1) % 6) as Facing];
+            return arcDirs.map((dir) => {
+              const [i, j] = EDGE_CORNERS[dir]!;
+              const p1 = corners[i]!;
+              const p2 = corners[j]!;
+              return (
+                <line
+                  key={`bunker-arc-${id}-${dir}`}
+                  x1={p1.x}
+                  y1={p1.y}
+                  x2={p2.x}
+                  y2={p2.y}
+                  stroke="#4fd1e8"
+                  strokeWidth={5}
+                  strokeLinecap="round"
+                  pointerEvents="none"
+                />
+              );
+            });
+          })}
+
           {[...objectives.entries()].map(([id, vp]) => {
             const c = hexCenter(id);
             const ctrl = game.hexes[id]?.features.control;
@@ -315,10 +510,10 @@ export function Board() {
           })}
 
           {/* Rendered last so it's always above every Hex fill and Unit counter. */}
-          {facingChoiceUnit && (
+          {facingHighlightUnit && (
             <g pointerEvents="none">
               {(() => {
-                const c = hexCenter(facingChoiceUnit.hexId);
+                const c = hexCenter(facingHighlightUnit.hexId);
                 const w = HEX_SIZE * 2.6;
                 const h = HEX_SIZE * 0.6;
                 const ty = c.y - HEX_SIZE * 1.55;
@@ -343,7 +538,7 @@ export function Board() {
                       textAnchor="middle"
                       dominantBaseline="central"
                     >
-                      Choose facing
+                      {facingChoiceUnit ? 'Choose facing' : 'Pivot (P)'}
                     </text>
                   </>
                 );
@@ -363,14 +558,57 @@ export function Board() {
           {odds.targets.map((t) => (
             <div key={t.targetId} className="fire-odds__row">
               {odds.targets.length > 1 && <div className="fire-odds__who">{t.targetId}</div>}
-              <div className="fire-odds__big">{pct(t.hit)}% to hit</div>
-              <div className="dim">incl. {pct(t.crit)}% critical (instant kill)</div>
+              {t.hopeless ? (
+                <div className="fire-odds__big fire-odds__hopeless">Cannot hit — even with CAP (§3.2)</div>
+              ) : (
+                <>
+                  <div className="fire-odds__big">{pct(t.hit)}% to hit</div>
+                  <div className="dim">incl. {pct(t.crit)}% critical (instant kill)</div>
+                </>
+              )}
               <div className="fire-odds__detail">
                 AR {t.ar} vs DR {t.dr} — 2d6 ≥ {t.hitNumber}
                 {t.flank ? ' (flank)' : ''}
               </div>
             </div>
           ))}
+        </div>
+      )}
+
+      {moveCostPopup && (
+        <div
+          className="move-cost"
+          style={{ left: moveCostPopup.x + 16, top: moveCostPopup.y - 16, transform: 'translateY(-100%)' }}
+        >
+          <div className="move-cost__head">
+            {moveCostPopup.occupyKind
+              ? `Occupy ${moveCostPopup.occupyKind === 'trench' ? 'Trench' : 'Bunker'} (§17.3)`
+              : `Move to ${moveCostPopup.hexId}`}{' '}
+            — {moveCostPopup.knownAp} AP{moveCostPopup.hasRandom ? ' + ?' : ''}
+          </div>
+          {moveCostPopup.mods.map((m, i) => (
+            <div key={i} className="move-cost__row">
+              <span>{m.label}</span>
+              <span>
+                {m.random ? '?' : `${m.value >= 0 ? '+' : ''}${m.value}`}
+              </span>
+            </div>
+          ))}
+          {moveCostPopup.willStripHastyDefense && (
+            <div className="move-cost__row move-cost__warning">
+              ⚠ Moving will remove this Unit's Hasty Defense (§17.6)
+            </div>
+          )}
+        </div>
+      )}
+
+      {moveIllegalPopup && (
+        <div
+          className="move-illegal"
+          style={{ left: moveIllegalPopup.x + 16, top: moveIllegalPopup.y - 16, transform: 'translateY(-100%)' }}
+        >
+          <div className="move-illegal__head">Cannot move to {moveIllegalPopup.hexId}</div>
+          <div className="move-illegal__reason">{moveIllegalPopup.reason}</div>
         </div>
       )}
 

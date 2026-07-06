@@ -156,6 +156,42 @@ export function UnitCounter({ game, unit, center, size, selected, stressed = fal
             </text>
           </g>
         )}
+        {/* §17.6 Hasty Defense marker — per-Unit, not a Hex feature. */}
+        {unit.hastyDefense && (
+          <g>
+            <rect x={x + s - fs * 1.3} y={y + s - fs * 1.1} width={fs * 1.3} height={fs} rx={2} fill="#3a6ab2" />
+            <text
+              x={x + s - fs * 0.65}
+              y={y + s - fs * 0.3}
+              fontSize={fs * 0.7}
+              fill="#fff"
+              fontWeight={700}
+              textAnchor="middle"
+            >
+              HD
+            </text>
+          </g>
+        )}
+        {unit.occupyingFortification && (() => {
+          const kind = game.hexes[unit.hexId]?.features.fortification?.kind;
+          const label = kind === 'trench' ? 'TRENCH' : kind === 'bunker' ? 'BUNK' : 'FORT';
+          const w = fs * (0.4 + label.length * 0.32);
+          return (
+            <g>
+              <rect x={x} y={y + s - fs * 1.1} width={w} height={fs} rx={2} fill="#3a6ab2" />
+              <text
+                x={x + w / 2}
+                y={y + s - fs * 0.3}
+                fontSize={fs * 0.7}
+                fill="#fff"
+                fontWeight={700}
+                textAnchor="middle"
+              >
+                {label}
+              </text>
+            </g>
+          );
+        })()}
       </g>
     </g>
   );
