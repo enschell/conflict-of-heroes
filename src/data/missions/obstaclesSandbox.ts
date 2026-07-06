@@ -34,7 +34,7 @@ const UNITS: UnitPlacement[] = [
   // Germans (A), facing east (facing 0).
   { id: 'G-rifle', side: 'A', templateId: 'ger-rifle', hexId: hexId(0, 0), facing: 0 },
   { id: 'G-sdkfz251', side: 'A', templateId: 'ger-sdkfz251', hexId: hexId(0, 1), facing: 0 }, // wheeled
-  { id: 'G-pz3', side: 'A', templateId: 'ger-pz3', hexId: hexId(0, 2), facing: 0 }, // tracked
+  { id: 'G-pz3', side: 'A', templateId: 'ger-pz3h', hexId: hexId(0, 2), facing: 0 }, // tracked
   // Soviets (B), facing west (facing 3) — "own" the Mines field (§17.10's
   // owning-side CAP choice is exercised from their side).
   { id: 'S-rifle', side: 'B', templateId: 'sov-rifle', hexId: hexId(5, 0), facing: 3 },

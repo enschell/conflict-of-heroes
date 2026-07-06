@@ -147,21 +147,62 @@ button.link {
   margin: 0 0 0.5rem;
   font-size: 1rem;
 }
+/* EXPERIMENTAL (easy to roll back via git): counter moved below the name,
+   at 3x scale, with text labels beside the printed numbers instead of a
+   separate stats-grid. */
 .inspector-header {
   display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 0.5rem;
+  flex-direction: column;
+  gap: 0.0rem;
 }
-.inspector-header__text {
-  flex: 1 1 auto;
-  min-width: 0;
+.inspector-header h3 {
+  /* Halves .panel h3's global 0.5rem margin-bottom, just for this heading —
+     combined with the gap above, that's half the old name-to-counter space. */
+  margin-bottom: 0.25rem;
+}
+.inspector-counter-row {
+  display: flex;
+  align-items: stretch;
+  justify-content: center;
+  gap: 0;
+}
+.inspector-counter-labels {
+  position: relative;
+  flex: 0 0 42px;
+}
+.inspector-counter-labels--left {
+  text-align: right;
+}
+.inspector-counter-labels--right {
+  text-align: left;
+}
+.inspector-counter-labels__item {
+  position: absolute;
+  /* -50% recenters on its own `top`; the extra -5px nudges every label up. */
+  transform: translateY(calc(-50% - 10px));
+  font-size: 1.0rem;
+  color: var(--dim);
+  line-height: 1.15;
+}
+.inspector-counter-labels--left .inspector-counter-labels__item {
+  /* Pulled in past the `pad` inset (Inspector.tsx's INSPECTOR_PAD_INNER ≈
+     13px, +8px closer per feedback) UnitCounter.tsx uses to indent each
+     number from the counter's edge, so the label overlaps in toward the
+     number itself instead of stopping at the true image border. */
+  right: -23px;
+}
+.inspector-counter-labels--right .inspector-counter-labels__item {
+  left: -23px;
 }
 .inspector-counter {
-  /* 1.5x board scale (118.8px, matches Inspector.tsx's INSPECTOR_COUNTER_SIZE).
-     2x forced the header text to wrap and pushed the rest of the panel down. */
+  /* 3x board scale (237.6px, matches Inspector.tsx's INSPECTOR_COUNTER_SIZE). */
   flex: 0 0 auto;
-  width: 118.8px;
+  width: 237.6px;
+}
+.inspector-counter-range {
+  text-align: center;
+  font-size: 1.0rem;
+  color: var(--dim);
 }
 
 .track {

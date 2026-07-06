@@ -198,8 +198,8 @@ export function UnitCounter({
             const w = fs * (0.4 + label.length * 0.32);
             return (
               <g>
-                <rect x={x} y={y + s} width={w} height={fs} rx={2} fill="#3a6ab2" />
-                <text x={x + w / 2} y={y + s + fs * 0.8} fontSize={fs * 0.7} fill="#fff" fontWeight={700} textAnchor="middle">
+                <rect x={center.x - w / 2} y={y + s} width={w} height={fs} rx={2} fill="#3a6ab2" />
+                <text x={center.x} y={y + s + fs * 0.8} fontSize={fs * 0.7} fill="#fff" fontWeight={700} textAnchor="middle">
                   {label}
                 </text>
               </g>

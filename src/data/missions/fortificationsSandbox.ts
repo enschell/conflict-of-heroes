@@ -42,7 +42,7 @@ for (let r = 0; r < 4; r++) {
 const UNITS: UnitPlacement[] = [
   // Germans (A), facing east (facing 0).
   { id: 'G-rifle', side: 'A', templateId: 'ger-rifle', hexId: hexId(0, 0), facing: 0 },
-  { id: 'G-pz3', side: 'A', templateId: 'ger-pz3', hexId: hexId(0, 1), facing: 0 }, // for the §17.11 two-roll destroy test
+  { id: 'G-pz3', side: 'A', templateId: 'ger-pz3h', hexId: hexId(0, 1), facing: 0 }, // for the §17.11 two-roll destroy test
   { id: 'G-rifle2', side: 'A', templateId: 'ger-rifle', hexId: hexId(0, 2), facing: 0 }, // for the Hasty Defense demo
   { id: 'G-pioneer', side: 'A', templateId: 'ger-pioneer', hexId: hexId(0, 3), facing: 0 }, // §18.0-§18.1 Flamethrower demo
   // Soviets (B), facing west (facing 3) — start AT the Trench/Bunker Hexes;

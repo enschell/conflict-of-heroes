@@ -4,7 +4,7 @@
  * Move/fire are also available by clicking the board. v3: each Action is
  * followed by a Spent Check (§2.5) and Stresses the unit (§2.6).
  */
-import { attackContext, closeCombatContext, directionTo, effectiveStats, legalActionsForUnit, RALLY_AP_COST, templateOf } from '../engine';
+import { attackContext, closeCombatContext, directionTo, legalActionsForUnit, RALLY_AP_COST, templateOf } from '../engine';
 import { isHopelessShot } from './odds';
 import { HIT_MARKERS, hitMarkerEffects, markerName } from '../data/hitMarkers';
 import type { Facing, GameState, Unit } from '../engine/types';
@@ -14,10 +14,31 @@ import { HEX_SIZE } from './hexgeo';
 
 const ARROWS = ['→', '↗', '↖', '←', '↙', '↘'];
 
-// 1.5x board scale — 2x forced the header text to wrap and pushed the rest
-// of the panel down, so this dropped down a tier (see .inspector-counter).
-const INSPECTOR_COUNTER_SIZE = HEX_SIZE * 1.5;
+// EXPERIMENTAL (easy to roll back — see git history): 3x board scale, counter
+// moved below the name, with text labels beside the printed numbers instead
+// of a separate stats-grid.
+const INSPECTOR_COUNTER_SIZE = HEX_SIZE * 3;
 const INSPECTOR_COUNTER_BOX = INSPECTOR_COUNTER_SIZE * 2.2;
+// The counter face (UnitCounter's own `s = size * 1.42`) is centered inside
+// the box, leaving equal padding above/below for floating badges (hit marker
+// above; Hasty Defense / Fortification below) — used to pull the Range label
+// up snug against the counter's real bottom edge instead of the box's.
+const INSPECTOR_COUNTER_FACE = INSPECTOR_COUNTER_SIZE * 1.42;
+const INSPECTOR_COUNTER_PAD = (INSPECTOR_COUNTER_BOX - INSPECTOR_COUNTER_FACE) / 2;
+// Label top-% values, ported from UnitCounter.tsx's own new-style layout math
+// (fs/pad/s) — but expressed as a fraction of the full BOX (not the face:
+// the label column stretches to match the counter div's rendered height,
+// which is the box, so a face-relative fraction alone put every label too
+// high, closer to the name banner than the actual number).
+const INSPECTOR_FS = INSPECTOR_COUNTER_SIZE * 0.27;
+const INSPECTOR_PAD_INNER = INSPECTOR_COUNTER_SIZE * 0.12;
+const LABEL_TOP_ATTACK_MOVE = ((INSPECTOR_COUNTER_PAD + INSPECTOR_FS * 0.9) / INSPECTOR_COUNTER_BOX) * 100;
+const LABEL_TOP_UPPER_STACK =
+  ((INSPECTOR_COUNTER_PAD + INSPECTOR_COUNTER_FACE - INSPECTOR_PAD_INNER * 0.6 - INSPECTOR_FS * 1.05) /
+    INSPECTOR_COUNTER_BOX) *
+  100;
+const LABEL_TOP_LOWER_STACK =
+  ((INSPECTOR_COUNTER_PAD + INSPECTOR_COUNTER_FACE - INSPECTOR_PAD_INNER * 0.6) / INSPECTOR_COUNTER_BOX) * 100;
 
 function InspectorCounter({ game, unit }: { game: GameState; unit: Unit }) {
   return (
@@ -68,7 +89,6 @@ export function Inspector() {
 
   const unit = game.units[selectedUnitId]!;
   const tmpl = templateOf(game, unit);
-  const eff = effectiveStats(game, unit);
   const player = game.players[unit.side];
   const yours = unit.side === game.currentSide;
   const acts = yours ? legalActionsForUnit(game, unit.id) : [];
@@ -117,40 +137,35 @@ export function Inspector() {
   return (
     <div className="panel">
       <div className="inspector-header">
-        <div className="inspector-header__text">
-          <h3>{tmpl.name}</h3>
-          <div className="stats-grid">
-            <span>Side</span>
-            <b>{unit.side}</b>
-            <span>Status</span>
-            <b>
-              {unit.status}
-              {unit.stressed ? ' · stressed' : ''}
-            </b>
-            <span>Hex / facing</span>
-            <b>
-              {unit.hexId} {ARROWS[unit.facing]}
-            </b>
-            <span>Firepower</span>
-            <b>
-              {eff.fp.red}
-              {eff.fp.blue ? ` / ${eff.fp.blue}b` : ''}
-            </b>
-            <span>Defense</span>
-            <b>
-              {eff.dr.front}f / {eff.dr.flank}k ({eff.dr.color})
-            </b>
-            <span>Move · Range</span>
-            <b>
-              {eff.move} · {eff.range}
-            </b>
-            <span>Fire cost · VP</span>
-            <b>
-              {eff.apToFire} AP · {tmpl.vp}
-            </b>
+        <h3>{tmpl.name}</h3>
+        <div className="inspector-counter-row">
+          <div className="inspector-counter-labels inspector-counter-labels--left">
+            <span className="inspector-counter-labels__item" style={{ top: `${LABEL_TOP_ATTACK_MOVE}%` }}>
+              Attack
+            </span>
+            <span className="inspector-counter-labels__item" style={{ top: `${LABEL_TOP_UPPER_STACK}%` }}>
+              Red FP
+            </span>
+            <span className="inspector-counter-labels__item" style={{ top: `${LABEL_TOP_LOWER_STACK}%` }}>
+              Blue FP
+            </span>
+          </div>
+          <InspectorCounter game={game} unit={unit} />
+          <div className="inspector-counter-labels inspector-counter-labels--right">
+            <span className="inspector-counter-labels__item" style={{ top: `${LABEL_TOP_ATTACK_MOVE}%` }}>
+              Move
+            </span>
+            <span className="inspector-counter-labels__item" style={{ top: `${LABEL_TOP_UPPER_STACK}%` }}>
+              Flank
+            </span>
+            <span className="inspector-counter-labels__item" style={{ top: `${LABEL_TOP_LOWER_STACK}%` }}>
+              Front
+            </span>
           </div>
         </div>
-        <InspectorCounter game={game} unit={unit} />
+        <div className="inspector-counter-range" style={{ marginTop: -(INSPECTOR_COUNTER_PAD - 4) }}>
+          Range
+        </div>
       </div>
 
       {unit.hitMarkers[0] && (
@@ -161,6 +176,13 @@ export function Inspector() {
               <li key={line}>{line}</li>
             ))}
           </ul>
+          {!rallyable && (
+            <p className="dim">
+              {enemyHere
+                ? "Can't Rally: sharing a Hex with an enemy (§7.9)."
+                : "Can't Rally: this marker has no Rally Number."}
+            </p>
+          )}
         </div>
       )}
 
@@ -240,6 +262,18 @@ export function Inspector() {
             </div>
           )}
 
+
+          {canPivot && (
+            <div className="pivot-row">
+              <span className="dim">Pivot (free, §4.5/§15.11):</span>
+              {ARROWS.map((arrow, f) => (
+                <button key={f} className="icon-btn" disabled={f === unit.facing} onClick={() => pivot(unit.id, f as Facing)}>
+                  {arrow}
+                </button>
+              ))}
+            </div>
+          )}
+          
           {fireActs.length > 0 && (
             <div className="fire-list">
               <div className="dim">Fire targets:</div>
@@ -284,23 +318,12 @@ export function Inspector() {
             </div>
           )}
 
-          {canPivot && (
-            <div className="pivot-row">
-              <span className="dim">Pivot:</span>
-              {ARROWS.map((arrow, f) => (
-                <button key={f} className="icon-btn" disabled={f === unit.facing} onClick={() => pivot(unit.id, f as Facing)}>
-                  {arrow}
-                </button>
-              ))}
-            </div>
-          )}
 
           {loadActs.length > 0 && (
             <div className="fire-list">
-              <div className="dim">Load onto (§15.7 — or click the amber-outlined hex):</div>
               {loadActs.map((a) => (
                 <button key={a.vehicleId} onClick={() => load(unit.id, a.vehicleId)}>
-                  🚚 Load onto {a.vehicleId}
+                  🚚 Load onto {a.vehicleId} (or click the amber-outlined hex §15.7)
                 </button>
               ))}
             </div>
@@ -320,13 +343,6 @@ export function Inspector() {
                 );
               })}
             </div>
-          )}
-
-          {acts.length > 0 && (
-            <p className="dim">
-              After acting, a Spent Check decides if {unit.id} stays Fresh; the
-              unit becomes Stressed (+1AP next Turn).
-            </p>
           )}
         </div>
       )}

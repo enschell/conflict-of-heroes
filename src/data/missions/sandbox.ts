@@ -26,7 +26,7 @@ const at = (label: string) => hexIdForLabel(label);
 
 const UNITS: UnitPlacement[] = [
   // Germans (A) facing north (facing 1 = NE).
-  { id: 'G-pz3', side: 'A', templateId: 'ger-pz3', hexId: at('F06'), facing: 1 },
+  { id: 'G-pz3', side: 'A', templateId: 'ger-pz3h', hexId: at('F06'), facing: 1 },
   { id: 'G-rifle', side: 'A', templateId: 'ger-rifle', hexId: at('F05'), facing: 1 },
   // Two more German rifles, each one Hex from S-rifle (§10.6 Group Close Combat test).
   { id: 'G-rifle2', side: 'A', templateId: 'ger-rifle', hexId: at('I07'), facing: 3 },

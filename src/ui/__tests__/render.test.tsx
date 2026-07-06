@@ -12,6 +12,7 @@ import { App } from '../../App';
 import { SavesDialog } from '../SavesDialog';
 import { useGame } from '../../state/store';
 import { ARMOR_SANDBOX } from '../../data/missions/sandbox';
+import { templateOf } from '../../engine';
 
 function render(): string {
   const el = document.createElement('div');
@@ -63,8 +64,11 @@ describe('UI renders', () => {
     const own = Object.values(g.units).find((u) => u.side === g.currentSide)!;
     useGame.getState().select(own.id);
     const html = render();
-    expect(html).toContain(own.id);
-    expect(html).toContain('Spent Check'); // v3 inspector note (no more Activate)
+    // Inspector's header no longer prints the raw unit id or a "Spent Check"
+    // note (both lived in a paragraph that's since been removed) — assert on
+    // the unit's name (still the header) and its Move action prompt instead.
+    expect(html).toContain(templateOf(g, own).name);
+    expect(html).toContain('Move:');
   });
 
   it('renders the dice modal when a roll is pending', () => {

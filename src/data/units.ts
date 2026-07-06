@@ -102,20 +102,21 @@ export const GERMAN_UNITS: UnitTemplate[] = [
   {
     // M6 vehicle (Armored Target, blue Defense). Stats are ours; movement
     // bonus-move / wheeled-tracked fields arrive with the vehicle-movement step.
-    id: 'ger-pz3',
+    id: 'ger-pz3h',
     nation: 'germans',
-    name: 'Panzer III',
+    name: 'Panzer IIIh',
     kind: 'vehicle',
-    fp: { red: 4, blue: 8 },
-    dr: { front: 16, flank: 13, color: 'blue' },
-    move: 2,
-    range: 12,
+    fp: { red: 3, blue: 8 },
+    dr: { front: 17, flank: 15, color: 'blue' },
+    move: 1,
+    range: 9,
     apToFire: 3,
     vp: 3,
     unburdened: false,
     propulsion: 'tracked',
     bonusMoves: 1,
     turreted: true, // §16.2 — the Pz III's 360° turret can fire outside its Arc for +2AP
+    counterImage: '/assets/units/Ger Pz IIIh.png',
   },
   {
     // §16.7 Field Gun: crewed, towable (15.6) rather than self-mobile; green
@@ -285,6 +286,7 @@ export const SOVIET_UNITS: UnitTemplate[] = [
     propulsion: 'tracked',
     bonusMoves: 2,
     turreted: true, // §16.2 — the T-34's 360° turret can fire outside its Arc for +2AP
+    counterImage: '/assets/units/T34 facing left.png',
   },
   {
     // M7 (§13, §14): 82mm mortar. Crew-served (whiteBoxFp: −2AR in CC, §13.1).

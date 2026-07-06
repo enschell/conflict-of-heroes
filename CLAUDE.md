@@ -324,7 +324,10 @@ target's DR colour (blue → vehicle pile, red → foot pile).
     CLOSE_COMBAT Action set `useFlamethrower: true` for a flat 3 red/3 blue FP, max Range 1 profile
     that always hits Flank DR and ignores every DR modifier but Smoke; `pioneer?` (Foot only) adds the
     §18.1 exceptions on top — immune to Mines Attacks, and its own `canFireSmoke` is capped to Range 1
-    regardless of the Unit's normal (longer) Range.
+    regardless of the Unit's normal (longer) Range. **Counter art (prototype):** `counterImage?: string`
+    (a `public/assets/units/...` path) swaps a Unit's board/HoverPanel/Inspector counter from the plain
+    nation-color+text rendering to the redesigned image-backed layout — see `UnitCounter.tsx` under
+    "Requested UI features" below. Opt-in per template; omit the field to keep the old rendering.
   - **Add a card:** `{ id, type:'action'|'bonus'|'mission'|'artillery', cost:{green?,blue?}, effect }`
     in `data/cards/` (v3 Green/Blue cost, 8.5). Effects are engine actions/modifiers, not UI code.
   - **Add a mission:** new file in `data/missions/` with maps, placements (by hex label), starting
@@ -505,6 +508,62 @@ Spent-Check die instead of a remaining-AP pool)*
   dispatched Action. Board-click (`hexClick`/`ActionChooser.tsx`) deliberately stays normal-Fire-only
   for now — Flamethrower attacks go through Inspector.tsx, a follow-up could add it to the board click
   path too.
+- **Image-backed unit counters** ✅ (`UnitCounter.tsx`, opt-in via `counterImage`, see above) — a Unit
+  whose template sets `counterImage` renders a redesigned counter face instead of the plain nation-
+  color+text one: the art fills the whole counter (clipped to its rounded corners), a green trapezoid
+  banner (widest — 65% — at the very top edge, narrowing going down) holds the Unit's name, Attack Cost
+  (black) sits top-left and Move Cost top-right (colored by kind — red foot/gun/mg/mortar, green
+  Wheeled vehicle, blue Tracked — extending §15.1's existing wheeled/tracked Move Cost color to foot
+  units too, a prototype convention not yet a real rule), red-over-blue Firepower stacks bottom-left,
+  a black hex badge holds Range bottom-center, and flank-over-front Defense (colored by DR type) stacks
+  bottom-right — all at the numbers' existing size (`fs = size × 0.27`, same as the old rendering, so
+  it matches actual board scale). Hit-marker/Hasty-Defense/Fortification-occupying badges float just
+  above/below the counter (the corners are otherwise fully packed in this layout) — **do not forget
+  these when touching the `counterImage` branch**; they were dropped once already when the layout was
+  first built and only caught later because a real Suppressed marker didn't show. `ignoreFacing?` prop
+  (default false) skips the facing-rotation transform — used by HoverPanel/Inspector's upright preview
+  copies, not the board. **`useId()`, not `unit.id`, drives the `<clipPath>` id** — the same Unit can
+  be mounted twice at once (board + HoverPanel/Inspector simultaneously); a shared id makes `url(#...)`
+  resolve to whichever `<clipPath>` came first in the DOM, silently clipping the *other* copy's
+  `<image>` against the wrong (e.g. board-scale) rect and hiding it entirely. Real art currently lives
+  at `public/assets/units/` for `sov-rifle` and a couple of German units — most templates still render
+  old-style.
+- **HoverPanel / Inspector counter previews** ✅ both panels render the hovered/selected Unit through
+  `UnitCounter` too (not a separate mini-renderer), always with `ignoreFacing` (an inspector view reads
+  better upright than rotated to the Unit's actual facing). HoverPanel: full board scale per Unit
+  (`HEX_SIZE`), stacked hexes chunked into rows of (at most) 3 via a small `chunk()` helper — a 5-Unit
+  stack is a row of 3 + a row of 2, not one long unreadable row or an uneven auto-wrap; each cell's
+  `flex-basis` is the literal per-Unit size with `flex-wrap: nowrap`, so 1–2 Units show at full size and
+  flexbox's own shrink math only kicks in once a 3rd would actually overflow the row — a static
+  `min(size, 1/3 row)` formula was tried first and was wrong (it capped every cell at 1/3 width
+  regardless of how many Units were actually present). Headings renamed **"Terrain in Hex"** (was
+  "Under cursor") and **"Units in Hex:"** (was "Units here:", now bold/`1rem` to match the heading).
+  **Inspector — EXPERIMENTAL, easy to roll back (not a locked design):** the old Side/Status/Hex-
+  facing/Firepower/Defense/Move·Range/Fire-cost·VP `stats-grid` text block is gone, replaced by a 3×
+  board-scale counter below the Unit's name with small text labels beside the counter instead of on
+  it — "Attack"/"Move" beside the top corners, "Red FP"/"Blue FP" and "Flank"/"Front" beside the bottom
+  stacks, "Range" centered just under the bottom edge. Trade-off: Side/Status(fresh-spent-stressed)/
+  Hex-facing/VP have no equivalent on the counter face and aren't shown anywhere in this layout anymore.
+  Label vertical position is **fraction-of-the-full-SVG-box**, not fraction-of-the-counter-face — the
+  label column stretches to match the counter div's rendered height (the box, which includes the
+  padding reserved above/below for the floating badges above), so a face-relative fraction alone put
+  every label noticeably higher than the number it's meant to sit beside (a real bug, caught by the
+  user's own annotated screenshot of where the labels should point). Horizontal inset is negative
+  (labels overlap *into* the counter by the same `pad` UnitCounter.tsx indents each number from the
+  edge), so a label lands right at its number rather than stopping at the image border. The "After
+  acting, a Spent Check decides if {id} stays Fresh..." paragraph was removed per user request — if
+  you're tempted to assert on it or on the bare unit-id string in a test, don't: neither is rendered
+  anywhere in the Inspector header any more (see `render.test.tsx`'s fix for this exact trap).
+- **Rally-blocked explanation** ✅ `Inspector.tsx`'s hit-note now says *why* a Hit Unit can't Rally when
+  it can't: "sharing a Hex with an enemy (§7.9)" or "this marker has no Rally Number" — `rallyable`
+  already encoded both conditions, this just surfaces the reason instead of silently omitting the
+  button.
+- **Auto-select the incoming side's Stressed Unit** ✅ `store.ts`'s `dispatch()` — whenever an Action
+  changes `currentSide` (i.e. the turn just passed), if the new side has a Stressed Unit (§2.6: at most
+  one per side, a Marker that moves, not a persistent per-unit flag) it's auto-selected, replacing
+  whatever the *outgoing* side had selected. Falls in priority just below the existing
+  `pendingFacingChoices` auto-select (§4.5/§15.11) — that one belongs to the *outgoing* side's
+  just-moved Unit and should win if both apply in the same dispatch.
 
 ---
 

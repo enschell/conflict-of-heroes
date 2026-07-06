@@ -66,7 +66,7 @@ const UNITS: UnitPlacement[] = [
   // Germans (A), facing east (facing 0).
   { id: 'G-rifle', side: 'A', templateId: 'ger-rifle', hexId: hexId(0, 1), facing: 0 },
   { id: 'G-hilltop', side: 'A', templateId: 'ger-lmg', hexId: hexId(3, 1), facing: 0 },
-  { id: 'G-tank', side: 'A', templateId: 'ger-pz3', hexId: hexId(1, 1), facing: 0 },
+  { id: 'G-tank', side: 'A', templateId: 'ger-pz3h', hexId: hexId(1, 1), facing: 0 },
   { id: 'G-mesa', side: 'A', templateId: 'ger-rifle', hexId: hexId(1, 4), facing: 0 },
   // Soviets (B), facing west (facing 3).
   { id: 'S-rifle', side: 'B', templateId: 'sov-rifle', hexId: hexId(6, 1), facing: 3 },

@@ -1089,11 +1089,23 @@ export const useGame = create<Store>((set, get) => {
       // other side, so normal click-to-select (current-side-only) couldn't
       // reach it otherwise. The most recently granted Unit wins if several.
       const pending = res.state.pendingFacingChoices;
+      // When the turn passes to the other side, auto-select that side's
+      // Stressed Unit (at most one per side, §2.6) if it has one — deselects
+      // whatever the outgoing side had selected, since a fresh side's turn
+      // starting is a clean slate. Falls through to the pendingFacingChoices
+      // case above it, which is a required prompt for the OUTGOING side's
+      // just-moved Unit and should win if both apply.
+      const turnChangedTo = res.state.currentSide !== game.currentSide ? res.state.currentSide : null;
+      const stressedForNewTurn = turnChangedTo
+        ? Object.values(res.state.units).find((u) => u.side === turnChangedTo && u.stressed)
+        : undefined;
       const selectedUnitId = pending?.length
         ? pending[pending.length - 1]!
-        : get().selectedUnitId && res.state.units[get().selectedUnitId!]
-          ? get().selectedUnitId
-          : null;
+        : stressedForNewTurn
+          ? stressedForNewTurn.id
+          : get().selectedUnitId && res.state.units[get().selectedUnitId!]
+            ? get().selectedUnitId
+            : null;
       const advancedRound = res.state.round > game.round && res.state.phase === 'playing';
       saveAuto(res.state);
       set({
