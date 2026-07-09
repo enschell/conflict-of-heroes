@@ -142,6 +142,21 @@ presentation changed (a large graphic in its own cell, not a text prefix). Statu
   the Units if the reducer ever disagrees (defense in depth, per CLAUDE.md §3's "legality lives in the
   engine, not the UI's own assumptions"). Verified live in-browser: two German Rifle Squads entered
   together at adjacent west-edge Hexes as one Group Action ("Group 0AP action — no Spent Check").
+  **Live preview counter while placing** ✅ (follow-up): a queued reinforcement Unit isn't a real
+  `Unit` (in `game.units`) until the whole ENTER dispatches, so with no extra handling nothing would
+  render on the board until every queued Unit had both a Hex *and* a facing — the user had to place
+  blind. `Board.tsx` now synthesizes a preview `Unit` (fresh, no hit markers, not carried) the instant
+  a Hex is chosen: while `placingReinforcementFacing` is open it renders at the wave's suggested
+  facing, and once `chooseReinforcementFacing`/`useDefaultReinforcementFacing` commits, the *next*
+  render reads the real facing straight out of `placingReinforcementDone` — a plain re-render "snap"
+  to whatever the store says, the same mechanism the real §4.5 free-facing-correction picker already
+  uses elsewhere, not a new animation/interpolation system. Preview `Unit`s merge straight into the
+  same `unitsByHex` map real ones use, so stacking/fan-out and the transition to the real `Unit` once
+  ENTER actually dispatches both come for free with zero extra code. Verified live: a single-Unit
+  placement shows the counter immediately on Hex click and updates the instant a facing is chosen; a
+  two-Unit Group placement keeps the first member's counter visible (read from
+  `placingReinforcementDone`) while the second is still being placed, and both settle into real
+  `Unit`s with no flicker/duplication once the Group ENTER commits.
 - **Why the engine itself needed no changes for the geometry swap:** `engine/hex.ts`'s adjacency
   (`neighbor`/`distance`/`lineDraw`) and `movement.ts`'s wall-crossing (`wallBetween`) are pure
   axial-index arithmetic with **zero pixel/orientation dependency** — only `axialToPixel` (used

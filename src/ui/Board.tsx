@@ -256,6 +256,54 @@ export function Board() {
     unitsByHex.set(u.hexId, arr);
   }
 
+  // Manual/Group reinforcement placement (§4.12): a queued Unit doesn't
+  // become a real Unit (in `game.units`) until the whole ENTER dispatches —
+  // otherwise nothing would render on the board until every queued Unit has
+  // both a Hex AND a facing. Synthesize a preview counter the instant a Hex
+  // is chosen (fresh, no hit markers — it hasn't Stressed or taken a Hit
+  // yet), using the wave's suggested facing until the player picks one;
+  // `placingReinforcementDone` already holds an explicit chosen facing by
+  // the time an entry lands there, so this "snaps" to the real facing the
+  // same way the real free-facing-correction picker does elsewhere — no
+  // separate animation/interpolation needed, just render whatever the store
+  // currently says.
+  const previewReinforcement = (unitId: string, hexId: string, facing: number): Unit | null => {
+    const r = game.reinforcements.find((x) => x.id === unitId);
+    if (!r) return null;
+    return {
+      id: r.id,
+      side: r.side,
+      nation: r.nation,
+      templateId: r.templateId,
+      hexId,
+      facing: facing as Facing,
+      status: 'fresh',
+      stressed: false,
+      hitMarkers: [],
+      assignedWeaponCards: [],
+    };
+  };
+  for (const d of placingReinforcementDone) {
+    const preview = previewReinforcement(d.unitId, d.hexId, d.facing);
+    if (!preview) continue;
+    const arr = unitsByHex.get(preview.hexId) ?? [];
+    arr.push(preview);
+    unitsByHex.set(preview.hexId, arr);
+  }
+  if (placingReinforcementFacing) {
+    const r = game.reinforcements.find((x) => x.id === placingReinforcementFacing.unitId);
+    const preview = previewReinforcement(
+      placingReinforcementFacing.unitId,
+      placingReinforcementFacing.hexId,
+      r?.facing ?? 0,
+    );
+    if (preview) {
+      const arr = unitsByHex.get(preview.hexId) ?? [];
+      arr.push(preview);
+      unitsByHex.set(preview.hexId, arr);
+    }
+  }
+
   // Fire-odds popup when hovering a hex with a selected attacker. A shot resolves
   // the whole hex (§7.5.1), so show one row per targetable enemy (in the same
   // deterministic id order the engine rolls them).
