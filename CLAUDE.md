@@ -595,6 +595,14 @@ Spent-Check die instead of a remaining-AP pool)*
 - **Spent-Check / opportunity confirm** ✅ acting with a unit prompts the Spent-Check die flow
   (replaces the old opportunity-spend confirm); `ConfirmDialog`.
 - **Turn banner** ✅ `TurnBanner.tsx` "Start of turn N".
+- **Persistent Turn header** ✅ `TurnHeader.tsx` — a colored bar directly above the board, always
+  visible (unlike `TurnBanner.tsx`'s one-per-Round, click-to-dismiss popup), showing "{Nation}'s
+  Turn" — updates live the instant `currentSide` flips. Never a bare Side letter (same convention as
+  `VictoryScreen.tsx`); handles a plural nation name already ending in "s" ("Germans", "Soviets")
+  with a bare apostrophe ("Germans' Turn") rather than a double-s ("Germans's Turn"). `App.tsx` wraps
+  it with `<Board/>` in a new `.board-wrap` column-flex div so it stacks *above* the board without
+  touching `.center`'s own row-flex layout (which several modal overlays — `ActionChooser`,
+  `DiceRoller`, `VictoryScreen`, etc. — sit alongside as siblings and shouldn't be disturbed).
 - **Readouts + dice in log** ✅ track sheet/inspector show **Fresh/Spent + Stress** and CAPs; the log
   prints the actual 2d6 (fire/rally/initiative) and the Spent-Die result.
 - **Animated clickable dice with sound** ✅ `DiceRoller.tsx` — dice show `?` until clicked, then

@@ -230,12 +230,12 @@ export function Board() {
     activeGroupMoveUnit?.hexId ??
     null;
   const facingHighlightLabel = placingReinforcementFacing
-    ? 'Choose facing (or click here for default)'
+    ? 'Choose facing'
     : facingChoiceUnit
       ? 'Choose facing'
       : pivotPickerUnit
         ? 'Pivot (P)'
-        : 'Move Group member (or click here to leave in place)';
+        : 'Move Group member';
   if (facingHighlightHex && !activeGroupMoveUnit) {
     for (const n of neighbors(parseHexId(facingHighlightHex))) {
       const nid = idOf(n);

@@ -98,7 +98,7 @@ describe('UI renders', () => {
     // v3: the winner is the VP-Advantage holder (positive marker = Side A).
     const finished = { ...useGame.getState().game!, phase: 'gameOver' as const, vpMarker: 3 };
     useGame.setState({ game: finished });
-    expect(render()).toContain('Side A wins');
+    expect(render()).toContain('Germans win!'); // Mission 1's Side A nation — no bare "Side A" text
   });
 
   it('shows the under-cursor hover panel with terrain of the hovered hex', () => {

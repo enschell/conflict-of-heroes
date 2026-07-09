@@ -23,6 +23,7 @@ import { ReinforcementsPanel } from './ui/ReinforcementsPanel';
 import { SetupScreen } from './ui/SetupScreen';
 import { TrackSheet } from './ui/TrackSheet';
 import { TurnBanner } from './ui/TurnBanner';
+import { TurnHeader } from './ui/TurnHeader';
 import { VictoryScreen } from './ui/VictoryScreen';
 
 export function App() {
@@ -159,7 +160,10 @@ export function App() {
       </aside>
 
       <main className="center">
-        <Board />
+        <div className="board-wrap">
+          <TurnHeader />
+          <Board />
+        </div>
         <ActionChooser />
         <DiceRoller />
         <ConfirmDialog />

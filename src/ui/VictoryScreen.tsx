@@ -17,14 +17,14 @@ export function VictoryScreen() {
   return (
     <div className="modal-backdrop">
       <div className="victory">
-        <h2>Side {winner} wins!</h2>
-        <p className="victory__adv">VP Advantage: Side {winner} +{margin}</p>
+        <h2>{label(winner)} win!</h2>
+        <p className="victory__adv">VP Advantage: {label(winner)} +{margin}</p>
         <div className="victory__scores">
           <div>
-            Side A · {label('A')}: <b>{scores.A} VP</b>
+            {label('A')}: <b>{scores.A} VP</b>
           </div>
           <div>
-            Side B · {label('B')}: <b>{scores.B} VP</b>
+            {label('B')}: <b>{scores.B} VP</b>
           </div>
         </div>
         <button className="primary" onClick={() => newGame()}>
