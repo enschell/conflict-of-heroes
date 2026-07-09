@@ -513,6 +513,24 @@ Spent-Check die instead of a remaining-AP pool)*
   `data/hexBoardMap.ts`'s generator gets them for free; hand-authored missions (Mission 1, the
   sandboxes) don't set `Hex.edgeCut`/`boardNumber` and so render as plain full hexes with no labels,
   same as before §B.
+- **Mouse-wheel zoom, centered on the cursor** ✅ `Board.tsx` drives the `<svg>`'s own `viewBox`
+  directly from `zoom`/`pan` state (default `zoom=1, pan={0,0}` = today's fixed viewBox exactly, a
+  no-op for anyone who never scrolls) — no CSS transform needed. A real native `wheel` listener
+  (attached once via a ref) computes the cursor's position in the *current* viewBox's user-space via
+  `getScreenCTM().inverse()`, then solves for the new `pan` that keeps that exact point fixed under
+  the cursor at the new zoom level; clamped to `[0.5, 4]×`. **A real bug caught and fixed before
+  shipping:** the first version computed the new `pan` via `setPan(...)` called *from inside*
+  `setZoom`'s functional-updater callback — impure (a `setState` call is a side effect), and
+  `<StrictMode>` (`main.tsx`) deliberately double-invokes updater functions to catch exactly this,
+  which visibly made the zoom drift off the cursor instead of staying put. Fixed by reading/writing a
+  plain ref (`viewRef`, kept current every render) instead of nested updater functions — `setZoom`/
+  `setPan` are now called with already-computed plain values, never a function with a side effect
+  inside it. Verified via `getScreenCTM()`-based round-trip checks (dispatch a wheel event, re-measure
+  the same screen point in SVG-space, confirm it hasn't moved) at both zoom-in and zoom-out, plus
+  confirmed the `[0.5, 4]×` clamp holds under repeated ticks (must be dispatched with a settle/RAF
+  between each in tests — firing several synchronously in one JS turn without waiting starves the
+  ref of updates between them and under-counts, a test-methodology gotcha, not a real one: actual
+  browser wheel events always arrive as separate tasks).
 - **Unit facing (§4.1)** ✅ `UnitCounter.tsx` rotates the whole counter (not an overlay arrow) so its
   **green top-edge bar** (+ a small outward notch) sits flush against whichever of the six hexsides it
   faces — matching the physical counter/rotate-in-place metaphor exactly (a corner is never a legal

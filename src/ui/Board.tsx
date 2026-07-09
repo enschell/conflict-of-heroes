@@ -8,6 +8,7 @@
  * enemy shows a fire-odds popup; Ctrl+click a stacked hex opens a unit
  * picker. Clicks/hover route through the store.
  */
+import { useEffect, useRef, useState } from 'react';
 import { attackContext, directionTo, distance, effectiveStats, fortificationAt, legalActionsForUnit, legalEntryHexes, moveCost, neighbor, neighbors, parseHexId, idOf, planVehicleMove, templateOf, visibleHexesFrom } from '../engine';
 import type { Action, Facing, FortificationKind, Unit } from '../engine/types';
 import { useGame } from '../state/store';
@@ -49,11 +50,66 @@ export function Board() {
   const hexClick = useGame((s) => s.hexClick);
   const closePicker = useGame((s) => s.closePicker);
 
+  // Mouse-wheel zoom, centered on the cursor. `zoom`/`pan` directly drive the
+  // <svg>'s own `viewBox` below (zoom=1, pan={0,0} is exactly today's fixed
+  // viewBox — a no-op for anyone who never scrolls). A plain `onWheel` JSX
+  // prop can't reliably `preventDefault()` (React attaches wheel listeners
+  // as passive by default), so this attaches a real, non-passive native
+  // listener once via a ref instead. `viewRef`/`layoutRef` carry the latest
+  // zoom/pan/layout-size into that stable listener without needing to
+  // reattach it every render (and without calling `setPan` *from inside*
+  // `setZoom`'s updater function, which — with `<StrictMode>`, main.tsx —
+  // gets double-invoked to catch exactly this kind of impurity; caught live:
+  // the double-invoke compounded the pan math and the point under the
+  // cursor visibly drifted instead of staying put. Reading/writing plain
+  // refs and calling `setZoom`/`setPan` with already-computed values instead
+  // of updater functions sidesteps that entirely).
+  const svgRef = useRef<SVGSVGElement>(null);
+  const [zoom, setZoom] = useState(1);
+  const [pan, setPan] = useState({ x: 0, y: 0 });
+  const layoutRef = useRef({ width: 0, height: 0 });
+  const viewRef = useRef({ zoom, pan });
+  const MIN_ZOOM = 0.5;
+  const MAX_ZOOM = 4;
+  useEffect(() => {
+    const svg = svgRef.current;
+    if (!svg) return;
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      const pt = svg.createSVGPoint();
+      pt.x = e.clientX;
+      pt.y = e.clientY;
+      const ctm = svg.getScreenCTM();
+      if (!ctm) return;
+      // Cursor position in the CURRENT viewBox's user-space coordinates —
+      // this is the point that must stay fixed under the cursor.
+      const cursor = pt.matrixTransform(ctm.inverse());
+      const { zoom: prevZoom, pan: prevPan } = viewRef.current;
+      const factor = e.deltaY < 0 ? 1.15 : 1 / 1.15; // scroll up = zoom in
+      const nextZoom = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, prevZoom * factor));
+      if (nextZoom === prevZoom) return;
+      const { width, height } = layoutRef.current;
+      const prevViewW = width / prevZoom;
+      const prevViewH = height / prevZoom;
+      const fracX = (cursor.x - prevPan.x) / prevViewW;
+      const fracY = (cursor.y - prevPan.y) / prevViewH;
+      const nextViewW = width / nextZoom;
+      const nextViewH = height / nextZoom;
+      const nextPan = { x: cursor.x - fracX * nextViewW, y: cursor.y - fracY * nextViewH };
+      setZoom(nextZoom);
+      setPan(nextPan);
+    };
+    svg.addEventListener('wheel', onWheel, { passive: false });
+    return () => svg.removeEventListener('wheel', onWheel);
+  }, []);
+
   if (!game) return null;
 
   // Non-playable edge hexes, drawn (clipped) as the board's half-hex border.
   const fringe = fringeHexes(game);
   const layout = computeLayout(game, HEX_SIZE, HEX_SIZE * 0.7, fringe);
+  layoutRef.current = { width: layout.width, height: layout.height };
+  viewRef.current = { zoom, pan };
   const bounds = playableBounds(game, HEX_SIZE); // clip edge for the fringe
   const clipPoints = pointsAttr(hexCorners({ x: 0, y: 0 }));
   const artW = Math.sqrt(3) * HEX_SIZE;
@@ -314,8 +370,9 @@ export function Board() {
   return (
     <>
       <svg
+        ref={svgRef}
         className="board"
-        viewBox={`0 0 ${layout.width} ${layout.height}`}
+        viewBox={`${pan.x} ${pan.y} ${layout.width / zoom} ${layout.height / zoom}`}
         preserveAspectRatio="xMidYMid meet"
         onMouseLeave={() => setHover(null)}
       >
