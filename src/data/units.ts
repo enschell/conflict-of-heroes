@@ -70,6 +70,23 @@ export const GERMAN_UNITS: UnitTemplate[] = [
     canFireSmoke: true,
   },
   {
+    // NON-CANONICAL: Mission 1's "SS Tracker Unit" reinforcement (§4.12,
+    // Round 3) — same body/stats as ger-pioneer, but explicitly fielded
+    // without its Flamethrower/Smoke/Pioneer-exception kit (mission design
+    // choice, not a printed rulebook unit).
+    id: 'ger-pioneer-tracker',
+    nation: 'germans',
+    name: 'SS Tracker Unit',
+    kind: 'infantry',
+    fp: { red: 4, blue: 3 },
+    dr: { front: 12, flank: 12, color: 'red' },
+    move: 1,
+    range: 3,
+    apToFire: 2,
+    vp: 2,
+    unburdened: true,
+  },
+  {
     // Unit List p.38 — "HMG34" (×2). Tripod MG: long range, move 2. Crew-served.
     id: 'ger-hmg',
     nation: 'germans',

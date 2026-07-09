@@ -102,6 +102,13 @@ button.link {
   gap: 6px;
   flex-wrap: wrap;
 }
+.online-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.85rem;
+  color: var(--dim);
+}
 .left {
   grid-column: 1;
   display: flex;
@@ -317,6 +324,23 @@ button.link {
   margin-top: 0.4rem;
   width: 100%;
 }
+.reinforce__wave-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+.reinforce__status {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  font-size: 0.82rem;
+  color: #c77dff;
+  border: 1px solid #c77dff;
+  border-radius: 6px;
+  padding: 0.35rem 0.5rem;
+  margin-bottom: 0.5rem;
+}
 
 .stats-grid {
   display: grid;
@@ -497,6 +521,22 @@ button.link {
   display: flex;
   gap: 0.6rem;
   margin-top: 1rem;
+}
+.setup__join {
+  display: flex;
+  gap: 0.6rem;
+  margin-top: 0.6rem;
+}
+.setup__join input {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 0.4rem 0.6rem;
+  border-radius: 6px;
+  border: 1px solid var(--line);
+  background: var(--bg);
+  color: inherit;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
 }
 
 /* ---- modals ---- */

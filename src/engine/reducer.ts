@@ -26,7 +26,7 @@ import {
 } from './fortifications';
 import { isInFrontArc, parseHexId } from './hex';
 import { effectiveStats, resolveHit, returnHitToPile, templateOf } from './hits';
-import { groupConnected, groupStress, isValidSupporter } from './groups';
+import { groupConnected, groupStress, hexesConnected, isValidSupporter } from './groups';
 import { directFireZone, indirectFireZone, rollIndirectFire } from './mortar';
 import { directionTo, moveCost, pivotCost, planVehicleMove } from './movement';
 import { destroysBarbedWire, minesOwnerSide, minesTargetsFor, rollMinesAttack } from './obstacles';
@@ -1050,6 +1050,11 @@ export function reduce(state: GameState, action: Action): ReduceResult {
         return deny(`${p.hexId} is not a legal entry Hex for ${r.id} (§4.12)`);
       entrants.push({ hexId: p.hexId, facing: p.facing ?? r.facing });
     }
+    // §4.12: a Group entry (>1 Unit in one Action) must land "on the same or
+    // spread out on adjacent entry Hexes" — a single-hex stack or an
+    // unbroken same-or-neighbour chain, not scattered hexes.
+    if (entrants.length > 1 && !hexesConnected(entrants.map((e) => e.hexId)))
+      return deny('a Group entry must be on the same or adjacent entry Hexes (§4.12)');
 
     // Place each Unit (0AP, §4.12 — the Spent Check/Stress happen below, once
     // for the whole placed Group).

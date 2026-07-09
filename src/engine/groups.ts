@@ -10,7 +10,33 @@ import { distance, parseHexId } from './hex';
 import { effectiveStats, templateOf } from './hits';
 import { hasLOS, inArc } from './los';
 import { rangeBand } from './range';
-import type { GameState, Unit, UnitId } from './types';
+import type { GameState, HexId, Unit, UnitId } from './types';
+
+/**
+ * Are these Hexes one continuously-adjacent cluster (same-or-neighbour
+ * chain)? Shared by §10.2 Group Actions (`groupConnected`, below) and §4.12
+ * Group reinforcement entry ("on the same or spread out on adjacent entry
+ * Hexes") — reducer.ts's `doEnter` calls this directly on the chosen entry
+ * Hexes, since those Units don't exist in `state.units` yet to go through
+ * `groupConnected`.
+ */
+export function hexesConnected(hexIds: HexId[]): boolean {
+  if (hexIds.length <= 1) return true;
+  // Flood-fill from hex 0 over the "same or adjacent hex" relation.
+  const seen = new Set<number>([0]);
+  const stack = [0];
+  while (stack.length) {
+    const i = stack.pop()!;
+    for (let j = 0; j < hexIds.length; j++) {
+      if (seen.has(j)) continue;
+      if (distance(parseHexId(hexIds[i]!), parseHexId(hexIds[j]!)) <= 1) {
+        seen.add(j);
+        stack.push(j);
+      }
+    }
+  }
+  return seen.size === hexIds.length;
+}
 
 /**
  * Do the given Units occupy one continuously-adjacent cluster (§10.2)? Members
@@ -19,27 +45,13 @@ import type { GameState, Unit, UnitId } from './types';
  */
 export function groupConnected(state: GameState, unitIds: UnitId[]): boolean {
   if (unitIds.length === 0) return false;
-  const hexes: string[] = [];
+  const hexes: HexId[] = [];
   for (const id of unitIds) {
     const u = state.units[id];
     if (!u) return false;
     hexes.push(u.hexId);
   }
-  if (hexes.length === 1) return true;
-  // Flood-fill from member 0 over the "same or adjacent hex" relation.
-  const seen = new Set<number>([0]);
-  const stack = [0];
-  while (stack.length) {
-    const i = stack.pop()!;
-    for (let j = 0; j < hexes.length; j++) {
-      if (seen.has(j)) continue;
-      if (distance(parseHexId(hexes[i]!), parseHexId(hexes[j]!)) <= 1) {
-        seen.add(j);
-        stack.push(j);
-      }
-    }
-  }
-  return seen.size === hexes.length;
+  return hexesConnected(hexes);
 }
 
 /** Group Stress penalty (§10.11): +1AP if ANY member acted on the previous Turn. */

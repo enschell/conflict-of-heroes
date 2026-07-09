@@ -27,6 +27,131 @@ mechanics live in `rules/` and this file's §6/§8.
 
 ---
 
+## B. Hex board migration (flat-top substrate — done; Mission 1 re-authored on it)
+
+The board's geometry was migrated from **pointy-top** to **flat-top** hexes, per
+**`docs/hex_board_spec/README.md`** (authoritative — geometry, labels, rotation, and multi-board
+abutment; not to be re-derived from memory). This isn't a departure from the rulebook's own
+convention — `rules/01-game-components.md`'s **"(Map #)–(Column Letter & Row #)"** citation (e.g.
+"1-E05") is the *same* scheme as the new spec's `A01`..`S12` + board number; only the board number's
+presentation changed (a large graphic in its own cell, not a text prefix). Status:
+
+- **Substrate — done:** `engine/hex.ts`'s `axialToPixel` is flat-top. `engine/hexBoard.ts` bridges
+  the spec's per-board column/row grid (`A01`..`S12` labels, the board-number cell, multi-board seam
+  merging into one shared axial space) to the engine's existing axial adjacency math — see its
+  header comment for the derivation (the naive per-axis board-pitch translation is **wrong**; the
+  flat-top pixel formula couples `r` to `q`, so a corrected embedding was needed and is proven
+  numerically + by test). `ui/hexgeo.ts` draws flat-top hexes with real half/quarter-hex edge
+  clipping (`clipHexPolygon`, Sutherland–Hodgman against each hex's own center — every board clip
+  line passes exactly through the affected hex's center, verified). `Board.tsx` renders the clipped
+  polygons, per-hex coordinate labels, and the large board-number cell. Proven by a non-canonical
+  `Hex Board Demo` mission (`data/missions/hexBoardDemo.ts` — a `TWO_BOARDS` flag toggles between a
+  blank single-board reference canvas and two boards abutted east-west with units straddling the
+  seam) and `engine/__tests__/hexBoard.test.ts` / `ui/__tests__/hexgeo.test.ts` /
+  `data/missions/__tests__/hexBoardDemo.test.ts`.
+- **Mission 1 — done, re-authored from scratch onto the new grid** (not reprojected — a locked
+  decision; reprojecting the old pointy-top `q,r` data would keep adjacency correct but visually
+  scramble the intended battlefield shape, since it's a different linear projection, not a
+  rotation). Real terrain, reinforcements, CAPs (6 German / 7 Soviet), starting units, and the
+  victory hex were rebuilt hex-by-hex directly with the user. Authoring workflow, reusable for future
+  missions: `data/hexBoardMap.ts`'s `applyTerrainJson(boards, json)` takes a
+  `{ boardNumber: { label: code } }` JSON map (`TERRAIN_CODES` for the valid code strings, incl.
+  `<terrain>_road` compounds like `heavy_woods_road` — a Road doesn't change the hex's terrain for
+  defense purposes, only negates its Difficult-Terrain movement cost road-to-road, §5.0.1 — already
+  how `movement.ts`/`combat.ts` work, no engine change needed for that) on top of
+  `generateOpenBoard`'s all-open base; unmentioned hexes stay Open. See `data/maps/mission1.ts` for
+  the live example. The rulebook's own terrain table (`rules/04`) has exactly 8 types, all already
+  implemented — "more terrain types" almost always means art variety
+  (`data/hexArt.ts`'s per-hex `HEX_ART_OVERRIDES`), not a new mechanical type.
+- **Sandboxes — all fixed now.** `sandbox.ts` (Armor) and `fireSupportSandbox.ts` were already fine —
+  both reuse `data/maps/mission1.ts`'s real `MISSION1_MAP`, so they got the flat-top substrate for
+  free. `hillsSandbox.ts`, `obstaclesSandbox.ts`, and `fortificationsSandbox.ts` each originally
+  placed their own small custom grid via raw `hexId(q, r)` — correct for the old pointy-top renderer,
+  but a sheared parallelogram under flat-top (adjacency was never wrong, just the visual shape).
+  Fixed identically in all three: every hex, unit, and the victory hex now goes through a local
+  `at(c, r)` helper that calls `engine/hexBoard.ts`'s `colRowToAxial({ c, r })` (the same column/
+  row→axial formula the real board substrate uses — column parity shifts axial `r` by
+  `-floor(c/2)`) instead of the raw axial pair. Nothing else about any of the three missions changed
+  — same terrain/CAP/unit/obstacle/fortification data, same `R{row}C{col}` labels (no need for real
+  `A01`-style labels or a board-number cell on a non-canonical test map). Verified live for all three
+  (board renders as a proper rectangle in each) plus Mission 1/Armor/Fire-Support-Sandbox as a
+  regression check: the **hold-Shift LOS-preview overlay** (`Board.tsx`'s `losActive`/
+  `visibleHexesFrom`) still lights up correctly on every one of the 6 missions — it was never actually
+  at risk (LOS is pure axial-index math, orientation-agnostic, same reasoning as §B's closing
+  paragraph below), but worth confirming after touching mission coordinate data since a coordinate
+  bug could in principle corrupt adjacency, unlike a pure-rendering bug. Also reverified the
+  mission-specific LOS set-pieces these sandboxes exist to demonstrate still hold post-fix: Hills
+  Sandbox's G-hilltop→S-rifle downhill shot, G-mesa↔S-mesa same-level sightline, and the §12.6 Blind
+  Spot pair (R2C6 hidden from the ridge peak, R2C7 visible beyond it) all reproduced correctly.
+- **Rotation is still not built** — see memory `conflict-of-heroes-hex-board-rotation` for the
+  locked requirements (labels always render upright; only same-length board edges abut) to apply
+  whenever a real mission needs it.
+- **Three real gotchas found live-testing Mission 1, all worth remembering:**
+  1. **The literal board-edge column/row is never a valid "full Hex" entry edge.** Column A (or S,
+     or row 1/12) is entirely half/quarter-hexes by construction (`edgeCut` is set on every cell) —
+     there is no such thing as "a full Hex on the boundary column." A §4.12 entry requirement like
+     "enters along the west edge" means the **first full column in from the boundary** (column B,
+     not A) — exactly mirroring how the original Mission 1 already used Row B, not Row A, for its
+     south edge. Caught because a unit was allowed to enter onto a half-hex; the fix was in mission
+     data (`WEST_EDGE` in `data/missions/mission1.ts`), not the engine — `legalEntryHexes` doesn't
+     filter for full hexes on its own, callers must build entry-hex lists that already exclude them
+     (see `withinPlayableFullHex` in that same file for the pattern).
+  2. **§4.12 Stress-on-entry was already correct, not a bug** — worth noting only because it's easy
+     to *suspect* it's broken when something else nearby (the half-hex entry, above) actually is.
+     `reducer.ts`'s `doEnter` → `afterGroupAction(placed, 0)` applies Stress unconditionally
+     regardless of the 0AP cost, and `engine/__tests__/reinforcements.test.ts` already had a
+     passing test for exactly this. Don't re-fix what isn't broken — verify against the existing
+     test/code first.
+  3. **The SAME half-hex-entry bug (#1) recurred on the Soviet side, later, even after #1 was
+     documented right here.** `sov-r2-reinforcements`' `entryHexIds` used the scenario's own named
+     Hex, `S06` — but column S is the board's literal east edge, so S06 has `edgeCut: {e: true}`
+     just like every column-A hex does. Fixing #1 for the German west-edge wave didn't prompt a check
+     of every OTHER wave's entry hex in the same mission for the identical mistake. Fixed the same
+     way: the nearest full-Hex neighbor that's still on the Road (`R07` — its other full neighbor,
+     `R06`, isn't on the Road, so it wouldn't have preserved "Road Hex"), verified via
+     `neighbors()`/`edgeCut` directly rather than assumed. **Lesson: when a mission-authoring rule
+     like this gets caught once, grep the SAME mission's other `entryHexIds` (or any other
+     hex-label reference) for the same class of mistake immediately — don't wait for each one to be
+     independently reported.**
+- **Group reinforcement entry — done.** §4.12 allows multiple Reinforcement Units to enter together
+  as a Group (10.2) in one Action (no Spent Check, one shared Stress-all outcome), with each Unit
+  free to choose its own facing. Engine: `groups.ts` exports `hexesConnected(hexIds)` (extracted from
+  its existing `groupConnected` flood-fill, "same-or-neighbour chain" relation), and `reducer.ts`'s
+  `doEnter` now denies a multi-placement `ENTER` whose Hexes aren't `hexesConnected` — §4.12's "same
+  or adjacent entry Hexes" is enforced, not just per-hex legality (`reinforcements.test.ts` covers
+  both a connected and a scattered case). UI: `store.ts` replaced the old single-unit
+  `placingReinforcementId` with a queue (`placingReinforcementQueue`/`placingReinforcementFacing`/
+  `placingReinforcementDone`) — `startPlaceReinforcements(unitIds)` arms one or more Units, and each
+  walks Hex → facing → (next Unit or dispatch) in turn; the final ENTER only fires once every queued
+  Unit has both. `ReinforcementsPanel.tsx` gained per-unit checkboxes + a wave-level "Place selected
+  as Group" button alongside the existing one-at-a-time `Place` button and the fast-path "Enter now"
+  (unchanged, still auto-spreads at the wave's default facing with no per-unit choice — the deliberate
+  quick option). `Board.tsx` reuses the existing blue six-neighbor facing-highlight machinery
+  (previously keyed off a live `Unit`, now generalized to work off a bare Hex id since a
+  mid-placement reinforcement has none yet) — clicking the placement Hex itself keeps the default
+  facing, clicking a neighbor sets that direction. **A real bug caught during live testing, since
+  fixed:** the entry-Hex highlight for the 2nd+ queued Unit initially still offered the wave's *full*
+  legal-entry set, not just Hexes connected to what was already placed — a user could click two
+  non-adjacent Hexes, walk both through a facing choice, and only then have the final ENTER silently
+  denied by the reducer's `hexesConnected` check, with the queue/facing state already optimistically
+  cleared (so the Units silently reappeared in the panel with zero error feedback). Fixed two ways:
+  (1) `Board.tsx`'s entry-Hex highlighting now intersects with "connected to `placingReinforcementDone`"
+  once at least one Unit has a Hex, so an illegal pick is never offered in the first place; (2)
+  `store.ts`'s `chooseReinforcementFacing` no longer clears placement state *before* dispatching —
+  it checks `lastEvents` for an `illegal` result and reopens the queue instead of silently dropping
+  the Units if the reducer ever disagrees (defense in depth, per CLAUDE.md §3's "legality lives in the
+  engine, not the UI's own assumptions"). Verified live in-browser: two German Rifle Squads entered
+  together at adjacent west-edge Hexes as one Group Action ("Group 0AP action — no Spent Check").
+- **Why the engine itself needed no changes for the geometry swap:** `engine/hex.ts`'s adjacency
+  (`neighbor`/`distance`/`lineDraw`) and `movement.ts`'s wall-crossing (`wallBetween`) are pure
+  axial-index arithmetic with **zero pixel/orientation dependency** — only `axialToPixel` (used
+  solely for the arc-of-fire forward/flank dot-product test, itself orientation-invariant by
+  construction) and the UI rendering layer needed to change. If you're ever tempted to "fix" a
+  movement/facing/LOS bug by touching hex orientation math, it's almost certainly not an
+  orientation problem.
+
+---
+
 ## 0. Continuing in a new session (handoff)
 
 This repo is self-describing: a fresh session needs only the code + these docs.
@@ -50,9 +175,19 @@ This repo is self-describing: a fresh session needs only the code + these docs.
   real reinforcements; conformance is at 0 violations. **M8 (Hidden Units) is deliberately deferred
   to online play** — see §8, it's a locked decision, not a gap. **M10 (Fortifications and Obstacles
   §17) is complete** (both Phases — Obstacles and Fortifications, incl. §17.11/17.12 destroying one by
-  Attack), and **M11 (Flamethrowers + Pioneers §18) is complete** too. OBA (Battle Cards) remains the
-  only unbuilt v3 combat module (M12, roadmap §8). **§8 has the full detail on every milestone — read
-  that, not this bullet, for specifics on how something works or why a decision was made.**
+  Attack), and **M11 (Flamethrowers + Pioneers §18) is complete** too. **The roadmap order was then
+  deliberately swapped** (user decision): **M13 (online multiplayer) built ahead of M12 (Cards)** —
+  see §8's M13 entry for full detail — because Cards need real per-client secret info (a hidden hand)
+  that only online play can actually provide; M12/OBA remain the only unbuilt v3 combat module,
+  now scheduled after M13. **§8 has the full detail on every milestone — read that, not this bullet,
+  for specifics on how something works or why a decision was made.** Separately from the v3/M-numbered
+  roadmap, **the board geometry itself was migrated pointy-top → flat-top — see §B**: the substrate
+  is done, and **every mission/sandbox has been re-authored onto it** (Mission 1 with real terrain,
+  reinforcements, CAPs, starting units directly with the user; the five non-canonical sandboxes via
+  the `colRowToAxial` coordinate fix, all verified live incl. the hold-Shift LOS overlay) — it's all
+  live, playable content now, not placeholders. §B also has live-tested gotchas (an entry-edge-hex
+  trap, the Group-reinforcement-entry UI build, and the sandbox coordinate fixes) worth reading before
+  touching reinforcements/entry-hex/mission-authoring code again.
 
 ---
 
@@ -133,15 +268,25 @@ conflict-of-heroes/
     00-overview.md … 19-alternate-player-counts.md
   package.json  vite.config.ts  tsconfig.json  index.html
   public/assets/            # original art + dice SFX
+  server/                   # ✅ M13: Node online-play server (see §8's M13 entry) — separate from
+                             #   the client-only `src/`, but shares its engine/protocol code directly
+    index.ts                #   HTTP static-serve (dist/) + WebSocket relay, wires rooms.ts + engine
+    rooms.ts                #   pure RoomManager (create/join/reconnect/turn-gate) — unit-tested, no real sockets
+    __tests__/               #   Vitest, included via tsconfig.json's/vite.config.ts's "server" entries
   src/
     main.tsx  App.tsx
+    net/                    # ✅ M13: client↔server WebSocket layer (see §8's M13 entry)
+      protocol.ts           #   ClientMsg/ServerMsg — same TS source imported by src/ AND server/
+      client.ts             #   NetClient: thin ws wrapper, reconnect-with-backoff, no game logic
+      session.ts            #   getSessionId() — opaque per-browser id in localStorage, for reconnect
     engine/                 # PURE rules engine (see §3)
       types.ts              # shared types (GameState, Unit, Hex, Action, GameEvent…)
       state.ts              # GameState shape, initGame(mission), (de)serialize
       rng.ts                # seeded RNG: roll2d6, rollD6, rollSpentDie, drawHit
       spent.ts              # Spent Die [1,1,2,3,3,4,5,5,6,7] + spentCheck(cost)
       stress.ts             # Stress state + "+1AP if acted last Turn"
-      hex.ts                # axial math: neighbors, distance, direction, line, arc
+      hex.ts                # axial math (flat-top, §B): neighbors, distance, direction, line, arc
+      hexBoard.ts            # ✅ §B: column/row↔axial bridge, A01-S12 labels, board number, multi-board merge
       terrain.ts            # terrain table → AP cost, DR mod, blocksLOS, isCover
       los.ts                # LOS + arc of fire; visibleHexesFrom(hex); ✅ M9 elevation (§12.4-12.6)
       movement.ts           # move cost, facing, pivot, backwards, roads, walls, ✅ M9 elevation (§12.2)
@@ -165,15 +310,18 @@ conflict-of-heroes/
       __tests__/            # Vitest
     data/                   # authored content (no logic)
       nations.ts terrainTypes.ts hitMarkers.ts units.ts hexArt.ts
-      maps/mission1.ts   missions/mission1.ts   # Mission 1 "Partisans": Map 1 board + setup + reinforcement waves
-      missions/sandbox.ts   # non-canonical Armor Sandbox test mission (M6)
-      missions/fireSupportSandbox.ts  # non-canonical Fire Support Sandbox test mission (M7)
-      missions/hillsSandbox.ts  # non-canonical Hills Sandbox test mission (M9) — own map, real hills
-      missions/obstaclesSandbox.ts  # non-canonical Obstacles Sandbox test mission (M10 Phase 1) — own map
-      missions/fortificationsSandbox.ts  # non-canonical Fortifications Sandbox test mission (M10 Phase 2) — own map
+      hexBoardMap.ts         # ✅ §B: generateOpenBoard/applyTerrainJson — engine/hexBoard.ts's generator → MapHexDef[]
+      maps/mission1.ts   missions/mission1.ts   # Mission 1 "Partisans": re-authored on the new flat-top grid (§B) + setup/reinforcement waves
+      missions/sandbox.ts   # non-canonical Armor Sandbox test mission (M6) — reuses MISSION1_MAP, already flat-top
+      missions/fireSupportSandbox.ts  # non-canonical Fire Support Sandbox test mission (M7) — reuses MISSION1_MAP too
+      missions/hillsSandbox.ts  # non-canonical Hills Sandbox test mission (M9) — own map, real hills; ✅ re-authored onto flat-top via colRowToAxial (§B)
+      missions/obstaclesSandbox.ts  # non-canonical Obstacles Sandbox test mission (M10 Phase 1) — own map; ✅ same colRowToAxial fix
+      missions/fortificationsSandbox.ts  # non-canonical Fortifications Sandbox test mission (M10 Phase 2) — own map; ✅ same colRowToAxial fix
+      missions/hexBoardDemo.ts  # ✅ §B: proves the new flat-top/multi-board substrate — 2 boards, units on the seam
+      missions/catalog.ts    # ✅ M13: id -> MissionDef lookup — the online server only ever receives a `missionId` string, never a client-supplied MissionDef
       cards/                # deferred to the cards milestone
       __tests__/
-    state/  store.ts persistence.ts             # Zustand + localStorage saves
+    state/  store.ts persistence.ts             # Zustand + localStorage saves; store.ts also owns M13's online dispatch fork (see §8's M13 entry)
     ui/     …  ReinforcementsPanel.tsx  MinesConfirm.tsx  …  # React + SVG (see §7)
   scripts/  play.ts conformance.ts              # terminal driver + v3 conformance audit
   public/hills-los-mockup.html  # ✅ kept in repo: interactive §12 LOS validator/reference (M9)
@@ -184,8 +332,8 @@ conflict-of-heroes/
 > `maps/mission1.ts` + `missions/mission1.ts` (the 2nd-ed `firefights/`/`maps/partisans.ts` are
 > deleted), plus the non-canonical `missions/sandbox.ts` (vehicles), `missions/fireSupportSandbox.ts`
 > (mortars/smoke), `missions/hillsSandbox.ts` (elevation), `missions/obstaclesSandbox.ts`
-> (Obstacles), and `missions/fortificationsSandbox.ts` (Fortifications) test missions. `rules/` is
-> the committed source of truth.
+> (Obstacles), `missions/fortificationsSandbox.ts` (Fortifications), and `missions/hexBoardDemo.ts`
+> (§B's new flat-top/multi-board substrate) test missions. `rules/` is the committed source of truth.
 
 ---
 
@@ -219,8 +367,10 @@ GameState = {
     hastyDefense?: boolean            // per-Unit marker, not a Hex feature (17.6, M10 Phase 2)
   }>
   hexes: Record<HexId, {
-    coord: { q: number; r: number }   // axial; label "B05"/"I06" derived for display (1.0)
+    coord: { q: number; r: number }   // flat-top axial (§B); label "B05"/"A01" derived for display (1.0)
     terrain: TerrainId; elevation: number; label?: string
+    boardNumber?: number              // §B: set only on a board's upper-left cell (large, not a coord)
+    edgeCut?: { w?: true; e?: true; n?: true; s?: true }  // §B: which board-relative sides are a real exposed edge (half/quarter-hex clip); a merged multi-board seam has none
     walls: boolean[]; road: boolean
     features: {
       control?: SideId; smoke?: 1|2
@@ -331,7 +481,12 @@ target's DR colour (blue → vehicle pile, red → foot pile).
   - **Add a card:** `{ id, type:'action'|'bonus'|'mission'|'artillery', cost:{green?,blue?}, effect }`
     in `data/cards/` (v3 Green/Blue cost, 8.5). Effects are engine actions/modifiers, not UI code.
   - **Add a mission:** new file in `data/missions/` with maps, placements (by hex label), starting
-    CAPs per side, rounds, victory config, deck, hidden-unit slots.
+    CAPs per side, rounds, victory config, deck, hidden-unit slots. To build the map on the new §B
+    flat-top substrate (real `A01`..`S12` labels, board number, correct multi-board merging), start
+    from `data/hexBoardMap.ts`'s `generateOpenBoard(boards)` (open terrain everywhere) and override
+    individual hexes' `terrain`/`walls`/`road`/etc. by `id` — see `data/missions/hexBoardDemo.ts`.
+    Hand-authoring a bespoke irregular map (Mission 1's/the sandboxes' current approach) still works
+    exactly as before; it just won't have `label`/`boardNumber`/`edgeCut` set.
 - **Actions** are plain serializable objects (see `engine/types.ts`'s `Action` union for the exact
   shapes): `MOVE` (unitId, toHexId, optional vehicle `path`, `capCostReduce?`, `minesCapMods?`),
   `PIVOT` (`capCostReduce?`, `minesCapMods?`), `FIRE`/`CLOSE_COMBAT` (attackerId, targetId,
@@ -352,8 +507,12 @@ target's DR colour (blue → vehicle pile, red → foot pile).
 ### Requested UI features (all implemented — keep them working)
 *(presentation is edition-agnostic; only the readouts change: show **Fresh/Spent + Stress** and the
 Spent-Check die instead of a remaining-AP pool)*
-- **Real pointy-top hex board** ✅ (`Board.tsx`/`hexgeo.ts`); the square ASCII grid in `play.ts` is
-  debug-only.
+- **Real hex board** ✅ (`Board.tsx`/`hexgeo.ts`) — **flat-top** as of §B's migration (was pointy-top);
+  the square ASCII grid in `play.ts` is debug-only. Board-edge half/quarter-hexes, coordinate labels
+  (`A01`..`S12`), and the board-number cell are all real (§B) — a mission using
+  `data/hexBoardMap.ts`'s generator gets them for free; hand-authored missions (Mission 1, the
+  sandboxes) don't set `Hex.edgeCut`/`boardNumber` and so render as plain full hexes with no labels,
+  same as before §B.
 - **Unit facing (§4.1)** ✅ `UnitCounter.tsx` rotates the whole counter (not an overlay arrow) so its
   **green top-edge bar** (+ a small outward notch) sits flush against whichever of the six hexsides it
   faces — matching the physical counter/rotate-in-place metaphor exactly (a corner is never a legal
@@ -527,7 +686,16 @@ Spent-Check die instead of a remaining-AP pool)*
   resolve to whichever `<clipPath>` came first in the DOM, silently clipping the *other* copy's
   `<image>` against the wrong (e.g. board-scale) rect and hiding it entirely. Real art currently lives
   at `public/assets/units/` for `sov-rifle` and a couple of German units — most templates still render
-  old-style.
+  old-style. **Spent dimming never washes out Selected/Stressed** (per user request): a Spent Unit's
+  body dims to 55% opacity (nation-color fill / counter image / stat text / the diagonal spent-line),
+  but the selection ring (`stroke="#ffd24a"`, or cyan for Group) and the Stress Marker's dashed amber
+  ring are siblings of the dimmed `<g opacity={spent?0.55:1}>`, not children of it — SVG group opacity
+  is a post-composite alpha multiply with no per-child override, so the only way to keep one visual
+  element at full strength while a sibling dims is to lift it entirely out of the dimmed group (an
+  element-level `opacity`/`fillOpacity` prop on the ring itself would NOT help if it stayed nested
+  inside the dimmed ancestor). The plain (non-`counterImage`) counter's base `<rect>` combines a
+  dimmable fill (nation color) with a never-dimmed stroke (the same selection ring) on one element —
+  split via `fillOpacity` (not `opacity`, which is not attribute-splittable) rather than two rects.
 - **HoverPanel / Inspector counter previews** ✅ both panels render the hovered/selected Unit through
   `UnitCounter` too (not a separate mini-renderer), always with `ignoreFacing` (an inspector view reads
   better upright than rotated to the Unit's actual facing). HoverPanel: full board scale per Unit
@@ -573,8 +741,10 @@ Spent-Check die instead of a remaining-AP pool)*
 - **M1 — Engine core (infantry, 2nd ed)** ✅ terrain, movement/facing, LOS/arc, combat, hits, rally,
   range, CAP, turn/round, victory, `reduce`, `initGame`, `legalActions`.
 - **M2 — Mission 1 content** ✅ real **Map 1** (206 hexes, authored from the Mission Book) +
-  "Partisans" (`missions/mission1.ts`: 5 rounds, 7 CAP/side, German Round-1 initiative, Soviets +1
-  VP, I06 = 1 VP/round + 1 VP/kill, no cards — a Section-1 teaching Mission). **M2.5 —
+  "Partisans" (`missions/mission1.ts`: 5 rounds, German Round-1 initiative, Soviets +1
+  VP, victory hex = 1 VP/round + 1 VP/kill, no cards — a Section-1 teaching Mission). Historical
+  description of the original (pointy-top) authoring — **superseded by the §B re-author**: current
+  facts (6/7 CAP, real terrain/hex labels) live in §B, not here. **M2.5 —
   Reinforcements (§4.12)** ✅ real `ENTER` action (`reinforcements.ts`, `ReinforcementsPanel.tsx`),
   not pre-placed.
 - **M3 — UI** ✅ Zustand + React/SVG board, dice/SFX, log, setup/victory screens, LOS overlay
@@ -686,6 +856,29 @@ Spent-Check die instead of a remaining-AP pool)*
   showed the roll dialog; a two-Spent-member Group Move showed "Spend 3 CAP... CAP 7 → 4" and resolved
   correctly at 0AP). Test coverage stayed at the engine layer (reducer already had this right) — these
   were pure `store.ts`/UI-wiring bugs, not rules bugs.
+- **Group Move — individual per-member destinations (§10.2/§10.3)** ✅ closes a real UI gap: the only
+  Group Move UI was the six formation-shift arrows (`groupMove(dir)`) — every member steps one hex in
+  the SAME shared direction, or stays. §10.2 actually says "Each individual Unit may move into any Hex
+  adjacent to it... or not move," and §10.3 explicitly allows members to **split apart** during the
+  move (they only need to *begin* continuously adjacent) — the underlying `GROUP_MOVE` Action already
+  supported arbitrary per-member `{unitId; toHexId?}[]`, the UI just never exposed a way to assign
+  different members different destinations. Caught live: two stacked Units, user wanted to send them
+  to two different adjacent Hexes, and the arrows-only UI couldn't express that. Fixed with a new
+  per-member destination queue in `store.ts` (`groupMoveQueue`/`groupMoveDone`,
+  `startGroupMoveIndividually`/`cancelGroupMoveIndividually` — same shape as the earlier
+  Group-reinforcement-entry queue): a new `hexClick` branch walks the queue — click the active
+  member's own Hex to leave it in place (§10.2's explicit third option), or one of its green-
+  highlighted legal destinations to assign it; queue empty → dispatches one `GROUP_MOVE` via a new
+  `submitGroupMove` helper (factored out of `groupMove(dir)`, which now calls it too — both share the
+  same §10.4 cost calc + `groupCapGate`). `Board.tsx` reuses the EXISTING `moveTargets` green
+  highlight for the active member's destinations (no new color/style) and generalized the floating
+  "Choose facing"/"Pivot (P)" label banner a 4th time — but without its usual blue neighbor overlay
+  for this case, since the green `moveTargets` highlight already covers those same Hexes. `GroupPanel`
+  gained a "Move individually (choose each member's Hex, §10.3)" button alongside the arrows. This
+  fix is 100% client-side — the server (`server/rooms.ts`) just relays whatever `GROUP_MOVE` the
+  client built, so it needed no changes at all. Verified live: two stacked reinforcement Units,
+  Group-selected, sent to two genuinely different Hexes, resolved as one Group Action with one Spent
+  Check, stack correctly split, free facing-correction window opened correctly afterward too.
 - **M8 — Hidden Units (§11) — DEFERRED to online play, on purpose, locked decision:** Hidden Units
   are fundamentally secret-information state — one side's Unit positions must not be visible to the
   other — and this build is hotseat: both sides share one screen and one `GameState`, unlike every
@@ -824,9 +1017,127 @@ Spent-Check die instead of a remaining-AP pool)*
   vs a Soviet Infantry Gun in a Stone Building: 6AR, 10DR flank — Stone Building's Terrain DM
   correctly ignored — Hit Number 4). `Fortifications Sandbox` gained a German `ger-pioneer` and a
   Soviet `sov-t34a` (both pre-existing templates, stats unchanged) as a live Flamethrower-vs-Armor
-  test bed. → M12 cards (§8, incl. OBA) → **M13 online multiplayer** (host the pure engine
-  authoritatively + WebSocket rooms; the client already speaks action objects) → **M8 Hidden Units**
-  (§11, now buildable for real).
+  test bed.
+
+- **M13 — Online Multiplayer, steps 1-3 done (roadmap deliberately reordered ahead of M12/Cards —
+  see §0/the plan at `.claude/plans/piped-strolling-finch.md` for the full reasoning): a real Node
+  server relays Actions between two browsers over WebSocket; hotseat is completely untouched.**
+  Locked decisions: Render hosting (one service serves both the static client and the WS endpoint);
+  optimistic apply on the acting player's own client, server-authoritative broadcast to both;
+  Undo/Redo disabled entirely online (opponent-approved undo is an explicit fast-follow, not built);
+  shareable room code/link, no accounts (`sessionId` is opaque, forward-compatible with a real auth
+  layer later). **Why this needed zero engine changes:** `engine/`'s golden rules (CLAUDE.md §3) —
+  pure `reduce(state, action)`, `GameState` 100% JSON-serializable, all randomness seeded *inside*
+  `GameState.rng` — meant the server could `import { reduce, initGame } from '../src/engine'`
+  verbatim, no adaptation; the existing dice-roller preview pattern (`store.ts`'s `request*Roll`,
+  which previews a roll from `state.rng` without committing it) is already exactly the "preview
+  locally, commit authoritatively, they must match since it's the same pure function" shape online
+  play needs.
+
+  **Server** (`server/`, new top-level directory, wired into the existing `tsconfig.json`/
+  `vite.config.ts` `include`/`test.include` so `npm run typecheck`/`npm test` cover it too):
+  `rooms.ts`'s `RoomManager` is pure (no WebSocket objects — a `Room` just wraps a `GameState` plus
+  which `sessionId` holds each `SideId` and whether that Side's socket is currently connected),
+  unit-tested in `__tests__/rooms.test.ts` with injected `genCode`/`genSeed` for determinism.
+  **Server picks a fresh random RNG seed per room** — reusing a Mission's hardcoded test seed (e.g.
+  Mission 1's `20261017`) would replay identical dice every real game. `index.ts` is the thin
+  transport layer: plain Node `http` (no Express — one dependency-minimal static file server for
+  `dist/`, matching the project's minimal-deps philosophy) + `ws`'s `WebSocketServer` on the same
+  HTTP server (so Render only needs one service/port). On a client's `ACTION` message it re-verifies
+  `sessionId`'s Side matches `state.currentSide` server-side (defense in depth — the client already
+  gates this too) before calling `reduce()`, then **always re-broadcasts the room's canonical state
+  regardless of whether the Action was accepted** — an internally-"illegal" Action just re-broadcasts
+  unchanged state, which is self-healing for any client whose local optimistic guess ever drifts, with
+  no special-case code. Reconnect: a disconnected socket doesn't touch the Room's `GameState` at all;
+  the same `sessionId` rejoining (`JOIN`, not `CREATE`) resumes the same Side seat, verified live
+  (join → disconnect → reconnect via a fresh WebSocket → same Side, `GameState` untouched throughout).
+  `data/missions/catalog.ts` (id → `MissionDef`) exists specifically so the server has its own
+  trusted mission lookup — a `CREATE` message carries a `missionId` string, never a client-supplied
+  `MissionDef` object.
+
+  **Protocol** (`src/net/protocol.ts`, one file imported by both `src/` and `server/` — literally the
+  same TS source, so client/server can't silently drift on message shape): `ClientMsg` = `CREATE` /
+  `JOIN` / `ACTION`; `ServerMsg` = `JOINED` (carries `peerConnected` too, so a joining client
+  immediately knows the other Side's live connection state without a second message) / `STATE` /
+  `PEER_STATUS` / `ERROR`. **`GameState` is the only game data that ever crosses the wire** — no
+  separate diff/patch protocol, a client just overwrites its local `game` with whatever `STATE`
+  delivers.
+
+  **Client** (`src/net/client.ts`'s `NetClient` — pure transport, reconnect-with-backoff, zero game
+  logic; `src/net/session.ts`'s `getSessionId()` — a `crypto.randomUUID()` cached in `localStorage`).
+  `store.ts`'s `dispatch()` forks on a new `mode: 'hotseat' | 'online'` field **at its very first
+  line** — the hotseat branch is byte-for-byte the original code, so hotseat correctness/tests were
+  never at risk. The online branch: cheap client-side turn gate (`mySide !== game.currentSide` →
+  silently no-op, no network round trip for something that can't be legal), then the SAME
+  `reduce()` call hotseat uses, applied optimistically via a newly-extracted `applyReduceResult`
+  helper (factored out of `dispatch`'s old body specifically so the online path's optimistic apply
+  and the hotseat path's real commit share one implementation — SFX, the §4.5/§15.11 free-facing and
+  §2.6 Stressed-unit auto-select, and the round-advance turn banner all Just Work for online too,
+  `persist`/`trackHistory` flags gate the localStorage-autosave/Undo-stack side effects hotseat-only).
+  Incoming `STATE` broadcasts go through a separate, deliberately lighter `handleServerMsg` reconciler
+  (plain overwrite of `game`, no diffing needed since `GameState` is already the single source of
+  truth `dispatch` itself works off) — **known v1 gap, on purpose:** it does NOT replay SFX (would
+  double up the acting client's own already-played cue) or re-derive the full auto-select logic from
+  `events` (the `STATE` message doesn't carry the originating `Action`/events, only the resulting
+  `state`) — so the opponent doesn't hear a sound cue for the other player's move yet. Documented as
+  an acceptable functional-minimum gap, not silently dropped; a real fix would thread the action/events
+  through the `STATE` broadcast too. `newGame`/`resume`/`quitToMenu` all close any live `netClient`
+  and force `mode: 'hotseat'` — a stale online socket can never survive a menu transition.
+
+  **UI — explicitly functional-minimum placeholder** (user may hand off a real visual design later,
+  e.g. via Claude Design — treat this pass's layout/copy as scaffolding to replace, not a locked
+  spec): `SetupScreen.tsx` gained a "Play Online" card (create-room + join-by-code) alongside the
+  untouched hotseat buttons; `OnlineLobby.tsx` is the pre-game "connecting…"/error screen (shown only
+  while `mode === 'online' && !game`); `App.tsx` shows a slim online-status line inside the existing
+  `.topbar` flex row (**not** a new grid-level sibling of `.layout` — that would've broken its
+  2-row `grid-template-rows`, caught before it shipped) and hides Undo/Redo when `mode === 'online'`.
+  **Side letters are never shown to the player** — every online-mode string resolves `SideId` through
+  `NATIONS`/`game.players[side].nations` first (matching the topbar's pre-existing convention), so
+  the lobby says "You are the Germans" / "waiting for the Soviets to join," never "Side A."
+
+  **Verified live** (`.env.local`'s `VITE_WS_URL=ws://localhost:8787` points the Vite dev client at a
+  separately-run `tsx server/index.ts`, since dev-mode client (5173) and server (8787) are different
+  origins — production serves both from one origin, same-origin default in `client.ts`): create-room
+  → real browser shows "waiting for the Soviets to join — room code X"; an independent second
+  WebSocket connection joining that exact room → real browser's status flips to "opponent connected"
+  live; a real click of Pass in the browser → the independent second connection receives the
+  resulting `STATE` broadcast with the flipped `currentSide`, **and** the real browser's own UI
+  updates correctly (turn banner, log) — proving the full loop end-to-end, not just the optimistic
+  echo of one's own action; a same-side click attempted out-of-turn was silently blocked client-side
+  (no message sent at all, verified via the second connection's log staying unchanged); disconnect +
+  reconnect with the same `sessionId` resumed the same Side seat cleanly. `npm test` (405/405, +10 new
+  for `rooms.ts`), typecheck, `npm run build`, and conformance (0 violations) all pass — hotseat
+  untouched throughout.
+
+  **A real bug caught by the user live-testing with a friend, since fixed:** after a Move online, the
+  free facing-correction picker (§4.5/§15.11 `CHOOSE_FACING`) silently refused to dispatch. Root
+  cause: both `store.ts`'s online `dispatch` and `rooms.ts`'s `applyAction` added a blanket "is it
+  your Turn" gate that neither hotseat nor the engine itself has — `reduce()`'s own `doChooseFacing`
+  deliberately has **no** `currentSide` check, because a normal Action always hands the Turn to the
+  other side *before* the correction window opens (that's the whole point of the rule). The blanket
+  gate treated it like every other Action and blocked it outright. First-instinct fix (delete the
+  gate entirely) was itself wrong and caught before shipping: `PASS` has no `unitId`/side field at
+  all (`{ type: 'PASS' }`), so `reduce()` has no caller identity to self-defend it with — removing the
+  gate wholesale would let either side trigger the *other* side's Pass. **Correct fix: exempt
+  `CHOOSE_FACING` specifically** from the Turn gate (both sides of the fix — client and server), and
+  give it its own narrower check instead: does the target Unit's `side` match the caller's (since
+  `doChooseFacing` itself never checks that either — harmless on one shared hotseat screen, a real gap
+  online where a client could otherwise reface the *opponent's* still-open window). New regression
+  test in `server/__tests__/rooms.test.ts`. Verified against the real running server with the exact
+  reported scenario. **Lesson: when adding a network-layer authorization check on top of an engine
+  that already has its own per-Action legality rules, don't assume "whose Turn is it" is a universal
+  precondition — grep for the Action's handler and read its own comment for documented exceptions
+  first.**
+
+  **Not yet built (steps 4-5 of the plan, explicitly out of scope for this pass):** actual Render
+  deployment (`render.yaml`, `PORT` env wiring — `server/index.ts` already reads `process.env.PORT`)
+  and a real over-the-internet test with a second person; opponent-approved Undo request (the
+  "fast-follow" decision — rides on this pass's message-passing pipeline, est. 1-2 extra days); the
+  real visual design for the lobby/status UI, if the user provides one.
+
+  → M12 cards (§8, incl. OBA) → the rest of M13 (deploy, real visual design, opponent-approved undo)
+  → **M8 Hidden Units** (§11, now genuinely buildable — a real per-client server exists to filter
+  state on, not just a single shared hotseat screen).
 
 ---
 

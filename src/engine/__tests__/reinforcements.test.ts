@@ -105,6 +105,58 @@ describe('ENTER reducer (§4.12)', () => {
     expect(res.state.units['R1']!.facing).toBe(3);
   });
 
+  it('a multi-Unit Group entry succeeds when placed on adjacent (or the same) Hexes', () => {
+    const s = scene();
+    s.reinforcements.push(
+      reinforcement({ id: 'R1', entryHexIds: ['0,0', '1,0', '2,0', '3,0'] }),
+      reinforcement({ id: 'R2', entryHexIds: ['0,0', '1,0', '2,0', '3,0'] }),
+    );
+    const res = reduce(s, {
+      type: 'ENTER',
+      placements: [
+        { unitId: 'R1', hexId: '0,0' },
+        { unitId: 'R2', hexId: '1,0' }, // adjacent to R1's hex
+      ],
+    });
+    expect(res.events.some((e) => e.type === 'illegal')).toBe(false);
+    expect(res.state.units['R1']).toBeDefined();
+    expect(res.state.units['R2']).toBeDefined();
+  });
+
+  it('a multi-Unit Group entry succeeds when every Unit stacks on the same Hex', () => {
+    const s = scene();
+    s.reinforcements.push(
+      reinforcement({ id: 'R1', entryHexIds: ['0,0', '1,0', '2,0', '3,0'] }),
+      reinforcement({ id: 'R2', entryHexIds: ['0,0', '1,0', '2,0', '3,0'] }),
+    );
+    const res = reduce(s, {
+      type: 'ENTER',
+      placements: [
+        { unitId: 'R1', hexId: '0,0' },
+        { unitId: 'R2', hexId: '0,0' },
+      ],
+    });
+    expect(res.events.some((e) => e.type === 'illegal')).toBe(false);
+  });
+
+  it('denies a multi-Unit Group entry scattered across non-adjacent Hexes (§4.12)', () => {
+    const s = scene();
+    s.reinforcements.push(
+      reinforcement({ id: 'R1', entryHexIds: ['0,0', '1,0', '2,0', '3,0'] }),
+      reinforcement({ id: 'R2', entryHexIds: ['0,0', '1,0', '2,0', '3,0'] }),
+    );
+    const res = reduce(s, {
+      type: 'ENTER',
+      placements: [
+        { unitId: 'R1', hexId: '0,0' },
+        { unitId: 'R2', hexId: '3,0' }, // 3 hexes away — not adjacent, no chain
+      ],
+    });
+    expect(res.events[0]?.type).toBe('illegal');
+    expect(res.state).toBe(s); // untouched
+    expect(res.state.units['R1']).toBeUndefined();
+  });
+
   it('denies entry before the earliest Round', () => {
     const s = scene();
     s.reinforcements.push(reinforcement({ earliestRound: 3 }));

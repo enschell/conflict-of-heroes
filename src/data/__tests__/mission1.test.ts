@@ -10,7 +10,7 @@ describe('Mission 1 — Partisans (setup)', () => {
   it('uses the real Map 1 board and the v3 mission parameters', () => {
     expect(MISSION_1.hexes).toBe(MISSION1_MAP);
     expect(MISSION_1.roundsTotal).toBe(5);
-    expect(MISSION_1.caps).toEqual({ A: 7, B: 7 });
+    expect(MISSION_1.caps).toEqual({ A: 6, B: 7 });
     expect(MISSION_1.firstInitiative).toBe('A'); // German Round-1 initiative
     expect(MISSION_1.startVp).toEqual({ B: 1 }); // Soviets begin with 1 VP
     expect(MISSION_1.vpPerKill).toBe(1); // flat 1 VP per kill
@@ -55,30 +55,47 @@ describe('Mission 1 — Partisans (setup)', () => {
     }
   });
 
-  it('matches the Mission Book: German R1 platoon (2 Rifles + 2 MG34) via B01-B12', () => {
+  it('matches the redesigned setup: German R1 platoon (2 Rifles + 2 MG34) via B01-B12 (column A is entirely half/quarter-hexes)', () => {
     const wave = MISSION_1.reinforcements!.find((w) => w.id === 'ger-r1-platoon')!;
     expect(wave.side).toBe('A');
     expect(wave.earliestRound).toBe(1);
     expect(wave.entryHexIds).toEqual(
       Array.from({ length: 12 }, (_, i) => hexIdForLabel(`B${String(i + 1).padStart(2, '0')}`)),
     );
+    // Every entry Hex must be a full Hex (no half/quarter-hex edge cut).
+    for (const id of wave.entryHexIds) {
+      expect(MISSION1_MAP.find((h) => h.id === id)!.edgeCut).toBeUndefined();
+    }
     expect(wave.units.filter((u) => u.templateId === 'ger-rifle')).toHaveLength(2);
     expect(wave.units.filter((u) => u.templateId === 'ger-lmg')).toHaveLength(2);
   });
 
-  it('matches the Mission Book: German R3 SS Tracker (1 Pioneer) within 2 hexes of R01', () => {
+  it('matches the redesigned setup: German R3 SS Tracker within 2 full Hexes of R01', () => {
     const wave = MISSION_1.reinforcements!.find((w) => w.id === 'ger-r3-ss-tracker')!;
     expect(wave.side).toBe('A');
     expect(wave.earliestRound).toBe(3);
     expect(wave.entryHexIds).toContain(hexIdForLabel('R01'));
-    expect(wave.units).toEqual([{ id: 'G-ss-pioneer', templateId: 'ger-pioneer', facing: 1 }]);
+    // Every entry Hex must be a full Hex (no half/quarter-hex edge cut).
+    for (const id of wave.entryHexIds) {
+      expect(MISSION1_MAP.find((h) => h.id === id)!.edgeCut).toBeUndefined();
+    }
+    expect(wave.units).toEqual([{ id: 'G-ss-pioneer', templateId: 'ger-pioneer-tracker', facing: 0 }]);
   });
 
-  it('matches the Mission Book: Soviet R2 reinforcements (2 Rifles) at Road Hex R07', () => {
+  it('matches the redesigned setup: Soviet R2 reinforcements (2 Rifles) at Road Hex R07 (S06 is a half-hex)', () => {
     const wave = MISSION_1.reinforcements!.find((w) => w.id === 'sov-r2-reinforcements')!;
     expect(wave.side).toBe('B');
     expect(wave.earliestRound).toBe(2);
+    // §4.12 entry Hexes must be full Hexes — the scenario names S06, but
+    // that's a half-hex on the board's true east edge (edgeCut.e on every
+    // Hex in column S), so this uses R07, the full-hex Road continuation one
+    // Hex inward (verified against MISSION1_MAP directly, not just the
+    // wave's own data, so a future regression re-introducing S06 would fail
+    // this test even if someone "fixed" only the entryHexIds value).
     expect(wave.entryHexIds).toEqual([hexIdForLabel('R07')]);
+    const entryHex = MISSION1_MAP.find((h) => h.id === wave.entryHexIds[0]);
+    expect(entryHex?.edgeCut).toBeUndefined();
+    expect(entryHex?.road).toBe(true);
     expect(wave.units.filter((u) => u.templateId === 'sov-rifle')).toHaveLength(2);
   });
 });
@@ -91,7 +108,8 @@ describe('Mission 1 — initial state', () => {
     expect(s.players.A.vp).toBe(0);
     expect(s.vpMarker).toBe(-1); // B leads by 1 (§9.2)
     expect(s.initiativeSide).toBe('A'); // German Round-1 initiative
-    expect(s.players.A.capCurrent).toBe(7);
+    expect(s.players.A.capCurrent).toBe(6);
+    expect(s.players.B.capCurrent).toBe(7);
   });
 
   it('starts with 7 Units off-Map awaiting their reinforcement wave (§4.12)', () => {

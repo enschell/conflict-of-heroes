@@ -2,9 +2,19 @@
  * Hills Sandbox — a NON-canonical test scenario (not from the Mission Book),
  * for M9 (§12 Hills and Elevation). Unlike `sandbox.ts`/`fireSupportSandbox.ts`,
  * this one needs its own map: Map 1 has no hills at all, so a small purpose-
- * built board (8 columns × 5 rows, plain axial `q,r` — no need for Map 1's
- * rulebook hex-label scheme since this mission isn't cross-referenced against
- * the physical board) stands in for it.
+ * built board (8 columns × 5 rows, own `R{row}C{col}` labels — no need for
+ * Map 1's rulebook A01-S12 scheme since this mission isn't cross-referenced
+ * against the physical board) stands in for it. Cells are placed via
+ * `colRowToAxial` (engine/hexBoard.ts's column/row → axial formula, §B), NOT
+ * raw `hexId(q, r)` — a straight rectangular grid under the flat-top
+ * projection needs the column-parity offset that formula applies (increasing
+ * column shifts axial r by `-floor(c/2)`), same as the real board substrate.
+ * This mission originally authored `hexId(q, r)` directly (pre-dating the
+ * flat-top migration, §B) and rendered as a sheared parallelogram once the
+ * board switched from pointy-top to flat-top — re-authored onto the correct
+ * embedding, not just cosmetically renamed (CLAUDE.md §B's "re-author, don't
+ * reproject" lesson applies here too: swapping the coordinate formula IS the
+ * fix, not a reprojection of results computed under the old formula).
  *
  * Row 0 — a Steep (2-level) cliff: L0→L2 directly at col 2 (on a Road, so a
  *   Vehicle can still cross it — §15.4 — but still pays the §12.2 elevation
@@ -26,8 +36,15 @@
  *   not just Level 0 (G-mesa ↔ S-mesa see each other across it).
  */
 import { hexId } from '../../engine/hex';
-import type { MapHexDef, MissionDef, TerrainId, UnitPlacement } from '../../engine/types';
+import { colRowToAxial } from '../../engine/hexBoard';
+import type { HexId, MapHexDef, MissionDef, TerrainId, UnitPlacement } from '../../engine/types';
 import { UNIT_TEMPLATES } from '../units';
+
+/** Column `c`, row `r` (this sandbox's own small grid) -> a real flat-top-adjacent HexId. */
+function at(c: number, r: number): HexId {
+  const a = colRowToAxial({ c, r });
+  return hexId(a.q, a.r);
+}
 
 interface ColDef {
   terrain: TerrainId;
@@ -54,7 +71,7 @@ const ROWS: ColDef[][] = [
 
 const HEXES: MapHexDef[] = ROWS.flatMap((row, r) =>
   row.map((col, q): MapHexDef => ({
-    id: hexId(q, r),
+    id: at(q, r),
     terrain: col.terrain,
     elevation: col.elevation,
     ...(col.road ? { road: true } : {}),
@@ -64,13 +81,13 @@ const HEXES: MapHexDef[] = ROWS.flatMap((row, r) =>
 
 const UNITS: UnitPlacement[] = [
   // Germans (A), facing east (facing 0).
-  { id: 'G-rifle', side: 'A', templateId: 'ger-rifle', hexId: hexId(0, 1), facing: 0 },
-  { id: 'G-hilltop', side: 'A', templateId: 'ger-lmg', hexId: hexId(3, 1), facing: 0 },
-  { id: 'G-tank', side: 'A', templateId: 'ger-pz3h', hexId: hexId(1, 1), facing: 0 },
-  { id: 'G-mesa', side: 'A', templateId: 'ger-rifle', hexId: hexId(1, 4), facing: 0 },
+  { id: 'G-rifle', side: 'A', templateId: 'ger-rifle', hexId: at(0, 1), facing: 0 },
+  { id: 'G-hilltop', side: 'A', templateId: 'ger-lmg', hexId: at(3, 1), facing: 0 },
+  { id: 'G-tank', side: 'A', templateId: 'ger-pz3h', hexId: at(1, 1), facing: 0 },
+  { id: 'G-mesa', side: 'A', templateId: 'ger-rifle', hexId: at(1, 4), facing: 0 },
   // Soviets (B), facing west (facing 3).
-  { id: 'S-rifle', side: 'B', templateId: 'sov-rifle', hexId: hexId(6, 1), facing: 3 },
-  { id: 'S-mesa', side: 'B', templateId: 'sov-rifle', hexId: hexId(4, 4), facing: 3 },
+  { id: 'S-rifle', side: 'B', templateId: 'sov-rifle', hexId: at(6, 1), facing: 3 },
+  { id: 'S-mesa', side: 'B', templateId: 'sov-rifle', hexId: at(4, 4), facing: 3 },
 ];
 
 const templates = [...new Set(UNITS.map((u) => u.templateId))].map((id) => {
@@ -91,5 +108,5 @@ export const HILLS_SANDBOX: MissionDef = {
   hexes: HEXES,
   units: UNITS,
   templates,
-  victoryHexes: [{ hexId: hexId(3, 2), vp: 1 }],
+  victoryHexes: [{ hexId: at(3, 2), vp: 1 }],
 };

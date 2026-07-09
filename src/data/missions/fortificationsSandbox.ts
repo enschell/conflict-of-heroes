@@ -2,7 +2,10 @@
  * Fortifications Sandbox — a NON-canonical test scenario (not from the
  * Mission Book), for M10 Phase 2 (§17.1-§17.6, §17.11-§17.12). Like
  * `obstaclesSandbox.ts`, this needs its own small map: Map 1 has no
- * Fortifications either.
+ * Fortifications either. Cells are placed via `colRowToAxial`
+ * (engine/hexBoard.ts, §B), not raw `hexId(q, r)` — see `hillsSandbox.ts`'s
+ * header comment for why a straight rectangular grid needs that
+ * column-parity formula under the flat-top projection.
  *
  * Row 0 — a Trench (§17.4): any Foot Unit may occupy it (any facing), +2DR
  *   from any direction; impassable to Wheeled, no Tracked Bonus Move in/out.
@@ -26,13 +29,20 @@
  * occupying is always a player choice, §17.2/17.3).
  */
 import { hexId } from '../../engine/hex';
-import type { MapHexDef, MissionDef, UnitPlacement } from '../../engine/types';
+import { colRowToAxial } from '../../engine/hexBoard';
+import type { HexId, MapHexDef, MissionDef, UnitPlacement } from '../../engine/types';
 import { UNIT_TEMPLATES } from '../units';
+
+/** Column `c`, row `r` (this sandbox's own small grid) -> a real flat-top-adjacent HexId. */
+function at(c: number, r: number): HexId {
+  const a = colRowToAxial({ c, r });
+  return hexId(a.q, a.r);
+}
 
 const HEXES: MapHexDef[] = [];
 for (let r = 0; r < 4; r++) {
   for (let q = 0; q < 6; q++) {
-    const def: MapHexDef = { id: hexId(q, r), terrain: 'open', label: `R${r}C${q}` };
+    const def: MapHexDef = { id: at(q, r), terrain: 'open', label: `R${r}C${q}` };
     if (r === 0 && q === 2) def.fortification = { kind: 'trench' };
     if (r === 1 && q === 2) def.fortification = { kind: 'bunker', facing: 3, destroyDr: 16 };
     HEXES.push(def);
@@ -41,15 +51,15 @@ for (let r = 0; r < 4; r++) {
 
 const UNITS: UnitPlacement[] = [
   // Germans (A), facing east (facing 0).
-  { id: 'G-rifle', side: 'A', templateId: 'ger-rifle', hexId: hexId(0, 0), facing: 0 },
-  { id: 'G-pz3', side: 'A', templateId: 'ger-pz3h', hexId: hexId(0, 1), facing: 0 }, // for the §17.11 two-roll destroy test
-  { id: 'G-rifle2', side: 'A', templateId: 'ger-rifle', hexId: hexId(0, 2), facing: 0 }, // for the Hasty Defense demo
-  { id: 'G-pioneer', side: 'A', templateId: 'ger-pioneer', hexId: hexId(0, 3), facing: 0 }, // §18.0-§18.1 Flamethrower demo
+  { id: 'G-rifle', side: 'A', templateId: 'ger-rifle', hexId: at(0, 0), facing: 0 },
+  { id: 'G-pz3', side: 'A', templateId: 'ger-pz3h', hexId: at(0, 1), facing: 0 }, // for the §17.11 two-roll destroy test
+  { id: 'G-rifle2', side: 'A', templateId: 'ger-rifle', hexId: at(0, 2), facing: 0 }, // for the Hasty Defense demo
+  { id: 'G-pioneer', side: 'A', templateId: 'ger-pioneer', hexId: at(0, 3), facing: 0 }, // §18.0-§18.1 Flamethrower demo
   // Soviets (B), facing west (facing 3) — start AT the Trench/Bunker Hexes;
   // occupying is a live choice the player makes in-browser.
-  { id: 'S-rifle', side: 'B', templateId: 'sov-rifle', hexId: hexId(2, 0), facing: 3 },
-  { id: 'S-maxim', side: 'B', templateId: 'sov-maxim', hexId: hexId(2, 1), facing: 3 },
-  { id: 'S-t34', side: 'B', templateId: 'sov-t34a', hexId: hexId(3, 3), facing: 3 }, // Flamethrower-vs-Armor target
+  { id: 'S-rifle', side: 'B', templateId: 'sov-rifle', hexId: at(2, 0), facing: 3 },
+  { id: 'S-maxim', side: 'B', templateId: 'sov-maxim', hexId: at(2, 1), facing: 3 },
+  { id: 'S-t34', side: 'B', templateId: 'sov-t34a', hexId: at(3, 3), facing: 3 }, // Flamethrower-vs-Armor target
 ];
 
 const templates = [...new Set(UNITS.map((u) => u.templateId))].map((id) => {
@@ -70,5 +80,5 @@ export const FORTIFICATIONS_SANDBOX: MissionDef = {
   hexes: HEXES,
   units: UNITS,
   templates,
-  victoryHexes: [{ hexId: hexId(4, 2), vp: 1 }],
+  victoryHexes: [{ hexId: at(4, 2), vp: 1 }],
 };

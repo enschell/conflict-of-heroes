@@ -11,6 +11,8 @@
     "play": "tsx scripts/play.ts",
     "demo": "tsx scripts/play.ts --demo",
     "conformance": "tsx scripts/conformance.ts",
+    "server": "tsx server/index.ts",
+    "start": "tsx server/index.ts",
     "test": "vitest",
     "test:run": "vitest run",
     "typecheck": "tsc --noEmit"
@@ -18,11 +20,14 @@
   "dependencies": {
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
+    "ws": "^8.21.0",
     "zustand": "^5.0.0"
   },
   "devDependencies": {
+    "@types/node": "^26.1.1",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
+    "@types/ws": "^8.18.1",
     "@vitejs/plugin-react": "^4.3.0",
     "jsdom": "^29.1.1",
     "tsx": "^4.19.0",

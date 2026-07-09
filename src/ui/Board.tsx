@@ -1,12 +1,14 @@
 /**
- * The SVG hex board — the real visual model (true pointy-top hexagons). Renders
- * per-hex artwork clipped into the hexagon, terrain/roads/walls/objectives, the
- * selected unit's legal move/fire highlights, the LOS overlay (hold Shift to see
- * LOS from the hovered hex), and all unit counters (stacked units fanned out).
- * Hovering a targetable enemy shows a fire-odds popup; Ctrl+click a stacked hex
- * opens a unit picker. Clicks/hover route through the store.
+ * The SVG hex board — the real visual model (flat-top hexagons, per
+ * docs/hex_board_spec/README.md). Renders per-hex artwork clipped into the
+ * hexagon, terrain/roads/walls/objectives, board-edge half/quarter-hexes and
+ * coordinate labels/board numbers, the selected unit's legal move/fire
+ * highlights, the LOS overlay (hold Shift to see LOS from the hovered hex),
+ * and all unit counters (stacked units fanned out). Hovering a targetable
+ * enemy shows a fire-odds popup; Ctrl+click a stacked hex opens a unit
+ * picker. Clicks/hover route through the store.
  */
-import { attackContext, directionTo, effectiveStats, fortificationAt, legalActionsForUnit, legalEntryHexes, moveCost, neighbor, neighbors, parseHexId, idOf, planVehicleMove, templateOf, visibleHexesFrom } from '../engine';
+import { attackContext, directionTo, distance, effectiveStats, fortificationAt, legalActionsForUnit, legalEntryHexes, moveCost, neighbor, neighbors, parseHexId, idOf, planVehicleMove, templateOf, visibleHexesFrom } from '../engine';
 import type { Action, Facing, FortificationKind, Unit } from '../engine/types';
 import { useGame } from '../state/store';
 import { artForHex } from '../data/hexArt';
@@ -14,12 +16,15 @@ import { fireOdds, isHopelessShot, pct } from './odds';
 import {
   EDGE_CORNERS,
   HEX_SIZE,
+  clipHexPolygon,
   computeLayout,
   fringeHexes,
   hexCenter,
   hexCorners,
   playableBounds,
   pointsAttr,
+  polygonCentroid,
+  polygonTopY,
 } from './hexgeo';
 import { HEX_STROKE, ROAD_STROKE, TERRAIN_FILL, WALL_STROKE } from './theme';
 import { UnitCounter } from './UnitCounter';
@@ -29,8 +34,11 @@ export function Board() {
   const game = useGame((s) => s.game);
   const selectedUnitId = useGame((s) => s.selectedUnitId);
   const groupSel = useGame((s) => s.groupSel);
+  const groupMoveQueue = useGame((s) => s.groupMoveQueue);
   const movePath = useGame((s) => s.movePath);
-  const placingReinforcementId = useGame((s) => s.placingReinforcementId);
+  const placingReinforcementQueue = useGame((s) => s.placingReinforcementQueue);
+  const placingReinforcementFacing = useGame((s) => s.placingReinforcementFacing);
+  const placingReinforcementDone = useGame((s) => s.placingReinforcementDone);
   const losMode = useGame((s) => s.losMode);
   const losSource = useGame((s) => s.losSource);
   const shiftHeld = useGame((s) => s.shiftHeld);
@@ -83,6 +91,20 @@ export function Board() {
     }
   }
 
+  // General Group Move (§10.2/§10.3): the front-of-queue member's own legal
+  // destination Hexes, highlighted the same green as a normal single-Unit
+  // Move — reuses `moveTargets` directly rather than a parallel Set, so the
+  // rendering below needs no changes at all.
+  if (!losActive && groupMoveQueue.length > 0) {
+    const activeUnit = game.units[groupMoveQueue[0]!];
+    if (activeUnit) {
+      for (const n of neighbors(parseHexId(activeUnit.hexId))) {
+        const nid = idOf(n);
+        if (game.hexes[nid] && moveCost(game, activeUnit, nid).ap != null) moveTargets.add(nid);
+      }
+    }
+  }
+
   // Vehicle Bonus-Move path (§15.2): the chosen steps + the legal next steps.
   const pathSet = new Set(movePath);
   const nextSteps = new Set<string>();
@@ -98,12 +120,33 @@ export function Board() {
     }
   }
 
-  // Manual reinforcement placement (§4.12): this Unit's legal entry Hexes.
+  // Manual/Group reinforcement placement (§4.12): the front-of-queue Unit's
+  // legal entry Hexes (hidden once it has a Hex and is awaiting a facing —
+  // the facing highlight below takes over at that point).
   const entryTargets = new Set<string>();
-  if (placingReinforcementId) {
-    const r = game.reinforcements.find((x) => x.id === placingReinforcementId);
-    if (r) for (const h of legalEntryHexes(game, r)) entryTargets.add(h);
+  if (!placingReinforcementFacing && placingReinforcementQueue.length > 0) {
+    const r = game.reinforcements.find((x) => x.id === placingReinforcementQueue[0]);
+    if (r) {
+      // §4.12 Group entry: once at least one Unit has a Hex, only offer
+      // Hexes connected to what's already placed — the reducer's own
+      // `hexesConnected` check would reject anything else, so restrict the
+      // picker up front rather than letting the player pick a scattered Hex
+      // and only find out it's illegal after choosing a facing too.
+      const alreadyPlaced = placingReinforcementDone.map((d) => d.hexId);
+      for (const h of legalEntryHexes(game, r)) {
+        if (
+          alreadyPlaced.length === 0 ||
+          alreadyPlaced.some((p) => p === h || distance(parseHexId(p), parseHexId(h)) <= 1)
+        ) {
+          entryTargets.add(h);
+        }
+      }
+    }
   }
+  // While a just-placed reinforcement Unit awaits its facing choice, keep its
+  // chosen Hex highlighted the same purple — clicking it again keeps the
+  // wave's default facing (store.ts's hexClick).
+  if (placingReinforcementFacing) entryTargets.add(placingReinforcementFacing.hexId);
 
   // Free facing correction (§4.5/§15.11): the six neighbor Hexes of a Unit
   // awaiting CHOOSE_FACING, clickable to face that direction (the arrow-button
@@ -111,13 +154,34 @@ export function Board() {
   // Also reused for the Pivot picker (P key, §4.6): same blue highlight, but
   // clicking issues a real (AP-costed) PIVOT instead — see store.ts's
   // `hexClick`, which branches on `pivotPicker` independently of this render.
+  // And reused a third time for a reinforcement Unit awaiting its placement
+  // facing (`placingReinforcementFacing`) — no live Unit exists yet for that
+  // one, so this works off a bare Hex id rather than a Unit.
   const facingTargets = new Set<string>();
   const facingChoiceUnit =
     selectedUnitId && game.pendingFacingChoices?.includes(selectedUnitId) ? game.units[selectedUnitId] : null;
   const pivotPickerUnit = pivotPicker && selectedUnitId ? game.units[selectedUnitId] : null;
-  const facingHighlightUnit = facingChoiceUnit ?? pivotPickerUnit;
-  if (facingHighlightUnit) {
-    for (const n of neighbors(parseHexId(facingHighlightUnit.hexId))) {
+  // General Group Move (§10.2/§10.3): the front-of-queue member's own Hex
+  // gets the same floating label as the pickers above, but NOT the blue
+  // neighbor overlay — its legal destinations are already the ordinary green
+  // moveTargets highlight (added below), so a second blue overlay on the
+  // same hexes would just look muddy.
+  const activeGroupMoveUnit = groupMoveQueue.length > 0 ? (game.units[groupMoveQueue[0]!] ?? null) : null;
+  const facingHighlightHex: string | null =
+    placingReinforcementFacing?.hexId ??
+    facingChoiceUnit?.hexId ??
+    pivotPickerUnit?.hexId ??
+    activeGroupMoveUnit?.hexId ??
+    null;
+  const facingHighlightLabel = placingReinforcementFacing
+    ? 'Choose facing (or click here for default)'
+    : facingChoiceUnit
+      ? 'Choose facing'
+      : pivotPickerUnit
+        ? 'Pivot (P)'
+        : 'Move Group member (or click here to leave in place)';
+  if (facingHighlightHex && !activeGroupMoveUnit) {
+    for (const n of neighbors(parseHexId(facingHighlightHex))) {
       const nid = idOf(n);
       if (game.hexes[nid]) facingTargets.add(nid);
     }
@@ -290,16 +354,60 @@ export function Board() {
           {ids.map((id) => {
             const hex = game.hexes[id]!;
             const c = hexCenter(id);
-            const pts = pointsAttr(hexCorners(c));
+            // Board-edge half/quarter-hexes (docs/hex_board_spec/README.md
+            // §Straight-edge clip) — clipped once here, every highlight/
+            // outline/click-target overlay below reuses these same `pts` so
+            // none of them spill past the hex's actual rendered shape.
+            const corners = hexCorners(c);
+            const clipped = hex.edgeCut ? clipHexPolygon(corners, c, hex.edgeCut) : corners;
+            const pts = pointsAttr(clipped);
             const art = artForHex(hex);
             const losDim = visible ? !visible.has(id) && id !== losActive : false;
+            const artClipId = hex.edgeCut ? `hexclip-${id}` : 'hexclip';
             return (
               <g key={id}>
+                {hex.edgeCut && (
+                  <defs>
+                    <clipPath id={artClipId}>
+                      <polygon points={pointsAttr(clipped.map((p) => ({ x: p.x - c.x, y: p.y - c.y })))} />
+                    </clipPath>
+                  </defs>
+                )}
                 <polygon points={pts} fill={TERRAIN_FILL[hex.terrain]} />
                 {art && (
-                  <g transform={`translate(${c.x},${c.y})`} clipPath="url(#hexclip)">
+                  <g transform={`translate(${c.x},${c.y})`} clipPath={`url(#${artClipId})`}>
                     <image href={art} x={-artW / 2} y={-HEX_SIZE} width={artW} height={2 * HEX_SIZE} preserveAspectRatio="xMidYMid slice" />
                   </g>
+                )}
+                {/* Coordinate label (small, top-centered) or board number (large,
+                    accent) — §Labeling. Rendered on top of art/terrain, below
+                    the interactive overlays that follow. */}
+                {hex.boardNumber != null ? (
+                  <text
+                    x={polygonCentroid(clipped).x}
+                    y={polygonCentroid(clipped).y}
+                    fontSize={HEX_SIZE * 0.75}
+                    fontWeight={700}
+                    fill="#b0442c"
+                    textAnchor="middle"
+                    dominantBaseline="central"
+                    pointerEvents="none"
+                  >
+                    {hex.boardNumber}
+                  </text>
+                ) : (
+                  hex.label && (
+                    <text
+                      x={polygonCentroid(clipped).x}
+                      y={polygonTopY(clipped) + HEX_SIZE * 0.2}
+                      fontSize={HEX_SIZE * 0.22}
+                      fill={HEX_STROKE}
+                      textAnchor="middle"
+                      pointerEvents="none"
+                    >
+                      {hex.label}
+                    </text>
+                  )
                 )}
                 {/* Smoke (§14): Heavy is denser/whiter than Light, both block/haze the hex. */}
                 {hex.features.smoke === 2 && (
@@ -510,11 +618,14 @@ export function Board() {
           })}
 
           {/* Rendered last so it's always above every Hex fill and Unit counter. */}
-          {facingHighlightUnit && (
+          {facingHighlightHex && (
             <g pointerEvents="none">
               {(() => {
-                const c = hexCenter(facingHighlightUnit.hexId);
-                const w = HEX_SIZE * 2.6;
+                const c = hexCenter(facingHighlightHex);
+                // Width scales with the label text so longer variants (e.g.
+                // the Group Move one) don't get clipped — same ratio the
+                // original two-case hardcoded 2.6/4.6 split already implied.
+                const w = HEX_SIZE * Math.max(2.6, facingHighlightLabel.length * 0.11);
                 const h = HEX_SIZE * 0.6;
                 const ty = c.y - HEX_SIZE * 1.55;
                 return (
@@ -538,7 +649,7 @@ export function Board() {
                       textAnchor="middle"
                       dominantBaseline="central"
                     >
-                      {facingChoiceUnit ? 'Choose facing' : 'Pivot (P)'}
+                      {facingHighlightLabel}
                     </text>
                   </>
                 );

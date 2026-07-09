@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <style>
+    html, body { margin: 0; padding: 0; }
+    body { background: #ece7db; }
+  </style>
+</helmet>
+<div style="min-height: 100vh; box-sizing: border-box; display: flex; flex-direction: column; background: #ece7db; padding: 28px 32px 40px;">
+  <div style="display: flex; align-items: baseline; gap: 16px; margin-bottom: 20px; font-family: ui-monospace, 'SF Mono', Menlo, monospace; color: #4a463d;">
+    <span style="font-size: 15px; font-weight: 700; letter-spacing: 0.04em;">HEX MAP</span>
+    <span style="font-size: 12px; color: #8a8474;">18 wide &times; 12 tall per board &middot; abutted boards share edge half-hexes (form full hexes) &middot; board number in upper-left</span>
+  </div>
+  <div style="flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center;">
+    <svg viewBox="{{ viewBox }}" preserveAspectRatio="xMidYMid meet" style="width: 100%; height: 100%; max-height: 82vh; display: block;">
+      <g transform="{{ rootTransform }}">
+        <sc-for list="{{ hexes }}" as="hex" hint-placeholder-count="200">
+          <polygon points="{{ hex.points }}" fill="{{ hex.fill }}" stroke="#4a463d" stroke-width="1.4" stroke-linejoin="round"></polygon>
+        </sc-for>
+        <g ref="{{ labelRef }}" style="pointer-events: none;"></g>
+      </g>
+    </svg>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script>
+class Component extends DCLogic {
+  // Which boards to lay out, on a shared board-grid. gx increases east, gy south.
+  // Boards abutted on any side share their edge half-hexes, which then read as
+  // full hexes. `n` is the board number stamped in the upper-left cell.
+  boards() {
+    return this.props.boards || [
+      { gx: 0, gy: 0, n: 1 },
+    ];
+  }
+
+  renderVals() {
+    const R = 40;                    // center-to-vertex
+    const h = Math.sqrt(3) * R;      // flat-top hex height
+    const cols = 19;                 // 17 full + 2 half-edge columns = 18 hex-widths
+    const eps = 0.001;
+    const boardW = (cols - 1) * 1.5 * R;   // horizontal board pitch (= 27R)
+    const boardH = 12 * h;                 // vertical board pitch
+
+    const fullPts = (cx, cy) => [
+      [cx + R, cy], [cx + R / 2, cy + h / 2], [cx - R / 2, cy + h / 2],
+      [cx - R, cy], [cx - R / 2, cy - h / 2], [cx + R / 2, cy - h / 2],
+    ];
+    const clipEdge = (poly, inside, intersect) => {
+      const out = [];
+      for (let i = 0; i < poly.length; i++) {
+        const a = poly[i], b = poly[(i + 1) % poly.length];
+        const ina = inside(a), inb = inside(b);
+        if (ina) { out.push(a); if (!inb) out.push(intersect(a, b)); }
+        else if (inb) { out.push(intersect(a, b)); }
+      }
+      return out;
+    };
+    const ix = (a, b, X) => { const t = (X - a[0]) / (b[0] - a[0]); return [X, a[1] + t * (b[1] - a[1])]; };
+    const iy = (a, b, Y) => { const t = (Y - a[1]) / (b[1] - a[1]); return [a[0] + t * (b[0] - a[0]), Y]; };
+    const area = (poly) => {
+      let a = 0;
+      for (let i = 0; i < poly.length; i++) {
+        const p = poly[i], q = poly[(i + 1) % poly.length];
+        a += p[0] * q[1] - q[0] * p[1];
+      }
+      return Math.abs(a) / 2;
+    };
+    const letters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+
+    const boards = this.boards();
+    const has = {};
+    boards.forEach(b => { has[b.gx + ',' + b.gy] = true; });
+
+    const hexes = [];
+    const labels = [];
+    const numbers = [];
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+
+    boards.forEach(b => {
+      const ox = b.gx * boardW, oy = b.gy * boardH;   // board origin translation
+      const xL = ox, xR = ox + boardW, yT = oy + h / 2, yB = oy + 12.5 * h;
+      // Is each outer edge exposed (no neighbouring board on that side)?
+      const expW = !has[(b.gx - 1) + ',' + b.gy];
+      const expE = !has[(b.gx + 1) + ',' + b.gy];
+      const expN = !has[b.gx + ',' + (b.gy - 1)];
+      const expS = !has[b.gx + ',' + (b.gy + 1)];
+
+      const clipBox = (poly) => {
+        let p = poly;
+        p = clipEdge(p, q => q[0] >= xL - eps, (a, c) => ix(a, c, xL));
+        p = clipEdge(p, q => q[0] <= xR + eps, (a, c) => ix(a, c, xR));
+        p = clipEdge(p, q => q[1] >= yT - eps, (a, c) => iy(a, c, yT));
+        p = clipEdge(p, q => q[1] <= yB + eps, (a, c) => iy(a, c, yB));
+        return p;
+      };
+
+      for (let c = 0; c < cols; c++) {
+        const even = c % 2 === 0;
+        for (let r = 0; r <= 12; r++) {
+          const cx = ox + c * 1.5 * R;
+          const cy = oy + h / 2 + r * h + (even ? 0 : h / 2);
+          const poly = clipBox(fullPts(cx, cy));
+          if (poly.length < 3 || area(poly) < 4) continue;
+
+          poly.forEach(p => {
+            if (p[0] < minX) minX = p[0];
+            if (p[0] > maxX) maxX = p[0];
+            if (p[1] < minY) minY = p[1];
+            if (p[1] > maxY) maxY = p[1];
+          });
+
+          // Half-hex only reads as such when its edge is EXPOSED. A shared edge
+          // pairs with the neighbour's half to form a full hex → full colour.
+          const onW = c === 0, onE = c === cols - 1;
+          const onN = even && r === 0, onS = even && r === 12;
+          const tinted = (onW && expW) || (onE && expE) || (onN && expN) || (onS && expS);
+
+          hexes.push({
+            key: b.n + '-' + c + '-' + r,
+            points: poly.map(p => p[0].toFixed(1) + ',' + p[1].toFixed(1)).join(' '),
+            fill: tinted ? '#ddd6c4' : '#fbfaf5',
+          });
+
+          const cxLab = poly.reduce((s, p) => s + p[0], 0) / poly.length;
+          const cyLab = poly.reduce((s, p) => s + p[1], 0) / poly.length;
+
+          // Upper-left cell (c=0,r=0) carries the BOARD NUMBER instead of a coord.
+          if (c === 0 && r === 0) {
+            numbers.push({ x: cxLab, y: cyLab, text: String(b.n) });
+            continue;
+          }
+          if (even && r === 0) continue;   // other top-edge halves: unlabelled
+          const num = even ? r : r + 1;
+          const topY = Math.min.apply(null, poly.map(p => p[1]));
+          labels.push({ x: cxLab, y: topY + 8, text: letters[c] + String(num).padStart(2, '0') });
+        }
+      }
+    });
+
+    // Nominal (unrotated) orientation.
+    const rot = this.props.rotation != null ? this.props.rotation : 0;
+    this._rotation = rot;
+
+    const pad = 6;
+    let vb;
+    if (rot === -90) {
+      // point (x,y) -> (y, -x): half-hex edges move to north/south borders.
+      vb = [minY, -maxX, (maxY - minY), (maxX - minX)];
+    } else if (rot === 90) {
+      // point (x,y) -> (-y, x)
+      vb = [-maxY, minX, (maxY - minY), (maxX - minX)];
+    } else {
+      vb = [minX, minY, (maxX - minX), (maxY - minY)];
+    }
+    const viewBox = [
+      (vb[0] - pad).toFixed(1), (vb[1] - pad).toFixed(1),
+      (vb[2] + 2 * pad).toFixed(1), (vb[3] + 2 * pad).toFixed(1),
+    ].join(' ');
+
+    this._labelData = labels;
+    this._numberData = numbers;
+    return { hexes, viewBox, rootTransform: 'rotate(' + rot + ')', labelRef: (el) => this.paintLabels(el) };
+  }
+
+  paintLabels(g) {
+    if (!g) return;
+    const NS = 'http://www.w3.org/2000/svg';
+    const rot = this._rotation || 0;
+    while (g.firstChild) g.removeChild(g.firstChild);
+    const make = (l, attrs) => {
+      const t = document.createElementNS(NS, 'text');
+      t.setAttribute('x', l.x.toFixed(1));
+      t.setAttribute('y', l.y.toFixed(1));
+      Object.keys(attrs).forEach(k => t.setAttribute(k, attrs[k]));
+      t.setAttribute('font-family', "ui-monospace, 'SF Mono', Menlo, monospace");
+      t.setAttribute('text-anchor', 'middle');
+      t.setAttribute('dominant-baseline', 'central');
+      // Counter-rotate glyphs about their own point so labels stay upright.
+      if (rot) t.setAttribute('transform', 'rotate(' + (-rot) + ' ' + l.x.toFixed(1) + ' ' + l.y.toFixed(1) + ')');
+      t.textContent = l.text;
+      g.appendChild(t);
+    };
+    (this._labelData || []).forEach(l => make(l, { 'font-size': '9', fill: '#4a463d' }));
+    (this._numberData || []).forEach(l => make(l, { 'font-size': '30', 'font-weight': '700', fill: '#b0442c' }));
+  }
+}
+</script>
+</body>
+</html>

@@ -1,86 +1,110 @@
 /**
- * Map 1 — the board for Mission 1 ("Partisans"). Terrain authored from the
- * physical Academy Games Map 1 board (our own data; no art is copied).
+ * Map 1 — the board for Mission 1 ("Partisans"). Re-authored onto the new
+ * flat-top board substrate (docs/hex_board_spec/README.md, CLAUDE.md §B)
+ * directly with the user, hex by hex, via the JSON terrain-authoring format
+ * (see data/hexBoardMap.ts's applyTerrainJson/TERRAIN_CODES). Single board
+ * (board 1), nominal orientation — a locked decision, not a placeholder.
  *
- * Coordinate system (matches the rulebook's hex labels):
- *  - 19 rows lettered A (south / bottom) … S (north / top); 12 columns 01–12
- *    running west→east. Rows alternate FULL (B,D,…,R) and HALF-hex (A,C,…,S);
- *    each half-hex row carries one leading UNNAMED half-hex, so its playable
- *    hexes are labelled col 01..12 after it (e.g. I06).
- *  - We map a label to the engine's pointy-top axial (q,r) so that north = up
- *    (smaller r) and east = right (larger q); `axialToPixel` then renders the
- *    rectangular, staggered board correctly.
- *
- * Each character below is one hex for columns 01..12 (west→east):
- *   O = open · R = road (open hex with a road) · L = light woods · H = heavy woods
- *   . = off-board / clipped half-hex (no playable hex)
+ * TERRAIN_JSON is the live source of truth as terrain is authored; hexes not
+ * yet mentioned default to Open (generateOpenBoard's base fill).
  */
-import type { MapHexDef, TerrainId } from '../../engine/types';
+import { applyTerrainJson, labelLookup, type TerrainJson } from '../hexBoardMap';
+import type { BoardPlacement } from '../../engine/hexBoard';
+import type { MapHexDef } from '../../engine/types';
 
-/** Rows north→south (display order); the builder reads them by label. */
-const ROWS: Record<string, string> = {
-  S: '............',
-  R: 'OOOOOOROOOO.',
-  Q: 'OLLRRRLOOLL.',
-  P: 'OOLRLLOLOLOO',
-  O: 'ORROOOLOOOL.',
-  N: 'HRLOOOHHLLOO',
-  M: 'RRRHHOHHOOO.',
-  L: 'RLHRHOOHOOOO',
-  K: 'RLHRLOLLLLO.',
-  J: 'ROOORLOOOOOR',
-  I: 'OOOORROOOLR.',
-  H: 'OOOOOORROORO',
-  G: 'OOOORHHRRRO.',
-  F: 'OLLOORHOLOOO',
-  E: 'LLOORLHOLLO.',
-  D: 'OLOOROOOOOOO',
-  C: 'OOOLROOOLOO.',
-  B: 'OOLLROOOOOOO',
-  A: 'OOOLOROOOOO.',
+export const MISSION1_BOARDS: BoardPlacement[] = [{ gx: 0, gy: 0, n: 1 }];
+
+const TERRAIN_JSON: TerrainJson = {
+  '1': {
+    I05: 'road',
+    I06: 'road',
+    H07: 'road',
+    N01: 'heavy_woods',
+    J01: 'road',
+    K01: 'road',
+    L01: 'road',
+    M01: 'road',
+    N02: 'road',
+    O02: 'road',
+    O03: 'road',
+    P04: 'road',
+    Q04: 'road',
+    Q05: 'road',
+    Q06: 'road',
+    R07: 'road',
+    S06: 'road',
+    L02: 'light_woods',
+    N03: 'light_woods',
+    M02: 'road',
+    M03: 'road',
+    L04: 'heavy_woods',
+    K04: 'road',
+    J05: 'road',
+    L03: 'heavy_woods',
+    K03: 'heavy_woods',
+    K02: 'light_woods',
+    M04: 'heavy_woods',
+    L05: 'heavy_woods',
+    K05: 'light_woods',
+    J06: 'light_woods',
+    H08: 'road',
+    G08: 'road',
+    F10: 'road',
+    F09: 'light_woods',
+    F07: 'heavy_woods',
+    E07: 'heavy_woods',
+    E09: 'light_woods',
+    K07: 'light_woods',
+    L08: 'heavy_woods',
+    M07: 'heavy_woods',
+    N08: 'heavy_woods',
+    M08: 'heavy_woods',
+    P08: 'light_woods',
+    Q07: 'light_woods',
+    Q10: 'light_woods',
+    P06: 'light_woods',
+    P05: 'light_woods',
+    Q03: 'light_woods',
+    P03: 'light_woods',
+    Q02: 'light_woods',
+    E01: 'heavy_woods',
+    D02: 'light_woods',
+    C04: 'light_woods',
+    G06: 'heavy_woods',
+    F06: 'road',
+    E05: 'road',
+    D05: 'road',
+    C05: 'road',
+    B06: 'road',
+    A06: 'road',
+    B04: 'light_woods',
+    B05: 'light_woods',
+    E06: 'light_woods',
+    H06: 'road',
+    G05: 'road',
+    O07: 'light_woods',
+    I10: 'light_woods',
+    E10: 'light_woods',
+    G09: 'road',
+    C09: 'light_woods',
+    G07: 'heavy_woods',
+    N07: 'heavy_woods',
+    N09: 'light_woods',
+    N10: 'light_woods',
+    G10: 'road',
+    H11: 'road',
+    I11: 'road',
+    J12: 'road',
+  },
 };
 
-/** A=0 (south) … S=18 (north). Row r (from top) = 18 − this index. */
-const LETTERS = 'ABCDEFGHIJKLMNOPQRS';
+export const MISSION1_MAP: MapHexDef[] = applyTerrainJson(MISSION1_BOARDS, TERRAIN_JSON);
 
-const TERRAIN: Record<string, { terrain: TerrainId; road?: boolean }> = {
-  O: { terrain: 'open' },
-  R: { terrain: 'open', road: true },
-  L: { terrain: 'woodsLight' },
-  H: { terrain: 'woodsHeavy' },
-};
+const LOOKUP = labelLookup(MISSION1_BOARDS);
 
-/** Rulebook hex label (e.g. "I06") → engine axial coordinate. */
-export function axialForLabel(label: string): { q: number; r: number } {
-  const letter = label[0]!;
-  const col = Number(label.slice(1));
-  const r = 18 - LETTERS.indexOf(letter);
-  // Full rows (r odd) are flush; half rows (r even) are offset half a hex.
-  const q = r % 2 === 1 ? col - (r - 1) / 2 : col - r / 2;
-  return { q, r };
-}
-
-/** Engine hex id ("q,r") for a rulebook label. */
+/** Mission 1 hex label (board 1, e.g. "I06") -> engine hex id ("q,r"). */
 export function hexIdForLabel(label: string): string {
-  const { q, r } = axialForLabel(label);
-  return `${q},${r}`;
+  const id = LOOKUP.get(`1-${label}`);
+  if (!id) throw new Error(`Mission 1: unknown hex label "${label}"`);
+  return id;
 }
-
-export const MISSION1_MAP: MapHexDef[] = (() => {
-  const hexes: MapHexDef[] = [];
-  for (const letter of LETTERS) {
-    const row = ROWS[letter];
-    if (!row) continue;
-    for (let col = 1; col <= 12; col++) {
-      const code = row[col - 1];
-      if (!code || code === '.') continue;
-      const t = TERRAIN[code];
-      if (!t) throw new Error(`Map 1: unknown terrain code "${code}" at ${letter}${col}`);
-      const label = `${letter}${String(col).padStart(2, '0')}`;
-      const def: MapHexDef = { id: hexIdForLabel(label), terrain: t.terrain, label };
-      if (t.road) def.road = true;
-      hexes.push(def);
-    }
-  }
-  return hexes;
-})();

@@ -7,6 +7,7 @@
 import { useEffect, useState } from 'react';
 import { useGame } from './state/store';
 import { NATIONS } from './data/nations';
+import { otherSide } from './engine';
 import { ActionChooser } from './ui/ActionChooser';
 import { Board } from './ui/Board';
 import { ConfirmDialog } from './ui/ConfirmDialog';
@@ -17,6 +18,7 @@ import { HoverPanel } from './ui/HoverPanel';
 import { Inspector } from './ui/Inspector';
 import { Log } from './ui/Log';
 import { MinesConfirm } from './ui/MinesConfirm';
+import { OnlineLobby } from './ui/OnlineLobby';
 import { ReinforcementsPanel } from './ui/ReinforcementsPanel';
 import { SetupScreen } from './ui/SetupScreen';
 import { TrackSheet } from './ui/TrackSheet';
@@ -40,6 +42,11 @@ export function App() {
   const togglePivotPicker = useGame((s) => s.togglePivotPicker);
   const newGame = useGame((s) => s.newGame);
   const quitToMenu = useGame((s) => s.quitToMenu);
+  const mode = useGame((s) => s.mode);
+  const mySide = useGame((s) => s.mySide);
+  const roomCode = useGame((s) => s.roomCode);
+  const peerConnected = useGame((s) => s.peerConnected);
+  const leaveOnlineRoom = useGame((s) => s.leaveOnlineRoom);
   const [savesOpen, setSavesOpen] = useState(false);
 
   // Hold Shift to preview LOS from the hovered hex; release to hide it.
@@ -74,10 +81,15 @@ export function App() {
     };
   }, [setShift, togglePivotPicker]);
 
+  // M13: still connecting (or the server rejected create/join) — a distinct
+  // screen from the normal hotseat menu, not just a blank board.
+  if (mode === 'online' && !game) return <OnlineLobby />;
   if (!game) return <SetupScreen />;
 
   const cs = game.currentSide;
-  const nation = game.players[cs].nations.map((n) => NATIONS[n]?.name ?? n).join(', ');
+  const nationNameFor = (side: typeof cs) =>
+    game.players[side].nations.map((n) => NATIONS[n]?.name ?? n).join(', ');
+  const nation = nationNameFor(cs);
 
   // v3 Stall (§2.8) is taken by a specific Fresh Unit: prefer the selected one,
   // else the side's first Fresh unit. (A Spent unit would need an explicit CAP
@@ -98,6 +110,17 @@ export function App() {
             {shiftHeld ? ' · LOS: hovered hex' : ' · hold Shift for LOS · Ctrl+click to pick a unit'}
           </em>
         </div>
+        {/* M13, functional-minimum placeholder — see CLAUDE.md's M13 plan. A
+            real visual design may replace this later. */}
+        {mode === 'online' && (
+          <div className="online-bar">
+            You are the {mySide ? nationNameFor(mySide) : '…'}
+            {peerConnected
+              ? ' · opponent connected'
+              : ` · waiting for the ${nationNameFor(otherSide(mySide ?? cs))} to join — room code ${roomCode}`}
+            <button onClick={leaveOnlineRoom}>Leave</button>
+          </div>
+        )}
         <div className="topbar__controls">
           <button onClick={() => dispatch({ type: 'PASS' })}>Pass</button>
           <button
@@ -107,8 +130,12 @@ export function App() {
           >
             Stall
           </button>
-          <button onClick={undo}>Undo</button>
-          <button onClick={redo}>Redo</button>
+          {mode !== 'online' && (
+            <>
+              <button onClick={undo}>Undo</button>
+              <button onClick={redo}>Redo</button>
+            </>
+          )}
           <button onClick={() => setSavesOpen(true)}>Saves</button>
           <button className={losMode ? 'on' : ''} onClick={toggleLosMode} title="Pin LOS by click (or hold Shift to hover)">
             LOS

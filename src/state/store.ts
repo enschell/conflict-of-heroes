@@ -55,6 +55,9 @@ import type {
 import { MISSION_1 } from '../data/missions/mission1';
 import { isHopelessShot, MAX_CAP_DICE_MOD, oddsForHitNumber, pct } from '../ui/odds';
 import { playFire, playMove } from '../ui/sound';
+import { NetClient } from '../net/client';
+import { getSessionId } from '../net/session';
+import type { ServerMsg } from '../net/protocol';
 import {
   clearAuto,
   deleteSlot,
@@ -154,11 +157,28 @@ interface Store {
   /** Group Actions (§10): when on, board clicks build/act on a unit Group. */
   groupMode: boolean;
   groupSel: UnitId[];
+  /** General Group Move (§10.2/§10.3): members of `groupSel` still awaiting a
+   *  per-unit destination choice (front = the one currently highlighted on
+   *  the board). Empty unless `startGroupMoveIndividually` armed it. */
+  groupMoveQueue: UnitId[];
+  /** Finished per-member choices (a Hex, or none = stays in place),
+   *  accumulated until the queue empties, then dispatched as one
+   *  GROUP_MOVE. */
+  groupMoveDone: { unitId: UnitId; toHexId?: HexId }[];
   /** In-progress vehicle Bonus-Move path (§15.2): the hex steps chosen so far. */
   movePath: HexId[];
-  /** Manual reinforcement placement (§4.12): the reinforcement Unit awaiting a
-   *  click on one of its highlighted legal entry Hexes. */
-  placingReinforcementId: UnitId | null;
+  /** Manual/Group reinforcement placement (§4.12): the reinforcement Units still
+   *  awaiting a Hex (front of queue is the one currently highlighted on the
+   *  board). Placing one Unit is a 1-element queue; a Group entry queues
+   *  several, all placed under one eventual ENTER Action. */
+  placingReinforcementQueue: UnitId[];
+  /** The Unit that just got a Hex and is now awaiting a facing choice (the six
+   *  neighbor Hexes highlight blue, same as the free facing-correction picker;
+   *  clicking the placement Hex itself keeps the wave's suggested facing). */
+  placingReinforcementFacing: { unitId: UnitId; hexId: HexId } | null;
+  /** Finished placements (Hex + facing decided), accumulated until the queue
+   *  empties, then dispatched as one ENTER Action (§4.12 Group entry). */
+  placingReinforcementDone: { unitId: UnitId; hexId: HexId; facing: Facing }[];
   losMode: boolean;
   losSource: HexId | null;
   shiftHeld: boolean;
@@ -180,9 +200,28 @@ interface Store {
   lastEvents: GameEvent[];
   muted: boolean;
 
+  /** M13 online play. 'hotseat' (default) is the existing pass-and-play mode
+   *  — completely untouched by any of the online fields/methods below. */
+  mode: 'hotseat' | 'online';
+  /** Which Side this browser is allowed to act as (only meaningful once
+   *  `JOINED` — set alongside `roomCode`). */
+  mySide: SideId | null;
+  roomCode: string | null;
+  /** Is the OTHER Side's socket currently connected? */
+  peerConnected: boolean;
+  netError: string | null;
+
   newGame: (def?: MissionDef) => void;
   resume: () => void;
   quitToMenu: () => void;
+  /** Create a new online room for the given Mission id (see
+   *  `data/missions/catalog.ts`), becoming Side A. */
+  createOnlineRoom: (missionId: string) => void;
+  /** Join an existing online room by its code — becomes whichever Side is
+   *  still open, or reconnects to the Side this browser already held. */
+  joinOnlineRoom: (roomCode: string) => void;
+  /** Disconnect and return to the hotseat/online choice menu. */
+  leaveOnlineRoom: () => void;
 
   select: (unitId: UnitId | null) => void;
   setHover: (h: Hover | null) => void;
@@ -221,15 +260,39 @@ interface Store {
   fireSmoke: (unitId: UnitId, targetHexId: HexId) => void;
   /** Enter every eligible Unit of one reinforcement wave as a single Group Action (§4.12). */
   enterWave: (waveId: string) => void;
-  /** Manual per-Unit entry (§4.12): arm placement mode, then a board click on a
-   *  highlighted Hex commits a single-Unit ENTER there. */
-  startPlaceReinforcement: (unitId: UnitId) => void;
-  cancelPlaceReinforcement: () => void;
+  /** Manual/Group entry (§4.12): arm placement mode for one or more reinforcement
+   *  Units. Board clicks then walk each Unit through Hex → facing in turn; once
+   *  every Unit in `unitIds` has both, all of them enter as ONE ENTER Action
+   *  (a real Group entry when `unitIds.length > 1`, §4.12's adjacency rule is
+   *  enforced by the reducer via `hexesConnected`). */
+  startPlaceReinforcements: (unitIds: UnitId[]) => void;
+  cancelPlaceReinforcements: () => void;
+  /** Keep the wave-suggested facing for the Unit currently awaiting a facing
+   *  choice (`placingReinforcementFacing`) — the board-click alternative to
+   *  clicking one of the six highlighted neighbor Hexes. */
+  useDefaultReinforcementFacing: () => void;
+  /** Explicit facing choice for the Unit currently awaiting one — advances the
+   *  queue to the next Unit, or dispatches the accumulated Group ENTER once
+   *  every queued Unit has a Hex + facing. */
+  chooseReinforcementFacing: (facing: Facing) => void;
 
   toggleGroupMode: () => void;
   toggleGroupMember: (unitId: UnitId) => void;
   clearGroup: () => void;
+  /** Formation Group Move (§10.2 shortcut): every member steps one hex in
+   *  `dir` if legal, else stays in place. Fast path for the common case —
+   *  `startGroupMoveIndividually` below is the general one (§10.3: members
+   *  may split apart to different Hexes, which a single shared direction
+   *  can't express). */
   groupMove: (dir: Facing) => void;
+  /** General Group Move (§10.2/§10.3): arms a per-member destination queue —
+   *  the board highlights the front member's own legal move Hexes; clicking
+   *  one assigns that member's destination (or click the member's own Hex to
+   *  leave it in place, §10.2's "or not move and just Pivot"), advancing to
+   *  the next member. Dispatches one GROUP_MOVE once every member has a
+   *  choice. */
+  startGroupMoveIndividually: () => void;
+  cancelGroupMoveIndividually: () => void;
   groupRally: () => void;
   groupAttack: (targetId: UnitId) => void;
 
@@ -270,6 +333,13 @@ interface Store {
 }
 
 const HISTORY_LIMIT = 100;
+
+/** M13 online play: the live WebSocket connection, if any. Deliberately kept
+ *  outside Zustand's reactive state — it's a side-effecting object, not
+ *  serializable data (CLAUDE.md §3's "GameState is 100% JSON-serializable"
+ *  is about `game`, not this transport handle). At most one at a time; a new
+ *  create/join always closes the previous one first. */
+let netClient: NetClient | null = null;
 
 /** Action types that go through the single-unit CAP-confirm gate below. */
 type GateableAction = Extract<
@@ -399,6 +469,28 @@ export const useGame = create<Store>((set, get) => {
   };
 
   /**
+   * Shared by `groupMove` (the formation-shift shortcut) and
+   * `startGroupMoveIndividually`'s per-member queue below: §10.4's cost
+   * (the highest mover's own Move Cost) + §10.11 Stress, then the normal
+   * Group CAP-confirm gate before dispatching one GROUP_MOVE.
+   */
+  const submitGroupMove = (moves: { unitId: UnitId; toHexId?: HexId }[]) => {
+    const g = get().game;
+    if (!g) return;
+    const members = moves.map((m) => g.units[m.unitId]).filter((u): u is Unit => !!u);
+    let maxMove = 0;
+    for (const m of moves) {
+      if (m.toHexId == null) continue;
+      const mc = moveCost(g, g.units[m.unitId]!, m.toHexId);
+      if (mc.ap != null) maxMove = Math.max(maxMove, mc.ap);
+    }
+    const costBeforeCap = maxMove + groupStress(members);
+    groupCapGate(members, costBeforeCap, (capCostReduce) =>
+      get().dispatch({ type: 'GROUP_MOVE', moves, capCostReduce }),
+    );
+  };
+
+  /**
    * Load/Unload (§15.7/§15.9) look up an already-precomputed action from
    * `legalActionsForUnit`, which bakes in the exact `capCostReduce` needed
    * when either member is Spent — this only adds the missing "spend N CAP?"
@@ -428,8 +520,12 @@ export const useGame = create<Store>((set, get) => {
   const resetForLoad = () => ({
     selectedUnitId: null,
     groupSel: [] as UnitId[],
+    groupMoveQueue: [] as UnitId[],
+    groupMoveDone: [] as { unitId: UnitId; toHexId?: HexId }[],
     movePath: [] as HexId[],
-    placingReinforcementId: null,
+    placingReinforcementQueue: [],
+    placingReinforcementFacing: null,
+    placingReinforcementDone: [],
     history: [] as GameState[],
     future: [] as GameState[],
     picker: null,
@@ -443,6 +539,102 @@ export const useGame = create<Store>((set, get) => {
     pivotPicker: false,
     hover: null,
   });
+
+  /**
+   * Apply a `reduce()` result as the new canonical `game`, with the same
+   * presentation side effects hotseat has always had (SFX, the §4.5/§15.11
+   * free-facing-choice and §2.6 Stressed-unit auto-select, the round-advance
+   * turn banner) — factored out of `dispatch` so M13's online path (which
+   * applies the identical result optimistically, see `dispatch` below) gets
+   * them too, without duplicating the logic. `persist`/`trackHistory` are
+   * off for online play: the server is the source of truth there, not
+   * localStorage autosave or local Undo/Redo (M13 plan — Undo/Redo are
+   * disabled entirely in online mode for v1).
+   */
+  const applyReduceResult = (
+    prevGame: GameState,
+    action: Action,
+    res: { state: GameState; events: GameEvent[] },
+    opts: { persist: boolean; trackHistory: boolean },
+  ) => {
+    if (action.type === 'MOVE') {
+      const u = prevGame.units[action.unitId];
+      const kind = u ? prevGame.templates[u.templateId]?.kind : undefined;
+      if (kind) playMove(kind, get().muted);
+    } else if (action.type === 'FIRE' || action.type === 'CLOSE_COMBAT') {
+      const u = prevGame.units[action.attackerId];
+      const kind = u ? prevGame.templates[u.templateId]?.kind : undefined;
+      if (kind) playFire(kind, get().muted);
+    }
+    const pending = res.state.pendingFacingChoices;
+    const turnChangedTo = res.state.currentSide !== prevGame.currentSide ? res.state.currentSide : null;
+    const stressedForNewTurn = turnChangedTo
+      ? Object.values(res.state.units).find((u) => u.side === turnChangedTo && u.stressed)
+      : undefined;
+    const selectedUnitId = pending?.length
+      ? pending[pending.length - 1]!
+      : stressedForNewTurn
+        ? stressedForNewTurn.id
+        : get().selectedUnitId && res.state.units[get().selectedUnitId!]
+          ? get().selectedUnitId
+          : null;
+    const advancedRound = res.state.round > prevGame.round && res.state.phase === 'playing';
+    if (opts.persist) saveAuto(res.state);
+    set({
+      game: res.state,
+      ...(opts.trackHistory
+        ? { history: [...get().history, prevGame].slice(-HISTORY_LIMIT), future: [] }
+        : {}),
+      lastEvents: res.events,
+      selectedUnitId,
+      turnBanner: advancedRound ? { round: res.state.round } : get().turnBanner,
+    });
+  };
+
+  /**
+   * M13 online play: react to a message from the server. `JOINED` seats this
+   * browser in a room; `STATE` is the authoritative result of ANY Action in
+   * the room (this client's own, just-optimistically-applied one, or the
+   * opponent's) — reconciling is a plain overwrite, no diffing needed, since
+   * `GameState` is already the single source of truth `dispatch` itself
+   * works off. Deliberately lighter than `applyReduceResult` above: no SFX
+   * here (the acting client's own optimistic apply already played its cue;
+   * re-playing it on the server echo would double it up, and the opponent
+   * not hearing a cue for the other player's move is an acceptable v1 gap
+   * for this functional-minimum online pass, CLAUDE.md M13 plan).
+   */
+  const handleServerMsg = (msg: ServerMsg) => {
+    switch (msg.type) {
+      case 'JOINED':
+        set({
+          mySide: msg.side,
+          roomCode: msg.roomCode,
+          game: msg.state,
+          peerConnected: msg.peerConnected,
+          netError: null,
+        });
+        break;
+      case 'STATE': {
+        const prevGame = get().game;
+        const advancedRound = prevGame
+          ? msg.state.round > prevGame.round && msg.state.phase === 'playing'
+          : false;
+        set({
+          game: msg.state,
+          selectedUnitId:
+            get().selectedUnitId && msg.state.units[get().selectedUnitId!] ? get().selectedUnitId : null,
+          turnBanner: advancedRound ? { round: msg.state.round } : get().turnBanner,
+        });
+        break;
+      }
+      case 'PEER_STATUS':
+        set({ peerConnected: msg.connected });
+        break;
+      case 'ERROR':
+        set({ netError: msg.message });
+        break;
+    }
+  };
 
   /**
    * Preview what each Hit in a sequence of rolls will do to its target
@@ -763,8 +955,12 @@ export const useGame = create<Store>((set, get) => {
     selectedUnitId: null,
     groupMode: false,
     groupSel: [],
+    groupMoveQueue: [],
+    groupMoveDone: [],
     movePath: [],
-    placingReinforcementId: null,
+    placingReinforcementQueue: [],
+    placingReinforcementFacing: null,
+    placingReinforcementDone: [],
     losMode: false,
     losSource: null,
     shiftHeld: false,
@@ -780,8 +976,15 @@ export const useGame = create<Store>((set, get) => {
     future: [],
     lastEvents: [],
     muted: false,
+    mode: 'hotseat',
+    mySide: null,
+    roomCode: null,
+    peerConnected: false,
+    netError: null,
 
     newGame: (def = MISSION_1) => {
+      netClient?.close();
+      netClient = null;
       const game = initGame(def);
       saveAuto(game);
       set({
@@ -789,8 +992,12 @@ export const useGame = create<Store>((set, get) => {
         selectedUnitId: null,
         groupMode: false,
         groupSel: [],
+        groupMoveQueue: [],
+        groupMoveDone: [],
         movePath: [],
-        placingReinforcementId: null,
+        placingReinforcementQueue: [],
+        placingReinforcementFacing: null,
+        placingReinforcementDone: [],
         losMode: false,
         losSource: null,
         pivotPicker: false,
@@ -804,17 +1011,46 @@ export const useGame = create<Store>((set, get) => {
         history: [],
         future: [],
         lastEvents: [],
+        mode: 'hotseat',
+        mySide: null,
+        roomCode: null,
+        peerConnected: false,
+        netError: null,
       });
     },
 
     resume: () => {
+      netClient?.close();
+      netClient = null;
       const game = loadAuto();
-      if (game) set({ game, ...resetForLoad(), lastEvents: [] });
+      if (game) {
+        set({
+          game,
+          ...resetForLoad(),
+          lastEvents: [],
+          mode: 'hotseat',
+          mySide: null,
+          roomCode: null,
+          peerConnected: false,
+          netError: null,
+        });
+      }
     },
 
     quitToMenu: () => {
+      netClient?.close();
+      netClient = null;
       clearAuto();
-      set({ game: null, ...resetForLoad(), losMode: false });
+      set({
+        game: null,
+        ...resetForLoad(),
+        losMode: false,
+        mode: 'hotseat',
+        mySide: null,
+        roomCode: null,
+        peerConnected: false,
+        netError: null,
+      });
     },
 
     select: (unitId) => set({ selectedUnitId: unitId, movePath: [], pivotPicker: false }),
@@ -832,14 +1068,28 @@ export const useGame = create<Store>((set, get) => {
         return;
       }
 
-      // Manual reinforcement placement (§4.12): the click commits this Unit to
-      // a legal entry Hex; any other click is ignored (Cancel clears the mode).
-      const placingId = get().placingReinforcementId;
-      if (placingId) {
+      // Manual/Group reinforcement placement (§4.12): walk the queue Hex →
+      // facing → (next Unit or dispatch). Any other click while armed is
+      // ignored (Cancel/useDefaultReinforcementFacing clear the mode).
+      const placingFacing = get().placingReinforcementFacing;
+      if (placingFacing) {
+        if (hexId === placingFacing.hexId) {
+          get().useDefaultReinforcementFacing();
+          return;
+        }
+        const dir = directionTo(placingFacing.hexId, hexId);
+        if (dir >= 0) get().chooseReinforcementFacing(dir as Facing);
+        return;
+      }
+      const placingQueue = get().placingReinforcementQueue;
+      if (placingQueue.length > 0) {
+        const placingId = placingQueue[0]!;
         const r = game.reinforcements.find((x) => x.id === placingId);
         if (r && legalEntryHexes(game, r).includes(hexId)) {
-          get().dispatch({ type: 'ENTER', placements: [{ unitId: placingId, hexId, facing: r.facing }] });
-          set({ placingReinforcementId: null });
+          set({
+            placingReinforcementQueue: placingQueue.slice(1),
+            placingReinforcementFacing: { unitId: placingId, hexId },
+          });
         }
         return;
       }
@@ -867,6 +1117,39 @@ export const useGame = create<Store>((set, get) => {
         set({ pivotPicker: false });
         if (dir >= 0) {
           get().pivot(selectedUnitId, dir as Facing);
+        }
+        return;
+      }
+
+      // General Group Move (§10.2/§10.3): walk the queue Hex → (next member or
+      // dispatch). The active (front) member's own Hex means "leave it in
+      // place" (§10.2: "or not move and just Pivot in Place"); any other
+      // clicked Hex must be one of ITS OWN legal move destinations — clicking
+      // a hex only legal for a different member is ignored, matching the
+      // free-facing/pivot pickers' "ignore anything that isn't a valid choice
+      // for the currently-armed thing" pattern.
+      const gmQueue = get().groupMoveQueue;
+      if (gmQueue.length > 0) {
+        const activeId = gmQueue[0]!;
+        const unit = game.units[activeId];
+        if (!unit) {
+          set({ groupMoveQueue: gmQueue.slice(1) });
+          return;
+        }
+        let choice: { unitId: UnitId; toHexId?: HexId } | null = null;
+        if (hexId === unit.hexId) {
+          choice = { unitId: activeId };
+        } else if (moveCost(game, unit, hexId).ap != null) {
+          choice = { unitId: activeId, toHexId: hexId };
+        }
+        if (!choice) return; // not a legal destination for this member — ignore
+        const nextQueue = gmQueue.slice(1);
+        const nextDone = [...get().groupMoveDone, choice];
+        if (nextQueue.length > 0) {
+          set({ groupMoveQueue: nextQueue, groupMoveDone: nextDone });
+        } else {
+          set({ groupMoveQueue: [], groupMoveDone: [], groupSel: [] });
+          submitGroupMove(nextDone);
         }
         return;
       }
@@ -1066,55 +1349,108 @@ export const useGame = create<Store>((set, get) => {
     },
 
     dispatch: (action) => {
-      const { game, history } = get();
+      const { game, mode } = get();
       if (!game) return;
+
+      if (mode === 'online') {
+        // Cheap local turn gate — but NOT for CHOOSE_FACING. §4.5/§15.11's
+        // free facing correction is deliberately turn-agnostic (a normal
+        // Action always hands the Turn to the other side *before* that
+        // window opens, and `reduce()`'s own `doChooseFacing` has no
+        // `currentSide` check at all) — gating it the same as every other
+        // Action here made it undispatchable online (caught live: a Move
+        // committed fine, but its follow-up facing picker silently refused
+        // to fire). Every OTHER Action type still needs this gate client-side
+        // even though `reduce()` itself also checks `unit.side !==
+        // currentSide` internally, because `PASS` has no unit/side field at
+        // all (`{ type: 'PASS' }`) — `reduce()` has no caller identity to
+        // self-defend it with, so skipping this gate entirely would let
+        // either side trigger the *other* side's Pass.
+        if (action.type === 'CHOOSE_FACING') {
+          // `doChooseFacing` itself never checks `unit.side` (only that the
+          // Unit is actually in `pendingFacingChoices`) — harmless on one
+          // shared hotseat screen, but online this Unit-ownership check is
+          // the only thing stopping a client from refacing the OTHER side's
+          // still-open correction window.
+          if (game.units[action.unitId]?.side !== get().mySide) return;
+        } else if (get().mySide !== game.currentSide) {
+          return;
+        }
+        const res = reduce(game, action);
+        const illegal = res.events.length === 1 && res.events[0]?.type === 'illegal';
+        if (illegal) {
+          set({ lastEvents: res.events });
+          return;
+        }
+        // Optimistic apply for instant feedback (M13 plan: "optimistic for
+        // the actor") — persist/history are off online, the server is the
+        // source of truth, not localStorage/local Undo.
+        applyReduceResult(game, action, res, { persist: false, trackHistory: false });
+        const roomCode = get().roomCode;
+        if (roomCode) netClient?.send({ type: 'ACTION', roomCode, sessionId: getSessionId(), action });
+        return;
+      }
+
       const res = reduce(game, action);
       const illegal = res.events.length === 1 && res.events[0]?.type === 'illegal';
       if (illegal) {
         set({ lastEvents: res.events });
         return;
       }
-      // Pure-presentation SFX based on the action just committed.
-      if (action.type === 'MOVE') {
-        const u = game.units[action.unitId];
-        const kind = u ? game.templates[u.templateId]?.kind : undefined;
-        if (kind) playMove(kind, get().muted);
-      } else if (action.type === 'FIRE' || action.type === 'CLOSE_COMBAT') {
-        const u = game.units[action.attackerId];
-        const kind = u ? game.templates[u.templateId]?.kind : undefined;
-        if (kind) playFire(kind, get().muted);
-      }
-      // §4.5/§15.11: right after a Move/Unload grants a free facing correction,
-      // auto-select the Unit awaiting it — it just switched control to the
-      // other side, so normal click-to-select (current-side-only) couldn't
-      // reach it otherwise. The most recently granted Unit wins if several.
-      const pending = res.state.pendingFacingChoices;
-      // When the turn passes to the other side, auto-select that side's
-      // Stressed Unit (at most one per side, §2.6) if it has one — deselects
-      // whatever the outgoing side had selected, since a fresh side's turn
-      // starting is a clean slate. Falls through to the pendingFacingChoices
-      // case above it, which is a required prompt for the OUTGOING side's
-      // just-moved Unit and should win if both apply.
-      const turnChangedTo = res.state.currentSide !== game.currentSide ? res.state.currentSide : null;
-      const stressedForNewTurn = turnChangedTo
-        ? Object.values(res.state.units).find((u) => u.side === turnChangedTo && u.stressed)
-        : undefined;
-      const selectedUnitId = pending?.length
-        ? pending[pending.length - 1]!
-        : stressedForNewTurn
-          ? stressedForNewTurn.id
-          : get().selectedUnitId && res.state.units[get().selectedUnitId!]
-            ? get().selectedUnitId
-            : null;
-      const advancedRound = res.state.round > game.round && res.state.phase === 'playing';
-      saveAuto(res.state);
+      applyReduceResult(game, action, res, { persist: true, trackHistory: true });
+    },
+
+    createOnlineRoom: (missionId) => {
+      netClient?.close();
+      const sessionId = getSessionId();
+      const client = new NetClient();
+      netClient = client;
+      client.onMessage(handleServerMsg);
+      client.onClose(() => set({ peerConnected: false }));
+      client.onOpen(() => client.send({ type: 'CREATE', missionId, sessionId }));
+      client.connect();
       set({
-        game: res.state,
-        history: [...history, game].slice(-HISTORY_LIMIT),
-        future: [], // a fresh action invalidates the redo stack
-        lastEvents: res.events,
-        selectedUnitId,
-        turnBanner: advancedRound ? { round: res.state.round } : get().turnBanner,
+        game: null,
+        ...resetForLoad(),
+        mode: 'online',
+        mySide: null,
+        roomCode: null,
+        peerConnected: false,
+        netError: null,
+      });
+    },
+
+    joinOnlineRoom: (roomCode) => {
+      netClient?.close();
+      const sessionId = getSessionId();
+      const client = new NetClient();
+      netClient = client;
+      client.onMessage(handleServerMsg);
+      client.onClose(() => set({ peerConnected: false }));
+      client.onOpen(() => client.send({ type: 'JOIN', roomCode, sessionId }));
+      client.connect();
+      set({
+        game: null,
+        ...resetForLoad(),
+        mode: 'online',
+        mySide: null,
+        roomCode: null,
+        peerConnected: false,
+        netError: null,
+      });
+    },
+
+    leaveOnlineRoom: () => {
+      netClient?.close();
+      netClient = null;
+      set({
+        game: null,
+        ...resetForLoad(),
+        mode: 'hotseat',
+        mySide: null,
+        roomCode: null,
+        peerConnected: false,
+        netError: null,
       });
     },
 
@@ -1238,24 +1574,73 @@ export const useGame = create<Store>((set, get) => {
       get().dispatch({ type: 'ENTER', placements });
     },
 
-    startPlaceReinforcement: (unitId) => {
+    startPlaceReinforcements: (unitIds) => {
       const g = get().game;
       if (!g) return;
-      const r = g.reinforcements.find((x) => x.id === unitId);
-      if (!r || r.side !== g.currentSide || g.round < r.earliestRound) return;
+      const eligible = unitIds.filter((id) => {
+        const r = g.reinforcements.find((x) => x.id === id);
+        return r && r.side === g.currentSide && g.round >= r.earliestRound;
+      });
+      if (eligible.length === 0) return;
       set({
-        placingReinforcementId: unitId,
+        placingReinforcementQueue: eligible,
+        placingReinforcementFacing: null,
+        placingReinforcementDone: [],
         selectedUnitId: null,
         groupMode: false,
         groupSel: [],
+        groupMoveQueue: [],
+        groupMoveDone: [],
         movePath: [],
       });
     },
-    cancelPlaceReinforcement: () => set({ placingReinforcementId: null }),
+    cancelPlaceReinforcements: () =>
+      set({ placingReinforcementQueue: [], placingReinforcementFacing: null, placingReinforcementDone: [] }),
+
+    useDefaultReinforcementFacing: () => {
+      const placing = get().placingReinforcementFacing;
+      if (!placing) return;
+      const g = get().game;
+      const r = g?.reinforcements.find((x) => x.id === placing.unitId);
+      get().chooseReinforcementFacing((r?.facing ?? 0) as Facing);
+    },
+
+    chooseReinforcementFacing: (facing) => {
+      const { placingReinforcementFacing: placing, placingReinforcementQueue: queue, placingReinforcementDone: done } = get();
+      if (!placing) return;
+      const nextDone = [...done, { unitId: placing.unitId, hexId: placing.hexId, facing }];
+      if (queue.length > 0) {
+        set({ placingReinforcementFacing: null, placingReinforcementDone: nextDone });
+        return;
+      }
+      // Every queued Unit now has a Hex + facing — dispatch the whole batch as
+      // one ENTER Action (a real Group entry when nextDone.length > 1, §4.12).
+      // Board.tsx's entry-Hex highlighting only ever offers Hexes connected to
+      // whatever's already placed, so the reducer's own §4.12 adjacency check
+      // should always agree — but don't just assume that and clear state
+      // before dispatching (CLAUDE.md §3.5: legality lives in the engine,
+      // the UI must still check rather than blindly trust its own picker);
+      // if the reducer disagrees anyway, reopen the queue instead of silently
+      // dropping the Units.
+      get().dispatch({ type: 'ENTER', placements: nextDone });
+      const { lastEvents } = get();
+      const illegal = lastEvents.length === 1 && lastEvents[0]?.type === 'illegal';
+      set(
+        illegal
+          ? { placingReinforcementQueue: nextDone.map((d) => d.unitId), placingReinforcementFacing: null, placingReinforcementDone: [] }
+          : { placingReinforcementQueue: [], placingReinforcementFacing: null, placingReinforcementDone: [] },
+      );
+    },
 
     toggleGroupMode: () =>
-      set((s) => ({ groupMode: !s.groupMode, groupSel: [], selectedUnitId: null })),
-    clearGroup: () => set({ groupSel: [] }),
+      set((s) => ({
+        groupMode: !s.groupMode,
+        groupSel: [],
+        groupMoveQueue: [],
+        groupMoveDone: [],
+        selectedUnitId: null,
+      })),
+    clearGroup: () => set({ groupSel: [], groupMoveQueue: [], groupMoveDone: [] }),
     toggleGroupMember: (unitId) => {
       const { game, groupSel } = get();
       if (!game) return;
@@ -1276,7 +1661,6 @@ export const useGame = create<Store>((set, get) => {
     groupMove: (dir) => {
       const { game, groupSel } = get();
       if (!game || groupSel.length === 0) return;
-      const members = groupSel.map((id) => game.units[id]!);
       // Formation move: each member steps one hex in `dir` if legal, else stays (§10.2).
       const moves = groupSel.map((id) => {
         const u = game.units[id]!;
@@ -1284,19 +1668,17 @@ export const useGame = create<Store>((set, get) => {
         if (game.hexes[to] && moveCost(game, u, to).ap != null) return { unitId: id, toHexId: to };
         return { unitId: id };
       });
-      // §10.4: Group Move cost = the highest individual mover's Move Cost.
-      let maxMove = 0;
-      for (const m of moves) {
-        if (m.toHexId == null) continue;
-        const mc = moveCost(game, game.units[m.unitId]!, m.toHexId);
-        if (mc.ap != null) maxMove = Math.max(maxMove, mc.ap);
-      }
-      const costBeforeCap = maxMove + groupStress(members); // §10.11
       set({ groupSel: [] });
-      groupCapGate(members, costBeforeCap, (capCostReduce) =>
-        get().dispatch({ type: 'GROUP_MOVE', moves, capCostReduce }),
-      );
+      submitGroupMove(moves);
     },
+
+    startGroupMoveIndividually: () => {
+      const { groupSel } = get();
+      if (groupSel.length === 0) return;
+      set({ groupMoveQueue: groupSel, groupMoveDone: [] });
+    },
+    cancelGroupMoveIndividually: () => set({ groupMoveQueue: [], groupMoveDone: [] }),
+
     groupRally: () => {
       const { game, groupSel } = get();
       if (!game || groupSel.length === 0) return;
@@ -1442,8 +1824,8 @@ export const useGame = create<Store>((set, get) => {
     setLosSource: (hexId) => set({ losSource: hexId }),
 
     undo: () => {
-      const { history, game } = get();
-      if (history.length === 0 || !game) return;
+      const { history, game, mode } = get();
+      if (mode === 'online' || history.length === 0 || !game) return;
       const prev = history[history.length - 1]!;
       saveAuto(prev);
       set({
@@ -1459,7 +1841,11 @@ export const useGame = create<Store>((set, get) => {
         // crashes a Group action on a member id that may no longer exist.
         movePath: [],
         groupSel: [],
-        placingReinforcementId: null,
+        groupMoveQueue: [],
+        groupMoveDone: [],
+        placingReinforcementQueue: [],
+        placingReinforcementFacing: null,
+        placingReinforcementDone: [],
         pendingRoll: null,
         pendingConfirm: null,
         chooser: null,
@@ -1469,8 +1855,8 @@ export const useGame = create<Store>((set, get) => {
     },
 
     redo: () => {
-      const { future, game } = get();
-      if (future.length === 0 || !game) return;
+      const { future, game, mode } = get();
+      if (mode === 'online' || future.length === 0 || !game) return;
       const next = future[0]!;
       saveAuto(next);
       set({
@@ -1480,7 +1866,11 @@ export const useGame = create<Store>((set, get) => {
         selectedUnitId: null,
         movePath: [], // see undo() — stale in-progress action state must not survive time-travel
         groupSel: [],
-        placingReinforcementId: null,
+        groupMoveQueue: [],
+        groupMoveDone: [],
+        placingReinforcementQueue: [],
+        placingReinforcementFacing: null,
+        placingReinforcementDone: [],
         pendingRoll: null,
         pendingConfirm: null,
         chooser: null,

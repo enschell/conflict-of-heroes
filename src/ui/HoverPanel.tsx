@@ -5,7 +5,7 @@
  */
 import type { CSSProperties } from 'react';
 import { templateOf } from '../engine';
-import type { GameState, Unit } from '../engine/types';
+import type { GameState, Hex, Unit } from '../engine/types';
 import { TERRAIN } from '../data/terrainTypes';
 import { artForHex } from '../data/hexArt';
 import { useGame } from '../state/store';
@@ -22,6 +22,18 @@ const FORTIFICATION_NAMES: Record<string, string> = {
   trench: 'Trench',
   bunker: 'Bunker',
 };
+
+/**
+ * The rulebook's own "(Map #)-(Column Letter & Row #)" address (§1.0, e.g.
+ * "1-E05") as "Map 1, E05" — falls back to the raw internal hex id for
+ * hand-authored maps that predate the flat-top substrate (the non-canonical
+ * sandboxes), which never got `label`/`mapNumber` set.
+ */
+function hexDisplayLabel(hex: Hex): string {
+  if (hex.label && hex.mapNumber != null) return `Map ${hex.mapNumber}, ${hex.label}`;
+  if (hex.boardNumber != null) return `Map ${hex.boardNumber}`; // the board-number cell itself, no coordinate
+  return hex.id;
+}
 
 // 1.5x board scale — this is an inspector view, not a board tile. Cells are
 // flex items with this as their `flex-basis` and `flex-wrap: nowrap` (see
@@ -82,7 +94,7 @@ export function HoverPanel() {
           <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'flex-start' }}>
             <div className="stats-grid" style={{ flex: 1 }}>
               <span>Hex</span>
-              <b>{hex.id}</b>
+              <b>{hexDisplayLabel(hex)}</b>
               <span>Elevation</span>
               <b>{hex.elevation === 2 ? 'L2 Hill ▲▲' : hex.elevation === 1 ? 'L1 Hill ▲' : 'L0 Ground'}</b>
               <span>Terrain</span>

@@ -105,15 +105,89 @@ export function UnitCounter({
     const rangeShift = s * 0.05;
 
     return (
-      <g className="counter" onClick={onClick} style={{ cursor: 'pointer' }} opacity={spent ? 0.55 : 1}>
+      <g className="counter" onClick={onClick} style={{ cursor: 'pointer' }}>
         <g transform={`rotate(${rotateDeg} ${center.x} ${center.y})`}>
           <defs>
             <clipPath id={clipId}>
               <rect x={x} y={y} width={s} height={s} rx={size * 0.14} />
             </clipPath>
           </defs>
-          <g clipPath={`url(#${clipId})`}>
-            <image href={tmpl.counterImage} x={x} y={y} width={s} height={s} preserveAspectRatio="xMidYMid slice" />
+          {/* Everything that fades for a Spent Unit. The selection/Group ring
+              and the Stress marker below are deliberately siblings of this
+              group, not children — a Spent Unit's dimming must never also
+              wash out the fact that it's Selected or holds the Stress Marker
+              (per user request: those two indicators stay at full strength
+              regardless of Fresh/Spent). */}
+          <g opacity={spent ? 0.55 : 1}>
+            <g clipPath={`url(#${clipId})`}>
+              <image href={tmpl.counterImage} x={x} y={y} width={s} height={s} preserveAspectRatio="xMidYMid slice" />
+            </g>
+            <polygon points={bannerPts} fill="#2fbf4a" />
+            <text x={center.x} y={y + bannerH * 0.72} fontSize={nameFs} fill="#0d3d17" fontWeight={500} textAnchor="middle">
+              {tmpl.name}
+            </text>
+
+            <text x={x + pad} y={y + fs * 0.9} fontSize={fs} fill="#000" fontWeight={700}>
+              {eff.apToFire}
+            </text>
+            <text x={x + s - pad} y={y + fs * 0.9} fontSize={fs} fill={moveColor} fontWeight={700} textAnchor="end">
+              {eff.move}
+            </text>
+
+            <text x={x + pad} y={y + s - pad * 0.6 - fs * 1.05} fontSize={fs} fill="#c0392b" fontWeight={700}>
+              {eff.fp.red}
+            </text>
+            <text x={x + pad} y={y + s - pad * 0.6} fontSize={fs} fill="#1f5fa8" fontWeight={700}>
+              {eff.fp.blue}
+            </text>
+
+            <polygon
+              points={`${center.x},${y + s - hexH - rangeShift} ${center.x + hexW / 2},${y + s - hexH * 0.75 - rangeShift} ${center.x + hexW / 2},${y + s - hexH * 0.25 - rangeShift} ${center.x},${y + s - rangeShift} ${center.x - hexW / 2},${y + s - hexH * 0.25 - rangeShift} ${center.x - hexW / 2},${y + s - hexH * 0.75 - rangeShift}`}
+              fill="#161310"
+            />
+            <text x={center.x} y={y + s - hexH * 0.35 - rangeShift} fontSize={rangeFs} fill="#f2ede4" fontWeight={700} textAnchor="middle">
+              {eff.range}
+            </text>
+
+            <text x={x + s - pad} y={y + s - pad * 0.6 - fs * 1.05} fontSize={fs} fill={drColor} fontWeight={700} textAnchor="end">
+              {eff.dr.flank}
+            </text>
+            <text x={x + s - pad} y={y + s - pad * 0.6} fontSize={fs} fill={drColor} fontWeight={700} textAnchor="end">
+              {eff.dr.front}
+            </text>
+
+            {spent && <line x1={x} y1={y + s} x2={x + s} y2={y} stroke="#0008" strokeWidth={2} />}
+            {hit && (
+              <g>
+                <rect x={center.x - fs * 1.1} y={y - fs} width={fs * 2.2} height={fs} rx={2} fill="#b91c1c" />
+                <text x={center.x} y={y - fs * 0.18} fontSize={fs * 0.8} fill="#fff" fontWeight={700} textAnchor="middle">
+                  {hit.slice(0, 4).toUpperCase()}
+                </text>
+              </g>
+            )}
+            {/* §17.6 Hasty Defense marker — floats below (the corners above are
+                already packed with FP/DR/range in this layout). */}
+            {unit.hastyDefense && (
+              <g>
+                <rect x={x + s - fs * 1.3} y={y + s} width={fs * 1.3} height={fs} rx={2} fill="#3a6ab2" />
+                <text x={x + s - fs * 0.65} y={y + s + fs * 0.8} fontSize={fs * 0.7} fill="#fff" fontWeight={700} textAnchor="middle">
+                  HD
+                </text>
+              </g>
+            )}
+            {unit.occupyingFortification && (() => {
+              const kind = game.hexes[unit.hexId]?.features.fortification?.kind;
+              const label = kind === 'trench' ? 'TRENCH' : kind === 'bunker' ? 'BUNK' : 'FORT';
+              const w = fs * (0.4 + label.length * 0.32);
+              return (
+                <g>
+                  <rect x={center.x - w / 2} y={y + s} width={w} height={fs} rx={2} fill="#3a6ab2" />
+                  <text x={center.x} y={y + s + fs * 0.8} fontSize={fs * 0.7} fill="#fff" fontWeight={700} textAnchor="middle">
+                    {label}
+                  </text>
+                </g>
+              );
+            })()}
           </g>
           <rect
             x={x}
@@ -125,40 +199,6 @@ export function UnitCounter({
             stroke={inGroup ? '#22d3ee' : selected ? '#ffd24a' : accent}
             strokeWidth={selected || inGroup ? 3 : 1.5}
           />
-          <polygon points={bannerPts} fill="#2fbf4a" />
-          <text x={center.x} y={y + bannerH * 0.72} fontSize={nameFs} fill="#0d3d17" fontWeight={500} textAnchor="middle">
-            {tmpl.name}
-          </text>
-
-          <text x={x + pad} y={y + fs * 0.9} fontSize={fs} fill="#000" fontWeight={700}>
-            {eff.apToFire}
-          </text>
-          <text x={x + s - pad} y={y + fs * 0.9} fontSize={fs} fill={moveColor} fontWeight={700} textAnchor="end">
-            {eff.move}
-          </text>
-
-          <text x={x + pad} y={y + s - pad * 0.6 - fs * 1.05} fontSize={fs} fill="#c0392b" fontWeight={700}>
-            {eff.fp.red}
-          </text>
-          <text x={x + pad} y={y + s - pad * 0.6} fontSize={fs} fill="#1f5fa8" fontWeight={700}>
-            {eff.fp.blue}
-          </text>
-
-          <polygon
-            points={`${center.x},${y + s - hexH - rangeShift} ${center.x + hexW / 2},${y + s - hexH * 0.75 - rangeShift} ${center.x + hexW / 2},${y + s - hexH * 0.25 - rangeShift} ${center.x},${y + s - rangeShift} ${center.x - hexW / 2},${y + s - hexH * 0.25 - rangeShift} ${center.x - hexW / 2},${y + s - hexH * 0.75 - rangeShift}`}
-            fill="#161310"
-          />
-          <text x={center.x} y={y + s - hexH * 0.35 - rangeShift} fontSize={rangeFs} fill="#f2ede4" fontWeight={700} textAnchor="middle">
-            {eff.range}
-          </text>
-
-          <text x={x + s - pad} y={y + s - pad * 0.6 - fs * 1.05} fontSize={fs} fill={drColor} fontWeight={700} textAnchor="end">
-            {eff.dr.flank}
-          </text>
-          <text x={x + s - pad} y={y + s - pad * 0.6} fontSize={fs} fill={drColor} fontWeight={700} textAnchor="end">
-            {eff.dr.front}
-          </text>
-
           {stressed && (
             <rect
               x={x - 3}
@@ -173,21 +213,112 @@ export function UnitCounter({
               pointerEvents="none"
             />
           )}
-          {spent && <line x1={x} y1={y + s} x2={x + s} y2={y} stroke="#0008" strokeWidth={2} />}
+        </g>
+      </g>
+    );
+  }
+
+  return (
+    <g className="counter" onClick={onClick} style={{ cursor: 'pointer' }}>
+      <g transform={`rotate(${rotateDeg} ${center.x} ${center.y})`}>
+        <defs>
+          <clipPath id={clipId}>
+            <rect x={x} y={y} width={s} height={s} rx={size * 0.14} />
+          </clipPath>
+        </defs>
+        {/* The base fill dims for a Spent Unit (via fillOpacity, not the
+            element's own `opacity`) so the stroke — the selection/Group ring
+            below is drawn full-strength — is unaffected regardless of order. */}
+        <rect
+          x={x}
+          y={y}
+          width={s}
+          height={s}
+          rx={size * 0.14}
+          fill={fill}
+          fillOpacity={spent ? 0.55 : 1}
+          stroke={inGroup ? '#22d3ee' : selected ? '#ffd24a' : accent}
+          strokeWidth={selected || inGroup ? 3 : 1.5}
+        />
+        {/* Everything else that fades for a Spent Unit. The Stress marker
+            below is a sibling, not a child — a Spent Unit's dimming must
+            never also wash out the fact that it holds the Stress Marker
+            (per user request: Selected/Stressed stay full-strength
+            regardless of Fresh/Spent). */}
+        <g opacity={spent ? 0.55 : 1}>
+          {/* Front indicator (§4.1): the green field along the Unit's top edge,
+              plus a small outward notch, so facing reads clearly even zoomed out.
+              Clipped to the counter's rounded corners. */}
+          <g clipPath={`url(#${clipId})`} pointerEvents="none">
+            <rect x={x} y={y} width={s} height={frontBarH} fill="#2fbf4a" />
+          </g>
+          <polygon
+            points={`${center.x - fs * 0.32},${y + frontBarH * 0.62} ${center.x + fs * 0.32},${y + frontBarH * 0.62} ${center.x},${y - fs * 0.3}`}
+            fill="#0d3d17"
+            pointerEvents="none"
+          />
+          {spent && (
+            <line x1={x} y1={y + s} x2={x + s} y2={y} stroke="#0008" strokeWidth={2} />
+          )}
+          {/* fire cost (top-left), move cost (top-right) */}
+          <text x={x + pad} y={y + fs + pad * 0.4 + frontBarH} fontSize={fs} fill="#0e0e0e" fontWeight={700}>
+            {eff.apToFire}
+          </text>
+          <text x={x + s - pad} y={y + fs + pad * 0.4 + frontBarH} fontSize={fs} fill="#e9e9e9" textAnchor="end">
+            {eff.move}
+          </text>
+          {/* unit code (centre) */}
+          <text
+            x={center.x}
+            y={center.y + fs * 0.35}
+            fontSize={fs * 1.08}
+            fill="#fff"
+            fontWeight={700}
+            textAnchor="middle"
+          >
+            {code(tmpl.name)}
+          </text>
+          {/* firepower (bottom-left, red), defense (bottom-right, colored) */}
+          <text x={x + pad} y={y + s - pad * 0.6} fontSize={fs} fill="#ff7b7b" fontWeight={700}>
+            {eff.fp.red}
+          </text>
+          <text
+            x={x + s - pad}
+            y={y + s - pad * 0.6}
+            fontSize={fs}
+            fill={eff.dr.color === 'blue' ? '#7bb6ff' : '#ff9d6e'}
+            fontWeight={700}
+            textAnchor="end"
+          >
+            {eff.dr.front}
+          </text>
           {hit && (
             <g>
-              <rect x={center.x - fs * 1.1} y={y - fs} width={fs * 2.2} height={fs} rx={2} fill="#b91c1c" />
-              <text x={center.x} y={y - fs * 0.18} fontSize={fs * 0.8} fill="#fff" fontWeight={700} textAnchor="middle">
+              <rect x={center.x - fs * 1.1} y={y - fs * 0.5} width={fs * 2.2} height={fs} rx={2} fill="#b91c1c" />
+              <text
+                x={center.x}
+                y={y + fs * 0.32}
+                fontSize={fs * 0.8}
+                fill="#fff"
+                fontWeight={700}
+                textAnchor="middle"
+              >
                 {hit.slice(0, 4).toUpperCase()}
               </text>
             </g>
           )}
-          {/* §17.6 Hasty Defense marker — floats below (the corners above are
-              already packed with FP/DR/range in this layout). */}
+          {/* §17.6 Hasty Defense marker — per-Unit, not a Hex feature. */}
           {unit.hastyDefense && (
             <g>
-              <rect x={x + s - fs * 1.3} y={y + s} width={fs * 1.3} height={fs} rx={2} fill="#3a6ab2" />
-              <text x={x + s - fs * 0.65} y={y + s + fs * 0.8} fontSize={fs * 0.7} fill="#fff" fontWeight={700} textAnchor="middle">
+              <rect x={x + s - fs * 1.3} y={y + s - fs * 1.1} width={fs * 1.3} height={fs} rx={2} fill="#3a6ab2" />
+              <text
+                x={x + s - fs * 0.65}
+                y={y + s - fs * 0.3}
+                fontSize={fs * 0.7}
+                fill="#fff"
+                fontWeight={700}
+                textAnchor="middle"
+              >
                 HD
               </text>
             </g>
@@ -198,47 +329,21 @@ export function UnitCounter({
             const w = fs * (0.4 + label.length * 0.32);
             return (
               <g>
-                <rect x={center.x - w / 2} y={y + s} width={w} height={fs} rx={2} fill="#3a6ab2" />
-                <text x={center.x} y={y + s + fs * 0.8} fontSize={fs * 0.7} fill="#fff" fontWeight={700} textAnchor="middle">
+                <rect x={x} y={y + s - fs * 1.1} width={w} height={fs} rx={2} fill="#3a6ab2" />
+                <text
+                  x={x + w / 2}
+                  y={y + s - fs * 0.3}
+                  fontSize={fs * 0.7}
+                  fill="#fff"
+                  fontWeight={700}
+                  textAnchor="middle"
+                >
                   {label}
                 </text>
               </g>
             );
           })()}
         </g>
-      </g>
-    );
-  }
-
-  return (
-    <g className="counter" onClick={onClick} style={{ cursor: 'pointer' }} opacity={spent ? 0.55 : 1}>
-      <g transform={`rotate(${rotateDeg} ${center.x} ${center.y})`}>
-        <defs>
-          <clipPath id={clipId}>
-            <rect x={x} y={y} width={s} height={s} rx={size * 0.14} />
-          </clipPath>
-        </defs>
-        <rect
-          x={x}
-          y={y}
-          width={s}
-          height={s}
-          rx={size * 0.14}
-          fill={fill}
-          stroke={inGroup ? '#22d3ee' : selected ? '#ffd24a' : accent}
-          strokeWidth={selected || inGroup ? 3 : 1.5}
-        />
-        {/* Front indicator (§4.1): the green field along the Unit's top edge,
-            plus a small outward notch, so facing reads clearly even zoomed out.
-            Clipped to the counter's rounded corners. */}
-        <g clipPath={`url(#${clipId})`} pointerEvents="none">
-          <rect x={x} y={y} width={s} height={frontBarH} fill="#2fbf4a" />
-        </g>
-        <polygon
-          points={`${center.x - fs * 0.32},${y + frontBarH * 0.62} ${center.x + fs * 0.32},${y + frontBarH * 0.62} ${center.x},${y - fs * 0.3}`}
-          fill="#0d3d17"
-          pointerEvents="none"
-        />
         {stressed && (
           <rect
             x={x - 3}
@@ -253,92 +358,6 @@ export function UnitCounter({
             pointerEvents="none"
           />
         )}
-        {spent && (
-          <line x1={x} y1={y + s} x2={x + s} y2={y} stroke="#0008" strokeWidth={2} />
-        )}
-        {/* fire cost (top-left), move cost (top-right) */}
-        <text x={x + pad} y={y + fs + pad * 0.4 + frontBarH} fontSize={fs} fill="#0e0e0e" fontWeight={700}>
-          {eff.apToFire}
-        </text>
-        <text x={x + s - pad} y={y + fs + pad * 0.4 + frontBarH} fontSize={fs} fill="#e9e9e9" textAnchor="end">
-          {eff.move}
-        </text>
-        {/* unit code (centre) */}
-        <text
-          x={center.x}
-          y={center.y + fs * 0.35}
-          fontSize={fs * 1.08}
-          fill="#fff"
-          fontWeight={700}
-          textAnchor="middle"
-        >
-          {code(tmpl.name)}
-        </text>
-        {/* firepower (bottom-left, red), defense (bottom-right, colored) */}
-        <text x={x + pad} y={y + s - pad * 0.6} fontSize={fs} fill="#ff7b7b" fontWeight={700}>
-          {eff.fp.red}
-        </text>
-        <text
-          x={x + s - pad}
-          y={y + s - pad * 0.6}
-          fontSize={fs}
-          fill={eff.dr.color === 'blue' ? '#7bb6ff' : '#ff9d6e'}
-          fontWeight={700}
-          textAnchor="end"
-        >
-          {eff.dr.front}
-        </text>
-        {hit && (
-          <g>
-            <rect x={center.x - fs * 1.1} y={y - fs * 0.5} width={fs * 2.2} height={fs} rx={2} fill="#b91c1c" />
-            <text
-              x={center.x}
-              y={y + fs * 0.32}
-              fontSize={fs * 0.8}
-              fill="#fff"
-              fontWeight={700}
-              textAnchor="middle"
-            >
-              {hit.slice(0, 4).toUpperCase()}
-            </text>
-          </g>
-        )}
-        {/* §17.6 Hasty Defense marker — per-Unit, not a Hex feature. */}
-        {unit.hastyDefense && (
-          <g>
-            <rect x={x + s - fs * 1.3} y={y + s - fs * 1.1} width={fs * 1.3} height={fs} rx={2} fill="#3a6ab2" />
-            <text
-              x={x + s - fs * 0.65}
-              y={y + s - fs * 0.3}
-              fontSize={fs * 0.7}
-              fill="#fff"
-              fontWeight={700}
-              textAnchor="middle"
-            >
-              HD
-            </text>
-          </g>
-        )}
-        {unit.occupyingFortification && (() => {
-          const kind = game.hexes[unit.hexId]?.features.fortification?.kind;
-          const label = kind === 'trench' ? 'TRENCH' : kind === 'bunker' ? 'BUNK' : 'FORT';
-          const w = fs * (0.4 + label.length * 0.32);
-          return (
-            <g>
-              <rect x={x} y={y + s - fs * 1.1} width={w} height={fs} rx={2} fill="#3a6ab2" />
-              <text
-                x={x + w / 2}
-                y={y + s - fs * 0.3}
-                fontSize={fs * 0.7}
-                fill="#fff"
-                fontWeight={700}
-                textAnchor="middle"
-              >
-                {label}
-              </text>
-            </g>
-          );
-        })()}
       </g>
     </g>
   );

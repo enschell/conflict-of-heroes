@@ -1,7 +1,10 @@
 /**
  * Obstacles Sandbox — a NON-canonical test scenario (not from the Mission
  * Book), for M10 Phase 1 (§17.7-§17.10). Like `hillsSandbox.ts`, this needs
- * its own small map: Map 1 has no Obstacles either.
+ * its own small map: Map 1 has no Obstacles either. Cells are placed via
+ * `colRowToAxial` (engine/hexBoard.ts, §B), not raw `hexId(q, r)` — see
+ * `hillsSandbox.ts`'s header comment for why a straight rectangular grid
+ * needs that column-parity formula under the flat-top projection.
  *
  * Row 0 — Barbed Wire (§17.8): a foot Unit crossing it rolls 1d6 added to its
  *   Move Cost; a Wheeled vehicle is denied entry; a Tracked vehicle crosses
@@ -15,13 +18,20 @@
  *   to 2 CAP to raise/lower the Hit Number via the Mines CAP-choice dialog.
  */
 import { hexId } from '../../engine/hex';
-import type { MapHexDef, MissionDef, UnitPlacement } from '../../engine/types';
+import { colRowToAxial } from '../../engine/hexBoard';
+import type { HexId, MapHexDef, MissionDef, UnitPlacement } from '../../engine/types';
 import { UNIT_TEMPLATES } from '../units';
+
+/** Column `c`, row `r` (this sandbox's own small grid) -> a real flat-top-adjacent HexId. */
+function at(c: number, r: number): HexId {
+  const a = colRowToAxial({ c, r });
+  return hexId(a.q, a.r);
+}
 
 const HEXES: MapHexDef[] = [];
 for (let r = 0; r < 3; r++) {
   for (let q = 0; q < 6; q++) {
-    const def: MapHexDef = { id: hexId(q, r), terrain: 'open', label: `R${r}C${q}` };
+    const def: MapHexDef = { id: at(q, r), terrain: 'open', label: `R${r}C${q}` };
     if (r === 1) def.road = true; // the whole row is one Road (§17.9 needs it under the Block)
     if (r === 0 && q === 2) def.obstacle = { kind: 'barbedWire', ownerSide: 'A' };
     if (r === 1 && q === 2) def.obstacle = { kind: 'roadBlock', ownerSide: 'A' };
@@ -32,13 +42,13 @@ for (let r = 0; r < 3; r++) {
 
 const UNITS: UnitPlacement[] = [
   // Germans (A), facing east (facing 0).
-  { id: 'G-rifle', side: 'A', templateId: 'ger-rifle', hexId: hexId(0, 0), facing: 0 },
-  { id: 'G-sdkfz251', side: 'A', templateId: 'ger-sdkfz251', hexId: hexId(0, 1), facing: 0 }, // wheeled
-  { id: 'G-pz3', side: 'A', templateId: 'ger-pz3h', hexId: hexId(0, 2), facing: 0 }, // tracked
+  { id: 'G-rifle', side: 'A', templateId: 'ger-rifle', hexId: at(0, 0), facing: 0 },
+  { id: 'G-sdkfz251', side: 'A', templateId: 'ger-sdkfz251', hexId: at(0, 1), facing: 0 }, // wheeled
+  { id: 'G-pz3', side: 'A', templateId: 'ger-pz3h', hexId: at(0, 2), facing: 0 }, // tracked
   // Soviets (B), facing west (facing 3) — "own" the Mines field (§17.10's
   // owning-side CAP choice is exercised from their side).
-  { id: 'S-rifle', side: 'B', templateId: 'sov-rifle', hexId: hexId(5, 0), facing: 3 },
-  { id: 'S-rifle2', side: 'B', templateId: 'sov-rifle', hexId: hexId(5, 2), facing: 3 },
+  { id: 'S-rifle', side: 'B', templateId: 'sov-rifle', hexId: at(5, 0), facing: 3 },
+  { id: 'S-rifle2', side: 'B', templateId: 'sov-rifle', hexId: at(5, 2), facing: 3 },
 ];
 
 const templates = [...new Set(UNITS.map((u) => u.templateId))].map((id) => {
@@ -59,5 +69,5 @@ export const OBSTACLES_SANDBOX: MissionDef = {
   hexes: HEXES,
   units: UNITS,
   templates,
-  victoryHexes: [{ hexId: hexId(4, 1), vp: 1 }],
+  victoryHexes: [{ hexId: at(4, 1), vp: 1 }],
 };
