@@ -1,0 +1,22 @@
+# Render Blueprint — one Node web service serves both the built client
+# (`dist/`, static) and the WebSocket game traffic (`server/index.ts`) on the
+# same port, per CLAUDE.md §8's M13 entry. Import this repo as a Blueprint
+# at https://dashboard.render.com/blueprints, or create a single Web Service
+# manually with the same build/start commands.
+#
+# `plan: free` to start — costs nothing, but Render's free tier spins the
+# service down after inactivity (the first connection after idle time pays a
+# ~30-60s cold start). Switch to `starter` (~$7/mo) once you're happy with it
+# for an always-on instance with no cold starts; this can be changed anytime
+# from the Render dashboard regardless of what's in this file.
+services:
+  - type: web
+    name: conflict-of-heroes
+    runtime: node
+    plan: free
+    buildCommand: npm install && npm run build
+    startCommand: npm start
+    healthCheckPath: /
+    envVars:
+      - key: NODE_VERSION
+        value: 20.18.0

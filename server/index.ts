@@ -5,11 +5,10 @@
  * transport layer wiring real sockets to it, per the M13 plan.
  */
 import { createServer, type IncomingMessage } from 'node:http';
-import { readFile } from 'node:fs/promises';
-import { extname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { WebSocketServer, type WebSocket } from 'ws';
 import { RoomManager, type Room } from './rooms';
+import { serveStatic } from './staticServe';
 import { missionById } from '../src/data/missions/catalog';
 import type { ClientMsg, RoomCode, ServerMsg, SessionId } from '../src/net/protocol';
 import type { SideId } from '../src/engine/types';
@@ -23,39 +22,6 @@ const PORT = process.env.PORT ? Number(process.env.PORT) : 8787;
 const DIST_DIR = fileURLToPath(new URL('../dist', import.meta.url));
 const PRUNE_INTERVAL_MS = 10 * 60 * 1000; // sweep every 10 minutes
 const ROOM_TIMEOUT_MS = 2 * 60 * 60 * 1000; // GC a room 2h after its last connected Side leaves
-
-const MIME: Record<string, string> = {
-  '.html': 'text/html; charset=utf-8',
-  '.js': 'text/javascript; charset=utf-8',
-  '.css': 'text/css; charset=utf-8',
-  '.json': 'application/json; charset=utf-8',
-  '.svg': 'image/svg+xml',
-  '.png': 'image/png',
-  '.ico': 'image/x-icon',
-};
-
-async function serveStatic(url: string, res: import('node:http').ServerResponse): Promise<void> {
-  const clean = url.split('?')[0] ?? '/';
-  const rel = clean === '/' ? '/index.html' : clean;
-  const path = join(DIST_DIR, rel);
-  // Never serve outside dist/ (no `..` escapes) — fall back to index.html for
-  // anything unresolved, matching a normal SPA static-serve convention.
-  if (!path.startsWith(DIST_DIR)) {
-    res.writeHead(400).end('Bad request');
-    return;
-  }
-  try {
-    const body = await readFile(path);
-    res.writeHead(200, { 'Content-Type': MIME[extname(path)] ?? 'application/octet-stream' }).end(body);
-  } catch {
-    try {
-      const body = await readFile(join(DIST_DIR, 'index.html'));
-      res.writeHead(200, { 'Content-Type': MIME['.html'] }).end(body);
-    } catch {
-      res.writeHead(404).end('Not found');
-    }
-  }
-}
 
 const rooms = new RoomManager();
 
@@ -91,7 +57,7 @@ function broadcastPeerStatus(roomCode: RoomCode, side: SideId, connected: boolea
 
 function startServer(): void {
   const httpServer = createServer((req: IncomingMessage, res) => {
-    void serveStatic(req.url ?? '/', res);
+    void serveStatic(DIST_DIR, req.url ?? '/', res);
   });
   const wss = new WebSocketServer({ server: httpServer });
   const sockets = new Set<WebSocket>();

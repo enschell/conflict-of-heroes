@@ -267,10 +267,15 @@ conflict-of-heroes/
     INDEX.md                #   routing index → read the right NN-*.md before coding
     00-overview.md … 19-alternate-player-counts.md
   package.json  vite.config.ts  tsconfig.json  index.html
+  render.yaml               # ✅ M13 step 4 prep: one Render Blueprint (build+start commands, PORT
+                             #   already read by server/index.ts) — deploying it still needs the user's
+                             #   own Render account, see §8's M13 entry
   public/assets/            # original art + dice SFX
   server/                   # ✅ M13: Node online-play server (see §8's M13 entry) — separate from
                              #   the client-only `src/`, but shares its engine/protocol code directly
     index.ts                #   HTTP static-serve (dist/) + WebSocket relay, wires rooms.ts + engine
+    staticServe.ts           #   serveStatic(distDir, url, res) — extracted from index.ts so it's
+                             #   independently testable (distDir is a param, not a module constant)
     rooms.ts                #   pure RoomManager (create/join/reconnect/turn-gate) — unit-tested, no real sockets
     __tests__/               #   Vitest, included via tsconfig.json's/vite.config.ts's "server" entries
   src/
@@ -1147,11 +1152,36 @@ Spent-Check die instead of a remaining-AP pool)*
   precondition — grep for the Action's handler and read its own comment for documented exceptions
   first.**
 
-  **Not yet built (steps 4-5 of the plan, explicitly out of scope for this pass):** actual Render
-  deployment (`render.yaml`, `PORT` env wiring — `server/index.ts` already reads `process.env.PORT`)
-  and a real over-the-internet test with a second person; opponent-approved Undo request (the
-  "fast-follow" decision — rides on this pass's message-passing pipeline, est. 1-2 extra days); the
-  real visual design for the lobby/status UI, if the user provides one.
+  **Render deployment — prepped, not yet actually deployed (step 4):** `render.yaml` (one Node web
+  service; `plan: free` to start, switchable to `starter` for an always-on instance later —
+  `server/index.ts` already reads `process.env.PORT`, no code change needed there). Two real gaps
+  found and fixed while prepping this, both worth remembering:
+  1. **`tsx` was a devDependency, but `npm start` (`tsx server/index.ts`) needs it at runtime.** A
+     platform that runs `npm install` with `NODE_ENV=production` (common for PaaS) skips
+     devDependencies, which would make the start command fail on a clean deploy despite working
+     fine locally (where `node_modules` already has everything from ad-hoc `npm install`s during
+     dev). Moved `tsx` to `dependencies`; `@types/node` correctly stays a devDependency (compile-time
+     only, never imported at runtime).
+  2. **`serveStatic`'s catch-all fallback served `index.html` (200, `text/html`) for ANY missing
+     path, including missing assets with a real extension** (`/assets/index-OLDHASH.js`) — not just
+     genuine SPA routes. The realistic trigger: a browser with a stale cached `index.html` from
+     before the last deploy, still referencing an old hashed bundle filename that no longer exists
+     post-redeploy. Serving HTML in place of the missing JS makes the browser try to execute/parse
+     it and fail confusingly, instead of a clean 404 it can react to (reload → picks up the new
+     `index.html`). Fixed: only extensionless paths get the `index.html` fallback now; a missing
+     path *with* an extension 404s for real. Caught by manually running the actual production
+     startup (`npm run build && npm start`, not the dev-mode split-port setup) and curling it —
+     verified both the static-serve fix and that one process really does serve the built client +
+     accept a real WebSocket `CREATE`/`JOINED` round-trip on the same port, the exact model Render
+     needs. Extracted `serveStatic` into its own `server/staticServe.ts` (takes `distDir` as a
+     parameter instead of a module-level constant) specifically so this could get real Vitest
+     coverage (a temp-directory fixture, no real HTTP server needed) rather than staying
+     manual-verification-only. **Still needs the user:** actually creating the Render service
+     (Blueprint import or manual Web Service pointed at this repo) and a real over-the-internet test
+     with a second person — I can prep the repo but can't sign up for/operate their Render account.
+  **Not yet built (step 5):** opponent-approved Undo request (the "fast-follow" decision — rides on
+  this pass's message-passing pipeline, est. 1-2 extra days); the real visual design for the
+  lobby/status UI, if the user provides one.
 
   → M12 cards (§8, incl. OBA) → the rest of M13 (deploy, real visual design, opponent-approved undo)
   → **M8 Hidden Units** (§11, now genuinely buildable — a real per-client server exists to filter
