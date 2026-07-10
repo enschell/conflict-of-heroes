@@ -635,7 +635,9 @@ Spent-Check die instead of a remaining-AP pool)*
   actually reproduce it in a fresh production build (`npm run build && npm start`, not the Vite dev
   server) rather than assuming the report is stale/cached; a `position: absolute` element's sizing
   bugs are inherently viewport/container-size-dependent and can pass every check at one window size
-  while being obviously wrong at another.**
+  while being obviously wrong at another.** **Follow-up, user preference:** repositioned from
+  vertically centered on the board to pinned at the board's top edge (`align-items: flex-start` +
+  `padding-top`, was `align-items: center`) — doesn't sit on top of units/terrain mid-board this way.
 - **Readouts + dice in log** ✅ track sheet/inspector show **Fresh/Spent + Stress** and CAPs; the log
   prints the actual 2d6 (fire/rally/initiative) and the Spent-Die result.
 - **Animated clickable dice with sound** ✅ `DiceRoller.tsx` — dice show `?` until clicked, then
