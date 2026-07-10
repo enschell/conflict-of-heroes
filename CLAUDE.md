@@ -521,7 +521,23 @@ target's DR colour (blue → vehicle pile, red → foot pile).
   **Removed in v3:** `ACTIVATE_UNIT`, `MARK_SPENT` (no activation/pool).
 - **Tests:** colocate in `__tests__/`. **Reproduce the v3 red-box examples** from `rules/NN-*.md` as
   fixtures — they are worked rule implementations (Spent Checks, Stress, combat HN, rally, OBA drift,
-  bunker DR, etc.) and make excellent oracles.
+  bunker DR, etc.) and make excellent oracles. Shared per-module fixture builders (a `scene()`-style
+  helper reused by several test files in the same directory) belong in that directory's own
+  `helpers.ts` — `src/engine/__tests__/helpers.ts` and `src/state/__tests__/helpers.ts` are the two
+  that exist so far; check there before writing a new inline scene-builder a sibling test file might
+  already have (or duplicate). **A full staleness audit of all 45 test files** (a 4-agent parallel
+  review, one per subsystem cluster) found the suite in good health overall — no leftover 7AP-pool or
+  pointy-top-hex relics, no skipped/dead tests — but did catch two worth remembering the pattern of: a
+  test's `it(...)` title had drifted from what it actually asserted (an honest comment nearby explained
+  the gap, but the title itself was never corrected — read the assertions, not just the title, when
+  judging whether a test still describes real behavior), and a test whose entire premise (the reducer
+  gates a certain roll on Hex occupancy) turned out to be false once checked against the actual
+  `reducer.ts` code — it was deleted, not fixed, since there was nothing true left to assert. **A tried
+  fix that was itself wrong, caught and reverted:** attempting to extend the misleadingly-titled test
+  into a *true* full reproduction of the rulebook's exact worked-example numbers by adding an elevation
+  difference produced an arithmetic error, since it was done without the actual rulebook text open —
+  reverted per this file's own "do not invent rules from memory" instruction, and fixed the title
+  instead of guessing the numbers.
 - **No engine→UI imports.** UI imports engine; never the reverse.
 
 ### Requested UI features (all implemented — keep them working)
