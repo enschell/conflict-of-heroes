@@ -638,6 +638,30 @@ Spent-Check die instead of a remaining-AP pool)*
   while being obviously wrong at another.** **Follow-up, user preference:** repositioned from
   vertically centered on the board to pinned at the board's top edge (`align-items: flex-start` +
   `padding-top`, was `align-items: center`) — doesn't sit on top of units/terrain mid-board this way.
+  **Follow-up, waits out the free facing-correction window:** a normal Move hands the Turn to the
+  other side *before* the mover's §4.5/§15.11 facing-correction pick — `currentSide` is already the
+  next side while the previous side still has that pending choice open. Flashing immediately read as
+  "it's the other side's Turn now" while the mover still had a decision pending, so `TurnFlash` now
+  also tracks `game.pendingFacingChoices` and holds off until it's empty, then flashes whoever's Turn
+  it actually is at that point (`useEffect`'s dependency array grew from `[cs]` to
+  `[cs, awaitingFacing]`). **Verification saga, worth remembering the pattern:** this initially
+  *looked* completely broken live (flash never appeared after resolving a facing choice, across many
+  separate `preview_eval` checks) — but was actually working correctly the whole time. Two distinct
+  false alarms stacked: (1) mid-session, Vite HMR hot-swapped this file while `TurnFlash` was already
+  mounted, and the `useEffect` dependency array changed *size* (`[cs]` → `[cs, awaitingFacing]`) —
+  React explicitly errors on this ("must remain constant") and the effect silently stops working for
+  that mounted instance; a full page reload (not just re-testing) clears it, and a genuinely fresh
+  dev-server restart rules it out for certain. (2) Even after eliminating that, every check still
+  came back "not found" — because each was its own separate `preview_eval` round-trip, and the
+  cumulative real time across several sequential checks routinely exceeded the 4-second window before
+  the *first* one even finished; a temporary `console.log` in the effect/render paths proved
+  `visible`/the render output were correct the entire time. Only a single **atomic** script — select,
+  move, choose facing, then poll opacity at 0/50/150/400/1000ms *all inside one `preview_eval` call*
+  — gave a trustworthy answer (0.07 → 0.38 → 0.91 → 1.0, correct). **Lesson, reinforcing the existing
+  one from the wheel-zoom section above: never trust a live UI verdict built from multiple separate
+  tool round-trips against a short-lived (~seconds) transient effect — write one atomic script that
+  drives the interaction AND polls the result with internal `setTimeout`/`requestAnimationFrame`
+  waits, so elapsed time is measured in the browser's own clock, not in tool dispatch latency.**
 - **Readouts + dice in log** ✅ track sheet/inspector show **Fresh/Spent + Stress** and CAPs; the log
   prints the actual 2d6 (fire/rally/initiative) and the Spent-Die result.
 - **Animated clickable dice with sound** ✅ `DiceRoller.tsx` — dice show `?` until clicked, then
