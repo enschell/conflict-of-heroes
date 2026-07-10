@@ -136,6 +136,22 @@ button.link {
 }
 
 /* ---- board ---- */
+/* Wraps just the <svg class="board"> (not the other .center children like
+   ActionChooser/DiceRoller/etc.) so TurnFlash's `inset: 0` sizes to the
+   board's own rendered box, not `.center`'s. `.center` is a flex ROW with
+   `align-items: flex-start` and no explicit height, so it can be taller
+   than the board itself (whatever's left of the viewport below `.board`'s
+   own `max-height` cap) — a real bug once shipped: TurnFlash centered its
+   text within `.center`'s full (larger, viewport-dependent) height instead
+   of the board's, landing the text somewhere below/outside the visible map
+   depending on window size, not fading in place over it as intended. No
+   explicit height on `.board-frame` itself — it shrink-wraps to the SVG's
+   own intrinsic height, so it's authoritative regardless of `.center`'s.
+   Has no other effect: it doesn't touch `.center`'s own row-flex layout. */
+.board-frame {
+  position: relative;
+  width: 100%;
+}
 .board {
   width: 100%;
   height: auto;
@@ -144,8 +160,7 @@ button.link {
 }
 
 /* Large text flashed over the board announcing whose Turn it is, fading
-   away over 4s (TurnFlash.tsx). `.center` is already `position: relative`,
-   so this overlays just the board area, not the sidebars. */
+   away over 4s (TurnFlash.tsx). */
 .turn-flash {
   position: absolute;
   inset: 0;

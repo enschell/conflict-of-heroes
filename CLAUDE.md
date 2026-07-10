@@ -614,6 +614,28 @@ Spent-Check die instead of a remaining-AP pool)*
   polls `getComputedStyle(...).opacity` at several timestamps *within the same call*, showing the
   expected 0 → 1 → 1 → 0 → (unmounted) progression precisely; don't trust a screenshot's absence of
   the flash as evidence of a bug without confirming via timestamped opacity polling first.
+  **A real bug shipped and caught live on the real deploy, since fixed:** the text didn't fade in
+  place — it appeared somewhere off from the board's own center and stayed until the next Turn
+  switch (only *looked* like "doesn't fade," since the unmount timer was actually firing correctly
+  the whole time; the symptom was purely positional). Root cause: `.turn-flash`'s `position: absolute;
+  inset: 0;` was scoped to `.center`, not to the board itself — `.center` is a flex ROW with
+  `align-items: flex-start` and no explicit height, so it can be (and on a tall viewport, was)
+  noticeably TALLER than `<Board/>`'s own rendered box (the SVG's `max-height` cap leaves empty space
+  below it that `.center` still occupies). Centering the flash text within `.center`'s full height
+  landed it well below the board's own visual center, by an amount that depends on viewport size —
+  invisible on some window sizes, glaringly wrong on others, which is exactly the "why does this only
+  break sometimes" fingerprint of a size-mismatch bug. Fixed with a new `.board-frame` (`position:
+  relative`, no explicit height — shrink-wraps to the SVG's own intrinsic height) wrapping *just*
+  `<Board/>` and `<TurnFlash/>` in `App.tsx`, so `inset: 0` now sizes to the board's own box
+  precisely, verified by comparing `getBoundingClientRect()` of `.board-frame`/`.turn-flash` against
+  `.board` directly (now identical) rather than trusting a screenshot. **Lesson: this bug was
+  completely invisible in the local dev-server preview at the window size already in use for earlier
+  testing, and only surfaced on the actual deployed build at the user's own (different) window size —
+  when a UI bug report doesn't reproduce in the same tool/window session that shipped the feature,
+  actually reproduce it in a fresh production build (`npm run build && npm start`, not the Vite dev
+  server) rather than assuming the report is stale/cached; a `position: absolute` element's sizing
+  bugs are inherently viewport/container-size-dependent and can pass every check at one window size
+  while being obviously wrong at another.**
 - **Readouts + dice in log** ✅ track sheet/inspector show **Fresh/Spent + Stress** and CAPs; the log
   prints the actual 2d6 (fire/rally/initiative) and the Spent-Die result.
 - **Animated clickable dice with sound** ✅ `DiceRoller.tsx` — dice show `?` until clicked, then

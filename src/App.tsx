@@ -160,8 +160,10 @@ export function App() {
       </aside>
 
       <main className="center">
-        <Board />
-        <TurnFlash />
+        <div className="board-frame">
+          <Board />
+          <TurnFlash />
+        </div>
         <ActionChooser />
         <DiceRoller />
         <ConfirmDialog />
