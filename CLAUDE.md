@@ -595,14 +595,25 @@ Spent-Check die instead of a remaining-AP pool)*
 - **Spent-Check / opportunity confirm** ✅ acting with a unit prompts the Spent-Check die flow
   (replaces the old opportunity-spend confirm); `ConfirmDialog`.
 - **Turn banner** ✅ `TurnBanner.tsx` "Start of turn N".
-- **Persistent Turn header** ✅ `TurnHeader.tsx` — a colored bar directly above the board, always
-  visible (unlike `TurnBanner.tsx`'s one-per-Round, click-to-dismiss popup), showing "{Nation}'s
-  Turn" — updates live the instant `currentSide` flips. Never a bare Side letter (same convention as
-  `VictoryScreen.tsx`); handles a plural nation name already ending in "s" ("Germans", "Soviets")
-  with a bare apostrophe ("Germans' Turn") rather than a double-s ("Germans's Turn"). `App.tsx` wraps
-  it with `<Board/>` in a new `.board-wrap` column-flex div so it stacks *above* the board without
-  touching `.center`'s own row-flex layout (which several modal overlays — `ActionChooser`,
-  `DiceRoller`, `VictoryScreen`, etc. — sit alongside as siblings and shouldn't be disturbed).
+- **Turn flash** ✅ `TurnFlash.tsx` — large text ("{Nation}'s Turn") flashed over the board and faded
+  out over 4s via a CSS `@keyframes` animation (fade in → hold → fade out), firing the instant
+  `currentSide` flips (including once on mount, for the Mission's starting side). **First shipped as
+  a persistent banner** (`TurnHeader.tsx`, a colored bar permanently above the board) **— replaced on
+  user request** for this large-fade-over-the-map version instead; `TurnHeader.tsx`/`.board-wrap`/
+  `.turn-header*` CSS were deleted outright, not kept alongside. `position: absolute; inset: 0;`
+  within `.center` (already `position: relative`) so it overlays just the board area, not the
+  sidebars; `pointer-events: none` so it never blocks play while fading. Never a bare Side letter
+  (same convention as `VictoryScreen.tsx`); handles a plural nation name already ending in "s"
+  ("Germans", "Soviets") with a bare apostrophe ("Germans' Turn") rather than a double-s
+  ("Germans's Turn"). Remounts via `key={cs}` on the animated element specifically so two Turn
+  switches in quick succession (e.g. two passes back-to-back) each restart the fade from scratch —
+  a plain visibility boolean toggling true→true across a rapid double-switch wouldn't force React to
+  remount the DOM node, so the CSS animation wouldn't restart. **Verification note:** a live 4-second
+  fade is hard to catch with a single `preview_screenshot` call (tool round-trip latency alone can
+  exceed the window) — verified instead with one atomic `preview_eval` script that clicks and then
+  polls `getComputedStyle(...).opacity` at several timestamps *within the same call*, showing the
+  expected 0 → 1 → 1 → 0 → (unmounted) progression precisely; don't trust a screenshot's absence of
+  the flash as evidence of a bug without confirming via timestamped opacity polling first.
 - **Readouts + dice in log** ✅ track sheet/inspector show **Fresh/Spent + Stress** and CAPs; the log
   prints the actual 2d6 (fire/rally/initiative) and the Spent-Die result.
 - **Animated clickable dice with sound** ✅ `DiceRoller.tsx` — dice show `?` until clicked, then
