@@ -1258,14 +1258,20 @@ Spent-Check die instead of a remaining-AP pool)*
      needs. Extracted `serveStatic` into its own `server/staticServe.ts` (takes `distDir` as a
      parameter instead of a module-level constant) specifically so this could get real Vitest
      coverage (a temp-directory fixture, no real HTTP server needed) rather than staying
-     manual-verification-only. **Still needs the user:** actually creating the Render service
-     (Blueprint import or manual Web Service pointed at this repo) and a real over-the-internet test
-     with a second person — I can prep the repo but can't sign up for/operate their Render account.
+     manual-verification-only. **Step 4 — done: the user deployed it** (Render Blueprint import,
+     `v3-migration` branch). Several real bugs surfaced and were fixed on the LIVE deployment
+     afterward (see the CHOOSE_FACING Turn-gate fix above, the S06 half-hex entry fix, and every
+     `TurnFlash`/reinforcement-preview-counter item below) — each one required `git push` →
+     Render auto-redeploy → the user re-testing on the actual live URL, which has by now repeatedly
+     proven the whole build→deploy→redeploy loop works end-to-end. **Still open:** a real
+     over-the-internet test with a genuinely separate second person (the user has been testing
+     solo/with themselves so far, as far as this file's own record goes) — not yet confirmed either
+     way; ask before assuming it has or hasn't happened.
   **Not yet built (step 5):** opponent-approved Undo request (the "fast-follow" decision — rides on
   this pass's message-passing pipeline, est. 1-2 extra days); the real visual design for the
   lobby/status UI, if the user provides one.
 
-  → M12 cards (§8, incl. OBA) → the rest of M13 (deploy, real visual design, opponent-approved undo)
+  → M12 cards (§8, incl. OBA) → the rest of M13 (real visual design, opponent-approved undo)
   → **M8 Hidden Units** (§11, now genuinely buildable — a real per-client server exists to filter
   state on, not just a single shared hotseat screen).
 

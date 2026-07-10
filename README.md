@@ -26,8 +26,12 @@ A personal, browser-based implementation of the Academy Games tactical wargame
 - **Save state:** localStorage autosave, **named save slots**, **JSON export/import**, and
   **undo/redo** (topbar "Saves" dialog). Saves round-trip exactly (the RNG travels with them).
 - Extras: an **LOS visibility mode** (hold **Shift** to see what the hovered hex can/can't see),
-  **animated, clickable dice with sound**, and a **Reinforcements panel** per side showing pending
-  waves (units, entry condition, one-click Group entry once eligible, §4.12).
+  **animated, clickable dice with sound**, a **Reinforcements panel** per side showing pending
+  waves (units, entry condition, one-click Group entry once eligible, §4.12, with a live preview
+  counter the instant you pick an entry Hex), **mouse-wheel zoom** centered on the cursor, and a
+  **Turn flash** (large text over the board announcing whose Turn it is, fading after 4s — waits
+  out any open free facing-correction window first, so it never flashes while you still have a
+  pivot pending from your last Move).
 
 ## Content & legal
 We author all stats/terrain/scenario **data** ourselves and use **original simple graphics**.
@@ -73,14 +77,19 @@ merge) — then select one of the current side's units and:
 (a debug convenience — the real visual model is the SVG board).
 
 ## Playing online (M13)
-Run `npm run server` (starts the WebSocket/HTTP server on port 8787) alongside `npm run dev`. In dev
-mode the client (5173) and server (8787) are different origins, so set `VITE_WS_URL=ws://localhost:8787`
-in a `.env.local` file first (production serves both from one origin automatically — no env var
-needed there). Then, from the start screen's **Play Online** card: one player clicks **Create Online
-Game** to get a shareable room code, the other enters it under **Join Game**. No accounts. Undo/Redo
-are disabled online (the server is the single source of truth); everything else plays the same as
-hotseat. This is a **functional-minimum placeholder UI** for now (see `CLAUDE.md` §8's M13 entry) —
-deploying it (Render) and a real visual design are the next steps, not yet done.
+**Deployed and live on Render** (Blueprint import from `render.yaml`, `v3-migration` branch — one
+Node service serves the built client and relays game Actions over WebSocket on the same port). From
+the start screen's **Play Online** card: one player clicks **Create Online Game** to get a shareable
+room code, the other enters it under **Join Game**. No accounts. Undo/Redo are disabled online (the
+server is the single source of truth); everything else plays the same as hotseat. This is still a
+**functional-minimum placeholder UI** (see `CLAUDE.md` §8's M13 entry) — a real visual design and
+opponent-approved Undo are the next steps, not yet done.
+
+To run it locally instead: `npm run server` (starts the WebSocket/HTTP server on port 8787)
+alongside `npm run dev`. In dev mode the client (5173) and server (8787) are different origins, so
+set `VITE_WS_URL=ws://localhost:8787` in a `.env.local` file first (production serves both from one
+origin automatically — no env var needed there, and that's exactly how the Render deployment runs
+it: `npm start`, one origin, `PORT` read from the environment).
 
 ## Where to look
 - **`CLAUDE.md`** — architecture, engine golden rules, directory map, rulebook section index,
@@ -104,10 +113,11 @@ Combat, Pioneer Mines-immunity + Range-1 Fire Smoke) · **Hex board migration** 
 flat-top, `docs/hex_board_spec/README.md`; real board-edge half/quarter-hexes, `A01`-`S12` labels,
 board number, multi-board seam merging; Mission 1 and all five non-canonical sandboxes fully
 re-authored onto it — rotation not yet built, deferred until a mission needs it) — see `CLAUDE.md` §B
-· **M13 Online Multiplayer ✅ steps 1-3** (deliberately built ahead of M12/Cards — Cards need real
+· **M13 Online Multiplayer ✅ steps 1-4** (deliberately built ahead of M12/Cards — Cards need real
 per-client secret info that only online play provides; Node + WebSocket server, room codes, hotseat
-completely untouched, functional-minimum UI) — see `CLAUDE.md` §8's M13 entry; next: deploy to
-Render + a real visual design (M13 steps 4-5) → M12 cards (incl. OBA) → M8 hidden units.
+completely untouched, functional-minimum UI, **deployed and live on Render**) — see `CLAUDE.md` §8's
+M13 entry; next: a real visual design + opponent-approved Undo (M13 step 5) → M12 cards (incl. OBA)
+→ M8 hidden units.
 See `CLAUDE.md` §8 for the full milestone roadmap.
 
 A **rules-conformance audit** (`npm run conformance`) self-plays several full games and re-derives
