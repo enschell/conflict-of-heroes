@@ -117,3 +117,27 @@ export function addUnit(
   s.units[id] = u;
   return u;
 }
+
+/**
+ * A straight row of open Hexes (q=0..10) with an attacker at q=0 (facing
+ * East) and a target at `targetQ`, optionally on different terrain — the
+ * shared setup for combat.test.ts's raw AR/DR/Hit-Number assertions and
+ * combat-mods.test.ts's arMods/drMods line-item breakdown of the same
+ * scenarios (both need the identical fixture; only what they assert on the
+ * result differs).
+ */
+export function rangeScene(opts: {
+  targetFacing: Facing;
+  targetQ?: number;
+  targetTerrain?: TerrainId;
+  attackerFp?: number;
+  range?: number;
+}): { s: GameState; a: Unit; t: Unit } {
+  const targetQ = opts.targetQ ?? 1;
+  const s = baseState();
+  addTemplate(s, rifleTemplate({ fp: { red: opts.attackerFp ?? 3, blue: 0 }, range: opts.range ?? 4 }));
+  for (let q = 0; q <= 10; q++) addHex(s, q, 0, q === targetQ ? (opts.targetTerrain ?? 'open') : 'open');
+  const a = addUnit(s, 'A1', 'A', 0, 0, 0); // facing East
+  const t = addUnit(s, 'T1', 'B', targetQ, 0, opts.targetFacing);
+  return { s, a, t };
+}

@@ -1,28 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { attackContext, enemiesInHex, rollAttack, rollStackFire } from '../combat';
-import type { Facing } from '../types';
-import { addHex, addTemplate, addUnit, baseState, rifleTemplate } from './helpers';
-
-function scene(opts: {
-  targetFacing: Facing;
-  targetQ?: number;
-  targetTerrain?: 'open' | 'woodsHeavy';
-  attackerFp?: number;
-  range?: number;
-}) {
-  const targetQ = opts.targetQ ?? 1;
-  const s = baseState();
-  addTemplate(
-    s,
-    rifleTemplate({ fp: { red: opts.attackerFp ?? 3, blue: 0 }, range: opts.range ?? 4 }),
-  );
-  for (let q = 0; q <= 10; q++) {
-    addHex(s, q, 0, q === targetQ ? (opts.targetTerrain ?? 'open') : 'open');
-  }
-  const a = addUnit(s, 'A1', 'A', 0, 0, 0); // facing East
-  const t = addUnit(s, 'T1', 'B', targetQ, 0, opts.targetFacing);
-  return { s, a, t };
-}
+import { addHex, addTemplate, addUnit, baseState, rangeScene as scene, rifleTemplate } from './helpers';
 
 describe('combat resolution (rulebook §7)', () => {
   it('uses front DR when the attacker is in the target front arc, +3FP at short range', () => {

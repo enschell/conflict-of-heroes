@@ -129,12 +129,20 @@ describe('Bunkers (§17.5)', () => {
     expect(pivot.events[0]!.text).toContain('Bunker');
   });
 
-  it('reproduces the rulebook\'s MG34-vs-MMG-in-a-Bunker worked example (18DR, 13 Hit Number)', () => {
-    // MMG: 12 Front Def. Bunker attacked within its Arc of Fire: +5DR. High
-    // Ground: +1DR (omitted here — no elevation difference in this fixture,
-    // so the isolated Bunker contribution is what's under test: 12+5=17DR;
-    // the rulebook's 18DR includes a +1 High Ground this fixture doesn't
-    // reproduce, so we assert the Bunker-only total and the MG34's own math).
+  it('Bunker Arc-of-Fire DR bonus stacks onto the occupant\'s own Front Def (§17.5)', () => {
+    // MMG: 12 Front Def. Bunker attacked within its Arc of Fire: +5DR (§17.5).
+    // NOTE: the rulebook's own worked example for this exact scenario cites
+    // 18DR/13 Hit Number — this fixture deliberately omits the High Ground
+    // (§12.3) component of that example (no elevation difference here), so
+    // it asserts the Bunker-only total (12+5=17DR) instead. A prior version
+    // of this test's *title* claimed to reproduce the full 18/13 figures
+    // without actually doing so (caught in a test-suite audit) — do not
+    // "fix" this by guessing what AR/DR combination would reach 18/13 without
+    // the real rulebook text in hand (CLAUDE.md: don't invent rules from
+    // memory); either leave this as the Bunker-only case it actually is, or
+    // extend the fixture with a verified elevation difference AND verify the
+    // resulting AR/DR/HN against `rules/17`+`rules/12` directly before
+    // asserting specific numbers.
     const s = baseState();
     addTemplate(s, rifleTemplate({ id: 'mmg', dr: { front: 12, flank: 10, color: 'red' } }));
     addTemplate(s, rifleTemplate({ id: 'mg34', fp: { red: 5, blue: 0 } }));
@@ -294,22 +302,6 @@ describe('§17.11 — destroying a Fortification/Obstacle by ranged Fire (two ro
     // Exactly one Spent Check for the whole Action, regardless of how many rolls happened.
     expect(newEvents.filter((e) => e.type === 'spent')).toHaveLength(1);
     expect(newEvents.some((e) => e.type === 'fireStructure')).toBe(true);
-  });
-
-  it('only rolls the structure when the Hex is unoccupied', () => {
-    const s = baseState();
-    addTemplate(s, rifleTemplate({ id: 'panzer', kind: 'vehicle', fp: { red: 5, blue: 5 }, dr: { front: 14, flank: 12, color: 'blue' } }));
-    addTemplate(s, rifleTemplate({ id: 'decoy' })); // needed only so attackContext has SOME legal target color path; unused
-    addHex(s, 0, 0, 'open');
-    addHex(s, 1, 0, 'open');
-    putFortification(s, '0,0', 'bunker', { facing: 0, destroyDr: 5 });
-    const panzer = addUnit(s, 'PZ', 'A', 1, 0, 3, 'panzer');
-    // No occupant at '0,0' — but FIRE requires a Unit target, so exercise the
-    // structure roll directly via the same pure helper doFire calls.
-    const ar = 8; // matches the rulebook's own Panzer AR example
-    const roll = rollStructureDestroy(s, ar, 16);
-    expect(roll.hitNumber).toBe(16 - 8);
-    void panzer;
   });
 
   it('rollStructureDestroy applies the (clamped) CAP mod before rolling, like every other roll', () => {

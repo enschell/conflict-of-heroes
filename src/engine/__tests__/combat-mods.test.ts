@@ -5,27 +5,10 @@
  */
 import { describe, expect, it } from 'vitest';
 import { attackContext, closeCombatContext } from '../combat';
-import type { Facing } from '../types';
-import { addHex, addTemplate, addUnit, baseState, rifleTemplate } from './helpers';
+import { addHex, addTemplate, addUnit, baseState, rangeScene as scene, rifleTemplate } from './helpers';
 
 function sum(mods: { value: number }[]): number {
   return mods.reduce((s, m) => s + m.value, 0);
-}
-
-function scene(opts: {
-  targetFacing: Facing;
-  targetQ?: number;
-  targetTerrain?: 'open' | 'woodsHeavy';
-  attackerFp?: number;
-  range?: number;
-}) {
-  const targetQ = opts.targetQ ?? 1;
-  const s = baseState();
-  addTemplate(s, rifleTemplate({ fp: { red: opts.attackerFp ?? 3, blue: 0 }, range: opts.range ?? 4 }));
-  for (let q = 0; q <= 10; q++) addHex(s, q, 0, q === targetQ ? (opts.targetTerrain ?? 'open') : 'open');
-  const a = addUnit(s, 'A1', 'A', 0, 0, 0);
-  const t = addUnit(s, 'T1', 'B', targetQ, 0, opts.targetFacing);
-  return { s, a, t };
 }
 
 describe('AR/DR modifier breakdown (dice-roller detail)', () => {

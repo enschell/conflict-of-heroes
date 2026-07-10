@@ -1,27 +1,14 @@
 // @vitest-environment jsdom
 /** Vehicle Bonus-Move path building through the store (§15.2 UI wiring). */
 import { afterEach, describe, expect, it } from 'vitest';
-import { idOf, neighbors, parseHexId, planVehicleMove } from '../../engine';
 import { ARMOR_SANDBOX } from '../../data/missions/sandbox';
 import { useGame } from '../store';
-import type { GameState, Unit } from '../../engine/types';
+import { legalSteps } from './helpers';
 
 afterEach(() => {
   localStorage.clear();
   useGame.setState({ game: null, selectedUnitId: null, movePath: [] });
 });
-
-/** Legal next hexes for extending `path` with this vehicle. */
-function legalSteps(g: GameState, unit: Unit, path: string[]): string[] {
-  const from = path.length ? path[path.length - 1]! : unit.hexId;
-  const out: string[] = [];
-  for (const n of neighbors(parseHexId(from))) {
-    const nid = idOf(n);
-    if (!g.hexes[nid] || path.includes(nid)) continue;
-    if (planVehicleMove(g, unit, [...path, nid]).ap != null) out.push(nid);
-  }
-  return out;
-}
 
 describe('vehicle bonus-move path (store)', () => {
   it('builds a multi-hex path and commits it as one Move', () => {

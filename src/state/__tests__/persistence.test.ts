@@ -3,19 +3,10 @@
  * M4 persistence + undo/redo. jsdom gives us a real localStorage.
  */
 import { afterEach, describe, expect, it } from 'vitest';
-import { idOf, initGame, neighbors, parseHexId, planVehicleMove, serialize } from '../../engine';
+import { initGame, serialize } from '../../engine';
 import { MISSION_1 } from '../../data/missions/mission1';
 import { ARMOR_SANDBOX } from '../../data/missions/sandbox';
-import type { GameState, Unit } from '../../engine/types';
-
-/** Any one adjacent hex `unit` can legally step into (terrain-independent helper). */
-function legalStep(game: GameState, unit: Unit): string {
-  const step = neighbors(parseHexId(unit.hexId))
-    .map(idOf)
-    .find((id) => game.hexes[id] && planVehicleMove(game, unit, [id]).ap != null);
-  if (!step) throw new Error(`no legal step found for ${unit.id}`);
-  return step;
-}
+import { legalStep } from './helpers';
 import {
   deleteSlot,
   isGameState,
