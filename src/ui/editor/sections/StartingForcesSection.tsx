@@ -2,7 +2,7 @@ import { useMemo } from 'react';
 import { assembledMap, useEditorStore } from '../../../state/editorStore';
 import { UNIT_TEMPLATES } from '../../../data/units';
 import { SIDE_COLOR } from '../../theme';
-import { EditorBoard, type EditorMarker } from '../EditorBoard';
+import { EditorBoardOrError, type EditorMarker } from '../EditorBoard';
 import { UnitPicker } from '../UnitPicker';
 import { FACING_LABELS } from '../constants';
 import type { Facing } from '../../../engine/types';
@@ -20,7 +20,7 @@ export function StartingForcesSection() {
   const removePlaced = useEditorStore((s) => s.removePlaced);
   const updatePlacedFacing = useEditorStore((s) => s.updatePlacedFacing);
   const map = useEditorStore((s) => s.map);
-  const mapHexes = useMemo(() => assembledMap(map).hexes, [map]);
+  const { hexes: mapHexes, error: mapError } = useMemo(() => assembledMap(map), [map]);
 
   const markers = useMemo<EditorMarker[]>(() => {
     const byHex = new Map<string, typeof forces.placed>();
@@ -43,7 +43,7 @@ export function StartingForcesSection() {
     <div className="editor__section editor__section--map">
       <div className="editor__map-body">
         <div className="editor__map-board">
-          <EditorBoard hexes={mapHexes} markers={markers} onHexClick={(hex) => placeAtHex(hex)} />
+          <EditorBoardOrError error={mapError} hexes={mapHexes} markers={markers} onHexClick={(hex) => placeAtHex(hex)} />
         </div>
         <div className="editor__map-tools">
           <UnitPicker

@@ -6,12 +6,36 @@
  * (`ui/theme.ts`) so it renders identically to the live board — no
  * placeholder grid.
  */
-import { useMemo } from 'react';
+import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { buildHex } from '../../engine';
 import type { RotationCluster } from '../../engine';
 import { EDGE_CORNERS, clipHexPolygon, hexCenter, hexCorners, playableBounds, pointsAttr, HEX_SIZE } from '../hexgeo';
 import { HEX_STROKE, TERRAIN_FILL, WALL_STROKE } from '../theme';
-import type { Facing, Hex, HexId, MapHexDef } from '../../engine/types';
+import type { Facing, Hex, HexId, MapHexDef, TerrainId } from '../../engine/types';
+
+/**
+ * Terrain artwork for the editor's own board preview — a small, self-contained
+ * mapping (not a reuse of `data/hexArt.ts`, which the LIVE game depends on and
+ * has an existing `road: '.../road.png'` mismatch — that file doesn't exist on
+ * disk, only `road.svg` does). `open.png` is the explicit default/fallback for
+ * any terrain without a mapped asset, per the user's request.
+ */
+const DEFAULT_TERRAIN_ART = '/assets/terrain/open.png';
+const EDITOR_TERRAIN_ART: Partial<Record<TerrainId, string>> = {
+  open: '/assets/terrain/open.png',
+  road: '/assets/terrain/road.svg',
+  plowed: '/assets/terrain/plowed.svg',
+  water: '/assets/terrain/water.svg',
+  woodsLight: '/assets/terrain/lightwoodsv2.png',
+  woodsHeavy: '/assets/terrain/woodsHeavyv2.png',
+  buildingWood: '/assets/terrain/buildingWood.png',
+  buildingStone: '/assets/terrain/buildingStone.png',
+};
+function artForTerrain(terrain: TerrainId): string {
+  return EDITOR_TERRAIN_ART[terrain] ?? DEFAULT_TERRAIN_ART;
+}
+/** Same proportions Board.tsx's own terrain art uses (a flat-top hex's width). */
+const ART_WIDTH = Math.sqrt(3) * HEX_SIZE;
 
 export interface EditorMarker {
   hexId: HexId;
@@ -82,6 +106,10 @@ function computeHexGeometry(hex: Hex) {
 }
 
 export function EditorBoard({ hexes, markers = [], highlightedHexIds, onHexClick, rotationClusters = [] }: EditorBoardProps) {
+  // Unique per mounted EditorBoard instance (several can render at once — the
+  // Map section, a Reinforcements wave's mini-board, an Exit Zone card, ...) —
+  // combined with each hex's own id below for a globally-unique clipPath id.
+  const instanceId = useId();
   const hexMap = useMemo(() => {
     const m: Record<HexId, Hex> = {};
     for (const h of hexes) m[h.id] = buildHex(h);
@@ -125,17 +153,78 @@ export function EditorBoard({ hexes, markers = [], highlightedHexIds, onHexClick
     return m;
   }, [rotationClusters, hexMap]);
 
-  const viewBox = `${bounds.minX - HEX_SIZE * 0.4} ${bounds.minY - HEX_SIZE * 0.4} ${
-    bounds.maxX - bounds.minX + HEX_SIZE * 0.8
-  } ${bounds.maxY - bounds.minY + HEX_SIZE * 0.8}`;
+  // Mouse-wheel zoom, centered on the cursor, 0.5x-4x — mirrors Board.tsx's
+  // own proven implementation exactly (same StrictMode gotcha applies: never
+  // call `setPan` from inside `setZoom`'s updater, since `<StrictMode>`
+  // double-invokes it and would compound the pan math — read/write a plain
+  // ref and call `setZoom`/`setPan` with already-computed values instead).
+  const svgRef = useRef<SVGSVGElement>(null);
+  const baseX = bounds.minX - HEX_SIZE * 0.4;
+  const baseY = bounds.minY - HEX_SIZE * 0.4;
+  const baseWidth = bounds.maxX - bounds.minX + HEX_SIZE * 0.8;
+  const baseHeight = bounds.maxY - bounds.minY + HEX_SIZE * 0.8;
+  const [zoom, setZoom] = useState(1);
+  const [pan, setPan] = useState({ x: baseX, y: baseY });
+  const viewRef = useRef({ zoom, pan });
+  const MIN_ZOOM = 0.5;
+  const MAX_ZOOM = 4;
+  useEffect(() => {
+    const svg = svgRef.current;
+    if (!svg) return;
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      const pt = svg.createSVGPoint();
+      pt.x = e.clientX;
+      pt.y = e.clientY;
+      const ctm = svg.getScreenCTM();
+      if (!ctm) return;
+      const cursor = pt.matrixTransform(ctm.inverse());
+      const { zoom: prevZoom, pan: prevPan } = viewRef.current;
+      const factor = e.deltaY < 0 ? 1.15 : 1 / 1.15;
+      const nextZoom = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, prevZoom * factor));
+      if (nextZoom === prevZoom) return;
+      const prevViewW = baseWidth / prevZoom;
+      const prevViewH = baseHeight / prevZoom;
+      const fracX = (cursor.x - prevPan.x) / prevViewW;
+      const fracY = (cursor.y - prevPan.y) / prevViewH;
+      const nextViewW = baseWidth / nextZoom;
+      const nextViewH = baseHeight / nextZoom;
+      const nextPan = { x: cursor.x - fracX * nextViewW, y: cursor.y - fracY * nextViewH };
+      setZoom(nextZoom);
+      setPan(nextPan);
+    };
+    svg.addEventListener('wheel', onWheel, { passive: false });
+    return () => svg.removeEventListener('wheel', onWheel);
+  }, [baseWidth, baseHeight]);
+  viewRef.current = { zoom, pan };
+
+  const viewBox = `${pan.x} ${pan.y} ${baseWidth / zoom} ${baseHeight / zoom}`;
 
   const renderHex = (hex: Hex, counterRotate?: number) => {
     const { center, corners, pts } = computeHexGeometry(hex);
     const highlighted = highlightedHexIds?.has(hex.id);
     const hexMarkers = markersByHex.get(hex.id) ?? [];
+    const art = artForTerrain(hex.terrain);
+    const clipId = `${instanceId}-terrain-clip-${hex.id}`;
     return (
       <g key={hex.id}>
         <polygon points={pts} fill={TERRAIN_FILL[hex.terrain]} stroke={HEX_STROKE} strokeWidth={1} />
+        <defs>
+          <clipPath id={clipId}>
+            <polygon points={pointsAttr(corners.map((p) => ({ x: p.x - center.x, y: p.y - center.y })))} />
+          </clipPath>
+        </defs>
+        <g transform={`translate(${center.x},${center.y})`} clipPath={`url(#${clipId})`}>
+          <image
+            href={art}
+            x={-ART_WIDTH / 2}
+            y={-HEX_SIZE}
+            width={ART_WIDTH}
+            height={2 * HEX_SIZE}
+            preserveAspectRatio="xMidYMid slice"
+            pointerEvents="none"
+          />
+        </g>
         {hex.road && <circle cx={center.x} cy={center.y} r={HEX_SIZE * 0.06} fill="#9c8456" pointerEvents="none" />}
         {hex.walls.map(
           (has, i) =>
@@ -192,7 +281,7 @@ export function EditorBoard({ hexes, markers = [], highlightedHexIds, onHexClick
   }
 
   return (
-    <svg viewBox={viewBox} width="100%" height="100%" style={{ maxHeight: '70vh' }}>
+    <svg ref={svgRef} viewBox={viewBox} width="100%" height="100%" style={{ maxHeight: '70vh' }}>
       <g>{plainHexes.map((hex) => renderHex(hex))}</g>
       {[...byCluster.entries()].map(([key, { rotation, pivot, hexes: clusterHexes }]) => (
         <g key={key} transform={`rotate(${rotation} ${pivot.x} ${pivot.y})`}>
@@ -201,4 +290,30 @@ export function EditorBoard({ hexes, markers = [], highlightedHexIds, onHexClick
       ))}
     </svg>
   );
+}
+
+/**
+ * Every screen that shows a board built from `assembledMap()` needs the same
+ * "the multi-board config is invalid right now" handling — an empty canvas
+ * with no explanation reads as a rendering bug, not a setting to fix (this
+ * exact confusion happened live: a missing/mismatched `attachTo` produced a
+ * blank board that looked like the terrain-image feature had broken). This
+ * wrapper shows a large, impossible-to-miss message in the board's own space
+ * instead of silently rendering nothing.
+ */
+export function EditorBoardOrError({
+  error,
+  ...boardProps
+}: EditorBoardProps & { error: string | null }) {
+  if (error) {
+    return (
+      <div className="editor__map-error">
+        <div className="editor__map-error__inner">
+          <div className="editor__map-error__title">⚠ Map configuration invalid — nothing to show</div>
+          <div className="editor__map-error__detail">{error}</div>
+        </div>
+      </div>
+    );
+  }
+  return <EditorBoard {...boardProps} />;
 }

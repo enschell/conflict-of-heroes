@@ -1019,7 +1019,7 @@ button.link {
   background: #1b1d16;
   color: #d9d4bd;
   font-family: ui-monospace, 'SF Mono', Menlo, monospace;
-  font-size: 12.5px;
+  font-size: 18.8px;
 }
 .editor * {
   box-sizing: border-box;
@@ -1035,14 +1035,14 @@ button.link {
   padding: 0.9rem 0;
 }
 .editor__brand {
-  font-size: 11px;
+  font-size: 16.5px;
   font-weight: 700;
   letter-spacing: 0.14em;
   color: #c9a04a;
   padding: 0 0.9rem 0.4rem;
 }
 .editor__mission-title {
-  font-size: 13px;
+  font-size: 19.5px;
   color: #e5e0c9;
   padding: 0 0.9rem;
   white-space: nowrap;
@@ -1050,7 +1050,7 @@ button.link {
   text-overflow: ellipsis;
 }
 .editor__draft-caption {
-  font-size: 10px;
+  font-size: 15px;
   color: #6e6c56;
   padding: 0.2rem 0.9rem 0.8rem;
 }
@@ -1067,7 +1067,7 @@ button.link {
   border-left: 2px solid transparent;
   color: #a09c81;
   font-family: inherit;
-  font-size: 12.5px;
+  font-size: 18.8px;
   padding: 0.55rem 0.9rem;
   cursor: pointer;
 }
@@ -1087,7 +1087,7 @@ button.link {
   transform: translateY(-50%);
   background: #2a2c20;
   color: #8b8871;
-  font-size: 9px;
+  font-size: 13.5px;
   padding: 2px 6px;
 }
 .editor__exit {
@@ -1114,7 +1114,7 @@ button.link {
   padding: 0.6rem 1rem;
 }
 .editor__topbar-label {
-  font-size: 11px;
+  font-size: 16.5px;
   text-transform: uppercase;
   letter-spacing: 0.12em;
   color: #8b8871;
@@ -1138,12 +1138,12 @@ button.link {
 }
 .editor__section h3 {
   color: #eee0bb;
-  font-size: 13px;
+  font-size: 19.5px;
   margin: 1.1rem 0 0.4rem;
 }
 .editor__section h4 {
   color: #c7c2a5;
-  font-size: 12px;
+  font-size: 18px;
   margin: 0.8rem 0 0.3rem;
 }
 .editor__title-input {
@@ -1153,7 +1153,7 @@ button.link {
   border-bottom: 1px solid #3a3d2e;
   color: #eee0bb;
   font-family: inherit;
-  font-size: 17px;
+  font-size: 25.5px;
   font-weight: 700;
   padding: 0.3rem 0;
   margin-bottom: 0.8rem;
@@ -1162,7 +1162,7 @@ button.link {
   display: flex;
   flex-direction: column;
   gap: 0.2rem;
-  font-size: 9.5px;
+  font-size: 14.3px;
   text-transform: uppercase;
   letter-spacing: 0.08em;
   color: #8b8871;
@@ -1176,7 +1176,7 @@ button.link {
   border: 1px solid #3a3d2e;
   color: #c7c2a5;
   font-family: inherit;
-  font-size: 12.5px;
+  font-size: 18.8px;
   padding: 0.35rem 0.5rem;
 }
 .editor__field-label textarea {
@@ -1214,13 +1214,13 @@ button.link {
   background: #b4553c;
 }
 .editor__side-label {
-  font-size: 13px;
+  font-size: 19.5px;
   font-weight: 700;
   color: #eee0bb;
 }
 .editor__initiative-badge {
   margin-left: auto;
-  font-size: 9px;
+  font-size: 13.5px;
   background: #2a2c20;
   color: #c9a04a;
   padding: 2px 6px;
@@ -1233,7 +1233,7 @@ button.link {
 .editor__stat-box {
   display: flex;
   flex-direction: column;
-  font-size: 9.5px;
+  font-size: 14.3px;
   text-transform: uppercase;
   color: #8b8871;
   flex: 1;
@@ -1242,7 +1242,7 @@ button.link {
   background: transparent;
   border: none;
   color: #c9a04a;
-  font-size: 15px;
+  font-size: 22.5px;
   font-weight: 700;
   text-align: right;
   font-family: inherit;
@@ -1257,7 +1257,7 @@ button.link {
   background: #262918;
   border: 1px solid #48513f;
   color: #d9d4bd;
-  font-size: 11px;
+  font-size: 16.5px;
   padding: 0.15rem 0.4rem;
   display: inline-flex;
   align-items: center;
@@ -1278,7 +1278,7 @@ button.link {
   background: transparent;
   border: 1px dashed #48513f;
   color: #8b8871;
-  font-size: 10px;
+  font-size: 15px;
   font-family: inherit;
 }
 .editor__bottom-row {
@@ -1298,7 +1298,7 @@ button.link {
   background: transparent;
   border: none;
   color: #c9a04a;
-  font-size: 26px;
+  font-size: 39px;
   font-weight: 700;
   font-family: inherit;
   width: 4rem;
@@ -1325,7 +1325,7 @@ button.link {
 }
 .editor__caption {
   color: #6e6c56;
-  font-size: 10.5px;
+  font-size: 15.8px;
   font-style: italic;
 }
 
@@ -1381,7 +1381,7 @@ button.link {
   display: flex;
   flex-direction: column;
   gap: 0.25rem;
-  font-size: 11.5px;
+  font-size: 17.3px;
 }
 .editor__placed-list li {
   display: flex;
@@ -1409,7 +1409,7 @@ button.link {
   display: flex;
   flex-direction: column;
   gap: 0.4rem;
-  max-height: 260px;
+  max-height: 556px; /* ~6 unit cards at the current (1.5x-scaled) text size */
   overflow: auto;
 }
 .editor__unit-card {
@@ -1426,7 +1426,7 @@ button.link {
 .editor__unit-card-head {
   display: flex;
   justify-content: space-between;
-  font-size: 12px;
+  font-size: 18px;
 }
 .editor__unit-name {
   font-weight: 700;
@@ -1434,12 +1434,12 @@ button.link {
 }
 .editor__unit-nation {
   color: #8b8871;
-  font-size: 10px;
+  font-size: 15px;
   text-transform: uppercase;
 }
 .editor__unit-stats {
   color: #a09c81;
-  font-size: 10.5px;
+  font-size: 15.8px;
   margin-top: 0.2rem;
 }
 .editor__unit-add {
@@ -1457,14 +1457,14 @@ button.link {
 }
 .editor__status-line {
   color: #c7c2a5;
-  font-size: 11px;
+  font-size: 16.5px;
 }
 
 .editor__table {
   width: 100%;
   border-collapse: collapse;
   margin-top: 1rem;
-  font-size: 11.5px;
+  font-size: 17.3px;
 }
 .editor__table th,
 .editor__table td {
@@ -1475,7 +1475,7 @@ button.link {
 .editor__table th {
   color: #8b8871;
   text-transform: uppercase;
-  font-size: 9.5px;
+  font-size: 14.3px;
 }
 .editor__table button {
   background: none;
@@ -1495,7 +1495,7 @@ button.link {
   display: flex;
   align-items: center;
   gap: 0.6rem;
-  font-size: 11.5px;
+  font-size: 17.3px;
 }
 .editor__wave-summary strong {
   color: #eee0bb;
@@ -1520,11 +1520,11 @@ button.link {
 }
 .editor__hex-echo {
   color: #a09c81;
-  font-size: 10.5px;
+  font-size: 15.8px;
 }
 .editor__warning {
   color: #d8b25c;
-  font-size: 11px;
+  font-size: 16.5px;
 }
 
 .editor__add-row {
@@ -1563,7 +1563,7 @@ button.link {
 .editor__victory-hex {
   color: #c9a04a;
   font-weight: 700;
-  font-size: 14px;
+  font-size: 21px;
 }
 .editor__override-panel {
   flex-basis: 100%;
@@ -1578,7 +1578,7 @@ button.link {
   display: flex;
   gap: 0.6rem;
   align-items: center;
-  font-size: 10.5px;
+  font-size: 15.8px;
 }
 
 .editor__warning-banner {
@@ -1588,11 +1588,42 @@ button.link {
   padding: 0.6rem 0.8rem;
   margin-bottom: 0.8rem;
 }
+/* Renders IN PLACE of the board itself when the multi-board config is
+   invalid (e.g. missing attachTo, mismatched edges) — an empty canvas plus a
+   small text warning elsewhere reads as "the board broke," not "fix this
+   setting," so this fills the board's own space and can't be missed. */
+.editor__map-error {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  min-height: 320px;
+  background: #2a2410;
+  border: 1px solid #55491f;
+  color: #eee0bb;
+  padding: 1.5rem;
+}
+.editor__map-error__inner {
+  max-width: 480px;
+}
+.editor__map-error__title {
+  font-size: 21px;
+  font-weight: 700;
+  color: #d8b25c;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin-bottom: 0.5rem;
+}
+.editor__map-error__detail {
+  font-size: 18px;
+  color: #c7c2a5;
+  line-height: 1.5;
+}
 .editor__round-checks {
   display: flex;
   flex-wrap: wrap;
   gap: 0.5rem;
-  font-size: 11px;
+  font-size: 16.5px;
 }
 .editor__checklist {
   list-style: none;
@@ -1601,7 +1632,7 @@ button.link {
   display: flex;
   flex-direction: column;
   gap: 0.2rem;
-  font-size: 11.5px;
+  font-size: 17.3px;
 }
 .editor__empty {
   color: #6e6c56;

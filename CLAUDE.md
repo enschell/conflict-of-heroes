@@ -341,6 +341,60 @@ Live-testing §C surfaced four real gaps, all now shipped:
   correctly afterward** in the live game, confirming none of these engine changes disturbed it. Full
   suite (typecheck/457 tests/build/conformance 0 violations) green throughout.
 
+### C's Phase 3 (built): real terrain images, invalid-config UX, readability/zoom polish
+
+Live-testing Phase 2 surfaced more real gaps, all closed:
+
+- **`EditorBoard.tsx` now renders real terrain art** (`public/assets/terrain/*.png|svg`) clipped into
+  each hex — same technique the live game's `Board.tsx` uses (a per-hex `<clipPath>` + `<image>`,
+  `TERRAIN_FILL` kept underneath as a fallback) — instead of flat colors. A small, self-contained
+  `EDITOR_TERRAIN_ART` map (NOT a reuse of `data/hexArt.ts`, which the live game depends on and has a
+  pre-existing `road: '.../road.png'` bug — that file doesn't exist on disk, only `road.svg` does);
+  `open.png` is the explicit default for any terrain without a mapped asset.
+- **A real bug caught live, since fixed:** the user reported "the image tiles are now not rendering"
+  after adding a second board. Root cause: NOT an image bug at all — an incomplete/invalid multi-board
+  config (missing `attachTo`, or a mismatched edge combination) makes `assembledMap()` return zero
+  hexes, and the *entire* board area rendered blank with only a small, easy-to-miss text warning
+  elsewhere on the page — which read as "the images broke." Fixed with a new shared
+  `EditorBoardOrError` wrapper (`EditorBoard.tsx`) that renders a large, impossible-to-miss panel
+  (`.editor__map-error`) directly in the board's own space — "⚠ Map configuration invalid — nothing to
+  show" + the exact reason — instead of silently rendering nothing. Applied everywhere a board depends
+  on the merged map (Map, Starting Forces, Reinforcements, the Exit Zones board in Victory Conditions),
+  not just the Map section, since all four would otherwise go silently blank the same way.
+- **Readability: every font-size under the editor's CSS scope (`src/styles.css`, the `.editor` block
+  through EOF) scaled 1.5×** (36 rules), per user request ("too hard to see"). Done with a small Node
+  script rather than by hand — worth remembering the gotcha it hit: `styles.css` uses CRLF line
+  endings, and a naive `.match(/.../)` regex silently failed on every line because JS's `.` doesn't
+  match `\r` by default — the fix explicitly captured an optional trailing `\r?` instead of relying on
+  `.*` to consume it. A blanket `.editor { font-size: 1.5em }` wouldn't have worked either, since every
+  descendant sets its own explicit `px` value (per the design tokens table) — scaling had to touch
+  each declared value individually, not rely on inheritance.
+- **`.editor__unit-list` (`StartingForcesSection`'s catalog picker) now shows exactly 6 unit cards
+  before scrolling**, per user request — `max-height: 556px` (up from 260px, since font scaling above
+  grew each card too), measured live rather than guessed (a temporary in-page script counted actually-
+  visible cards against candidate heights until exactly 6 landed cleanly with no partial 7th peeking).
+- **Mouse-wheel zoom, 0.5×–4×, on every board in the editor** (Map, Starting Forces, Reinforcements,
+  Exit Zones) — added directly to the shared `EditorBoard.tsx` component so every section gets it for
+  free from one implementation. Deliberately mirrors `ui/Board.tsx`'s own already-debugged
+  implementation exactly, including the exact StrictMode gotcha it already documents: never call
+  `setPan` from inside `setZoom`'s updater function, since `<StrictMode>` (`main.tsx`) double-invokes
+  it and would compound the pan math — read/write a plain ref and call `setZoom`/`setPan` with
+  already-computed plain values instead. `EditorBoard`'s own bounds-derived base viewBox (rather than
+  `Board.tsx`'s `computeLayout`) needed its own base-pan offset (`baseX`/`baseY` from `playableBounds`,
+  since unlike the live board this one's natural viewBox origin isn't already near `(0,0)` — a
+  180°-rotated board's hexes can land at very negative axial coordinates). **Verification note:**
+  synthetic `dispatchEvent(new WheelEvent(...))` calls did NOT reproduce real wheel behavior at all
+  (zero effect, silently) — real, physical `computer` mouse-scroll actions were required to actually
+  exercise the listener; confirmed precisely by reading the SVG's own `viewBox` attribute before/after
+  (not just screenshots) — one tick matched the expected 1.15× factor exactly, and clamping was
+  confirmed exact at both 4.0× and 0.5×.
+- **Verified live in-browser**: terrain images render correctly at default state, after switching maps,
+  and across a rotated 2-board merge; the invalid-config panel reproduces on demand and clears the
+  instant the config is fixed, consistently across all four sections; 6 unit cards visible with a
+  working scrollbar; zoom exercised end-to-end via real mouse-wheel actions with exact viewBox
+  measurements at each clamp boundary. Full suite (typecheck/457 tests/build/conformance 0 violations)
+  green throughout; zero console errors in every check.
+
 ---
 
 ## 0. Continuing in a new session (handoff)

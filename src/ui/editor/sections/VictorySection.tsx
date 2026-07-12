@@ -1,7 +1,7 @@
 import { useMemo } from 'react';
 import { assembledMap, useEditorStore } from '../../../state/editorStore';
 import { UNIT_TEMPLATES } from '../../../data/units';
-import { EditorBoard } from '../EditorBoard';
+import { EditorBoardOrError } from '../EditorBoard';
 
 export function VictorySection() {
   const victory = useEditorStore((s) => s.victory);
@@ -22,7 +22,7 @@ export function VictorySection() {
   const placed = useEditorStore((s) => s.forces.placed);
   const waves = useEditorStore((s) => s.reinforcements.waves);
   const map = useEditorStore((s) => s.map);
-  const mapHexes = useMemo(() => assembledMap(map).hexes, [map]);
+  const { hexes: mapHexes, error: mapError } = useMemo(() => assembledMap(map), [map]);
 
   const allUnits = [
     ...placed.map((p) => ({ id: p.id, label: `${UNIT_TEMPLATES[p.templateId]?.name ?? p.templateId} (${p.id})` })),
@@ -209,7 +209,8 @@ export function VictorySection() {
               <button onClick={() => removeExitZone(z.id)}>× Remove Zone</button>
             </div>
             <div className="editor__map-board editor__map-board--small">
-              <EditorBoard
+              <EditorBoardOrError
+                error={mapError}
                 hexes={mapHexes}
                 highlightedHexIds={new Set(z.hexIds)}
                 onHexClick={(hex) => toggleExitZoneHex(z.id, hex)}

@@ -3,7 +3,7 @@ import { assembledMap, useEditorStore } from '../../../state/editorStore';
 import type { EditorWave } from '../../../state/editorStore';
 import { UNIT_TEMPLATES } from '../../../data/units';
 import { hexesConnected } from '../../../engine';
-import { EditorBoard } from '../EditorBoard';
+import { EditorBoardOrError } from '../EditorBoard';
 import { UnitPicker } from '../UnitPicker';
 import { FACING_LABELS } from '../constants';
 import type { Facing, SideId } from '../../../engine/types';
@@ -19,7 +19,7 @@ function WaveCard({ side, wave }: { side: SideId; wave: EditorWave }) {
   const reinf = useEditorStore((s) => s.reinforcements);
   const setReinf = useEditorStore((s) => s.setReinf);
   const map = useEditorStore((s) => s.map);
-  const mapHexes = useMemo(() => assembledMap(map).hexes, [map]);
+  const { hexes: mapHexes, error: mapError } = useMemo(() => assembledMap(map), [map]);
 
   const expanded = expandedWaveId === wave.id;
   const connected = hexesConnected(wave.entryHexIds);
@@ -90,7 +90,12 @@ function WaveCard({ side, wave }: { side: SideId; wave: EditorWave }) {
             ))}
           </ul>
           <div className="editor__map-board editor__map-board--small">
-            <EditorBoard hexes={mapHexes} highlightedHexIds={highlighted} onHexClick={(hex) => toggleWaveHex(side, wave.id, hex)} />
+            <EditorBoardOrError
+              error={mapError}
+              hexes={mapHexes}
+              highlightedHexIds={highlighted}
+              onHexClick={(hex) => toggleWaveHex(side, wave.id, hex)}
+            />
           </div>
           <p className="editor__hex-echo">Entry Hexes: {wave.entryHexIds.join(', ') || '(none selected)'}</p>
           {!connected && wave.entryHexIds.length > 1 && (

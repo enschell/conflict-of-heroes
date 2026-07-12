@@ -3,7 +3,7 @@ import { assembledMap, assembledRotationClusters, useEditorStore } from '../../.
 import type { EditorBoard as EditorBoardEntry, MapTool } from '../../../state/editorStore';
 import { MAP_CATALOG, mapById } from '../../../data/maps/catalog';
 import { SIDE_COLOR } from '../../theme';
-import { EditorBoard, type EditorMarker } from '../EditorBoard';
+import { EditorBoardOrError, type EditorMarker } from '../EditorBoard';
 import { FACING_LABELS } from '../constants';
 import type { Facing } from '../../../engine/types';
 import type { BoardEdge, Rotation } from '../../../engine';
@@ -171,7 +171,6 @@ export function MapSection() {
           + Add Board
         </button>
       </div>
-      {error && <p className="editor__warning">⚠ {error}</p>}
       <em className="editor__caption">
         Real boards — terrain painting is a separate, not-yet-built tool. Multiple boards may be independently
         rotated and abutted (§C); 0°/180° boards freely mix with each other, and 90°/-90° boards freely mix with
@@ -179,7 +178,13 @@ export function MapSection() {
       </em>
       <div className="editor__map-body">
         <div className="editor__map-board">
-          <EditorBoard hexes={hexes} markers={markers} onHexClick={paintMapHex} rotationClusters={clusters} />
+          <EditorBoardOrError
+            error={error}
+            hexes={hexes}
+            markers={markers}
+            onHexClick={paintMapHex}
+            rotationClusters={clusters}
+          />
         </div>
         <div className="editor__map-tools">
           <div className="editor__tool-group">
