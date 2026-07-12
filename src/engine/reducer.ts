@@ -34,7 +34,7 @@ import { RALLY_AP_COST, rollRally } from './rally';
 import { legalEntryHexes } from './reinforcements';
 import { spentCheck } from './spent';
 import { endRound, switchTurn } from './turn';
-import { gainVp, otherSide, updateVictoryHexControl } from './victory';
+import { gainVp, otherSide, updateVictoryHexControl, vpPerKillFor } from './victory';
 import type {
   Action,
   DRColor,
@@ -172,8 +172,9 @@ export function reduce(state: GameState, action: Action): ReduceResult {
     if (unit.carriedBy) delete unit.carriedBy;
     const tmpl = templateOf(next, unit);
     const opp = otherSide(unit.side);
-    // §9.1: VP to the destroyer (flat per-Mission value if set) + step the no-tie marker.
-    const killVp = next.victory.vpPerKill ?? tmpl.vp;
+    // §9.1: VP to the destroyer — a specific-Unit override (Mission-authored) beats the
+    // flat/per-side value, which beats the Unit's own template vp — then step the no-tie marker.
+    const killVp = next.victory.unitKillVp?.[unit.id] ?? vpPerKillFor(next.victory, opp) ?? tmpl.vp;
     gainVp(next, opp, killVp);
     // §16.1: destroyed Trucks/Wagons do not adjust the CAPs Track (still count for VP above).
     if (!tmpl.noCapLossOnDestroy) applyUnitLoss(next.players[unit.side]);
@@ -1122,6 +1123,33 @@ export function reduce(state: GameState, action: Action): ReduceResult {
     return finish();
   };
 
+  /**
+   * Exit the Map via a Mission-authored exit zone (§4.0 — Mission-specific).
+   * Costs the Unit's own move stat as AP, a real Spent Check like a Move.
+   * VP goes to the exiting Unit's own side, not the opponent (§9.1, Mission-authored).
+   */
+  const doExit = (a: Extract<Action, { type: 'EXIT' }>): ReduceResult => {
+    const unit = next.units[a.unitId];
+    if (!unit) return deny('no such unit');
+    if (unit.side !== next.currentSide) return deny('not your turn');
+    if (unit.carriedBy) return deny('a transported Unit cannot Exit on its own');
+    const eff = effectiveStats(next, unit);
+    if (!eff.canMove) return deny('this Unit cannot act (§7.4)');
+    const zone = next.exitZones.find((z) => z.side === unit.side && z.hexIds.includes(unit.hexId));
+    if (!zone) return deny('this Unit is not on one of its side\'s designated exit Hexes');
+    const player = next.players[unit.side];
+    const { cost, capsSpent } = planCost(unit, eff.move, a.capCostReduce ?? 0);
+    if (unit.status === 'spent' && cost > 0)
+      return deny('a Spent unit must spend CAPs to reduce its Action Cost to 0AP (§3.4)');
+    if (player.capCurrent < capsSpent) return deny('not enough CAP');
+    player.capCurrent -= capsSpent;
+    delete next.units[unit.id];
+    gainVp(next, unit.side, zone.vpPerUnit);
+    log('exit', `${unit.id} exits the Map via ${zone.id} (+${zone.vpPerUnit} VP to ${unit.side})`, unit.side);
+    afterAction(unit, cost);
+    return finish();
+  };
+
   // -- dispatch -------------------------------------------------------------
 
   switch (action.type) {
@@ -1159,6 +1187,8 @@ export function reduce(state: GameState, action: Action): ReduceResult {
       return doHastyDefense(action);
     case 'REMOVE_HASTY_DEFENSE':
       return doRemoveHastyDefense(action);
+    case 'EXIT':
+      return doExit(action);
     case 'PASS':
       return doPass();
     default:

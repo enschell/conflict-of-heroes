@@ -29,6 +29,8 @@ import {
   directionTo,
   idOf,
   legalEntryHexes,
+  vpForRound,
+  vpPerKillFor,
 } from '../src/engine';
 import { lineDraw } from '../src/engine/hex';
 import { TERRAIN } from '../src/data/terrainTypes';
@@ -377,8 +379,9 @@ function playGame(seed: number, style: Style): GameResult {
     let vpToB = 0;
     for (const id of destroyed) {
       const u = pre.units[id]!;
-      const vp = pre.victory.vpPerKill ?? pre.templates[u.templateId]!.vp;
-      if (otherSide(u.side) === 'A') vpToA += vp;
+      const opp = otherSide(u.side);
+      const vp = vpPerKillFor(pre.victory, opp) ?? pre.templates[u.templateId]!.vp;
+      if (opp === 'A') vpToA += vp;
       else vpToB += vp;
     }
     // A Round-ending Pass also awards control VP for each held objective (§9.0).
@@ -386,8 +389,9 @@ function playGame(seed: number, style: Style): GameResult {
     if (roundEnded) {
       for (const vh of post.victory.victoryHexes) {
         const ctrl = post.hexes[vh.hexId]?.features.control;
-        if (ctrl === 'A') vpToA += vh.vp;
-        else if (ctrl === 'B') vpToB += vh.vp;
+        const vp = vpForRound(vh, pre.round);
+        if (ctrl === 'A') vpToA += vp;
+        else if (ctrl === 'B') vpToB += vp;
       }
     }
     check(post.players.A.vp - pre.players.A.vp === vpToA, '9.1', `Side A VP delta ${post.players.A.vp - pre.players.A.vp} != ${vpToA} (kills+control)`);

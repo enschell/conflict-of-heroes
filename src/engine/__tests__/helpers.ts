@@ -42,6 +42,7 @@ export function baseState(seed = 1): GameState {
     hexes: {},
     hitPiles: { foot: makeFootHitPile(), vehicle: makeArmoredHitPile() },
     reinforcements: [],
+    exitZones: [],
     missionId: 'test',
     victory: { victoryHexes: [] },
     log: [],

@@ -167,6 +167,182 @@ presentation changed (a large graphic in its own cell, not a text prefix). Statu
 
 ---
 
+## C. Mission Editor (built)
+
+A visual, in-app tool for authoring a new Mission — no more hand-writing `MapHexDef`/
+`UnitPlacement`/`ReinforcementWaveDef` arrays by hand. Lives at `src/ui/editor/` (open it from
+`SetupScreen`'s "Mission Editor" card), backed by its own small Zustand store
+(`state/editorStore.ts`) that is **deliberately separate** from `state/store.ts` (the live
+`GameState`-driven store) — the editor is authoring data, not a game in progress, and mixing the two
+would bloat/risk the already-large game store for no benefit. `App.tsx` gained a `screen: 'menu' |
+'editor'` store field, checked as the very first branch (before the existing `mode`/`game` checks).
+
+- **Design provenance:** a claude.ai/design "Design Component" handoff bundle at
+  `docs/design_handoff_mission_editor/` (`Mission Editor.dc.html` + `support.js` + a detailed
+  `README.md` spec) — high-fidelity forms, a deliberately low-fidelity placeholder hex grid meant to
+  be replaced with the real board. Reviewed live by the user in a real browser and approved before
+  implementation began.
+- **Scope, confirmed while re-reading the approved design carefully:** the Map section does **not**
+  paint terrain — its "Paint Tool" only ever covers Obstacles (Barbed Wire/Mines/Road Block) and
+  Fortifications (Trench/Bunker). Terrain-authoring is a separate, not-yet-built tool. The Map
+  section is instead a **map picker** (`data/maps/catalog.ts`, seeded with real `MISSION1_MAP` +
+  a freshly generated `BLANK_SINGLE_BOARD` — both the same real 19-column(18 hex-wide)×12-row
+  single-board size `engine/hexBoard.ts`'s `BOARD_COLS`/`BOARD_ROWS` constants fix every board to;
+  there's no "board size" to configure) plus obstacle/fortification painting on top of whichever map
+  is picked. Unit templates are picked from the existing `UNIT_TEMPLATES` catalog only — never
+  authored here (a separate tool for that is planned by the user).
+- **Board rendering — a new `EditorBoard.tsx`, NOT a reuse of the live `Board.tsx`:** `Board.tsx` is
+  hardwired to ~15 `useGame(...)` selectors and a live `GameState`, so a prop-driven
+  `{ hexes, markers?, highlightedHexIds?, onHexClick? }` component was built instead, reusing
+  `ui/hexgeo.ts`'s pure geometry directly (real flat-top rendering, half-hex edges, `A01`..`S12`
+  labels — no placeholder grid). `hexgeo.ts`'s `fringeHexes`/`playableBounds`/`computeLayout` had
+  their `state: GameState` params widened to `Pick<GameState, 'hexes'>` (safe, backward-compatible)
+  so the editor board can call them without a live `GameState`. Obstacle/fortification board markers
+  are simple colored badges for now (matching units) — `EditorBoard.tsx`'s marker rendering is a
+  swappable per-kind lookup (`MARKER_RENDERERS`, keyed e.g. `'obstacle:mines'`) since these are
+  expected to get their own image-backed counter later (the `UnitCounter.tsx` `counterImage`
+  pattern) — a future upgrade is a localized addition to that lookup, not a rewrite.
+- **Export: a real, self-contained TypeScript `MissionDef` source file**, not JSON —
+  `data/editor/emitMissionSource.ts`, a from-scratch JS-value-to-TS-source pretty printer (no
+  `prettier` dependency added, kept minimal on purpose). Inlines the picked map's hexes +
+  obstacle/fortification overrides + unit placements + reinforcement waves as literal data; only
+  `UNIT_TEMPLATES` is imported by reference (matches the existing `hillsSandbox.ts`-style convention
+  — a mission stays in sync with the real catalog instead of duplicating stat blocks). Triggers a
+  browser download (`Blob` + `<a download>`) — no server/dev-only write path, works identically in
+  the deployed build and local dev. Round-trip tested (`data/editor/__tests__/emitMissionSource.test.ts`):
+  generates source from a fixture, strips the one TS-only construct it emits (a non-null assertion),
+  evals the object literal via `new Function`, and feeds the result through the real `initGame` —
+  proving the exported file is genuinely loadable, not just plausible-looking text. The generated
+  file's header comment reminds the author of the still-manual registration steps (import + a
+  `SetupScreen.tsx` button, optionally `data/missions/catalog.ts` for online play) — matching this
+  file's own §7 "Add a mission" convention, not automated.
+- **Victory Conditions became fully real, not inert** — small additive engine changes shipped
+  alongside the editor (all covered by new tests in `engine/__tests__/victory-config.test.ts`):
+  `VictoryHexDef` (renamed from the old inline `{hexId, vp}` shape) gained optional
+  `control?: SideId` (a victory hex's Mission-authored starting owner — `state.ts`'s `initGame` seeds
+  it before the existing sole-occupier check, which still overrides it if a Unit is actually present)
+  and `roundOverrides?: {round, vp}[]` (`turn.ts`'s `endRound` now calls a new `vpForRound` helper
+  instead of always using the flat `vp`); `vpPerKill` widened to
+  `number | Partial<Record<SideId, number>>` for per-side kill VP (`reducer.ts`'s `destroyUnit` calls
+  a new `vpPerKillFor` helper). All additive/optional — every existing Mission's tests passed
+  unchanged.
+- **Cards/Hidden Units/OBA/Air Support stayed inert, as planned** (see §8's M12/M8 entries) —
+  captured in a new `MissionAdvancedNotes` bag on `MissionDef` (`advancedNotes?`), round-tripped
+  losslessly through export, read by nothing yet. The Advanced section's permanent "Coming later —
+  not yet functional in the game engine" warning banner matches the design exactly. **Map rotation is
+  NOT in this inert list** — see the Phase 2 entry below, it shipped for real.
+- **A real gap caught mid-implementation:** `obstacles.ts`'s `rollMinesAttack` defaults an unset Hit
+  Number to 0 (an always-hits mine) — the original design had no Hit Number field for Mines at all.
+  The Map section's tool rail gained a "Mines Hit Number (§17.10)" input (default 8) whenever the
+  Mines tool is selected, to avoid silently shipping broken mines.
+- **Verified live in-browser, full click-through of all 6 sections** (Mission Info, Map, Starting
+  Forces, Reinforcements, Victory Conditions, Advanced): real Mission 1 map rendering (all 216 real
+  labels), obstacle+fortification painting, unit placement with facing, a reinforcement wave with a
+  connected 2-hex entry set (validated via the existing pure `hexesConnected` from `engine/groups.ts`,
+  newly exported from the engine barrel) plus a live check that a scattered 3rd hex correctly
+  triggers the "not one connected group (§4.12)" warning, a victory hex with a starting controller +
+  a per-round VP override, the Advanced section's hidden-units checklist correctly aggregating both
+  starting-forces AND reinforcement-wave units, Export Mission with zero console errors, Exit Editor
+  back to the menu, and — critically — **Mission 1 itself still played correctly afterward**,
+  confirming the engine touches didn't regress the live game. Full suite (typecheck/423 tests/build/
+  conformance 0 violations) green throughout.
+- **Known follow-ups, not yet done:** drag-select/shift-click-range for entry hexes (still
+  click-to-toggle, per the design's own accepted v1 scope); no persistence/localStorage for
+  in-progress editor authoring (a reload loses everything); no validation beyond the victory-hex-label
+  /connectivity checks already built (duplicate placements on one hex, empty required fields, etc.
+  aren't blocked).
+
+### C's Phase 2 (built): multi-board rotation/abutment + richer VP categories
+
+Live-testing §C surfaced four real gaps, all now shipped:
+
+- **Multi-map missions, each map independently rotatable (0°/90°/-90°/180°) and abutted** — the
+  biggest single addition to this project since the original flat-top migration (§B), because it
+  required real, from-scratch hex-grid math nobody had solved here before (the board-geometry spec's
+  own "Orientation" section only ever rotates a WHOLE assembly together, never per-board).
+  **The core finding, derived and numerically verified before any code was written (not just
+  reasoned about): a hexagon has 6-fold rotational symmetry, not 4-fold — a genuine 90°/-90°
+  rotation of a board's own axial coordinates that both preserves adjacency and doesn't mirror the
+  authored content does not exist.** Verified two ways: group theory (the hex lattice's isometry
+  group is exactly D6 — 6 rotations + 6 reflections, no 90° element), and a direct numeric
+  counterexample (rotating one real board's coordinates by the "obvious" 90° matrix broke 432 real
+  adjacencies and created 396 fake ones). New `engine/boardAssembly.ts` (`assembleBoards`,
+  `rotationClusters`) encodes the consequence: **0° and 180° are the only two REAL axial rotations**
+  (0° = identity; 180° = the exact cube-coordinate identity `(q,r) -> (-q,-r)`, since 180° = 3×60° is
+  a genuine hex-tiling symmetry) — these two freely mix with each other, in any abutment. **90°/-90°
+  have no axial equivalent at all**, so a board tagged either one borrows whichever of the two real
+  transforms lets its requested attachment actually merge (tried both, whichever succeeds is used) —
+  the user-visible spin is a **display-only pixel rotation layered on top**, applied per-cluster by
+  `ui/hexgeo.ts`/`EditorBoard.tsx` (rotate that cluster's rendered polygons+labels around the
+  cluster's own center, counter-rotating labels so they stay upright — the same technique
+  `docs/hex_board_spec/Hex Map.dc.html`'s reference prototype already uses for its own whole-assembly
+  rotation, just narrowed from "the whole mission" to "one connected cluster"). **User-facing rotation
+  families are `{0°,180°}` and `{90°,-90°}`** (confirmed with the user) — two boards may only be
+  directly attached if they're in the same family (a `{0°,180°}` board can never touch a
+  `{90°,-90°}` board — their edge lengths become geometrically incompatible after rotation); since
+  every non-anchor board must attach to an already-placed same-family board, an entire `entries` tree
+  is transitively always one single family, so `rotationClusters` only ever returns zero or one
+  cluster, never more. Abutment itself is specified via each board's own LOCAL edge labels
+  (`localEdge`/`neighborLocalEdge`, e.g. "this board's E edge touches that board's E edge") rather
+  than screen-relative directions, sidestepping the whole "which screen direction does a rotated
+  board's edge face" question entirely — `assembleBoards` brute-force-searches for the translation
+  that makes the two specified edges coincide exactly (a true bijection, 0 collisions), rejecting
+  (with a clear thrown error) anything that doesn't. **A real, subtle bug caught and fixed during
+  derivation:** the initial assumption that N/S abutment merges all 19 columns (mirroring E/W's own
+  13-cell full merge) was wrong and caused a translation that satisfied the requested edge's bijection
+  check while ALSO silently overlapping the other board's entire footprint elsewhere (a real Vitest
+  run returned 238 hexes total instead of the expected ~463 — full collision). Root cause: only EVEN
+  columns have a boundary half-hex that merges at a N/S seam (10 of 19); ODD columns are already full
+  top-to-bottom and merely sit adjacent, not merged — confirmed against the existing, already-correct
+  `generateBoardHexes` formula as ground truth. Fixed by restricting `onLocalEdge`'s N/S membership to
+  even columns only, **and** by adding a defensive full-collision check in `assembleBoards` itself (a
+  candidate translation is only accepted if its total collision count exactly matches the intended
+  seam length) so this class of bug can't recur silently. All of this is covered by
+  `engine/__tests__/boardAssembly.test.ts` — numeric adjacency-preservation checks, real E-W/N-S
+  merge-count assertions, a same-family 90°/-90° cluster, and cross-family rejection — written and
+  passing BEFORE any UI touched this, per the plan. The Map section's old single-map `<select>` picker
+  became a real board list (`state/editorStore.ts`'s `EditorMapState.boards: EditorBoard[]`, each with
+  its own map/rotation/attachTo; the merged, obstacle/fortification-overlaid `hexes` is a derived value,
+  `assembledMap()`, never stored directly) — the previously-inert Advanced section's `mapTable` stub
+  was retired outright as redundant now that this is real.
+- **Victory Conditions gained three more categories, all real (not inert), per user request:**
+  (1) **award timing** — `VictoryHexDef.awardTiming?: 'endOfRound' | 'endOfMission'` (default
+  `endOfRound`, unchanged behavior); `turn.ts`'s `endRound` now skips `endOfMission` hexes on every
+  Round except the Mission's actual last one. (2) **specific-Unit destruction VP** —
+  `VictoryConfig.unitKillVp?: Record<UnitId, number>`, checked first in `reducer.ts`'s `destroyUnit`
+  before falling back to the existing `vpPerKillFor`/template-vp chain — overrides the general
+  per-kill value for one named Unit only (e.g. "kill the enemy commander for +9"). (3) **VP for
+  enemy Units surviving to Mission end** — `VictoryConfig.vpPerSurvivor?: number | Partial<Record
+  <SideId, number>>` (same shape as `vpPerKill`), awarded once, in the same last-Round branch as (1),
+  via a new `vpPerSurvivorFor` helper mirroring `vpPerKillFor`. All three are additive/optional;
+  covered by `engine/__tests__/victory-config.test.ts`.
+- **Exit the Map (§4.0) is a new, real gameplay Action — not inert**, since the user wants actual VP
+  earned via actual in-game exits, unlike Cards/Hidden-Units/OBA/Air-Support which stay deliberately
+  inert. `rules/04-position-and-movement.md`'s own "a Unit may never exit the Map, unless specified by
+  a Mission" already delegates this to individual Missions — legitimate Mission-configurable content,
+  not rule-invention. New `MissionDef.exitZones?: ExitZoneDef[]` (`{id, side, hexIds, vpPerUnit,
+  description?}`, one per side, mirroring `ReinforcementWaveDef`'s shape for the reverse direction);
+  new `EXIT` `Action` — costs the Unit's own `move` stat as AP (a real Spent Check, confirmed with the
+  user, same as a plain Move), legal only on one of the Unit's own side's designated exit Hexes
+  (`actions.ts`), removes the Unit from `state.units` with no hit marker/no CAP loss (it's not a
+  loss) and awards `vpPerUnit` to the EXITING Unit's own side, not the opponent (`reducer.ts`'s new
+  `doExit`). Live UI: `Inspector.tsx` gets a Rally/Hasty-Defense-style self-targeted "Exit the Map (N
+  AP, §4.0)" button (3-state: Fresh / Spent-affordable / Spent-unaffordable, matching the existing
+  pattern exactly); `store.ts`'s `exit()` is CAP-gated like `hastyDefense()` (no roll needed). Editor:
+  Victory Conditions section gained an "Exit Zones" sub-section — per-side hex multi-select (reuses
+  the exact multi-select-toggle pattern `ReinforcementsSection.tsx` already built for entry hexes) + a
+  VP-per-unit field + free-text description. Covered by `engine/__tests__/exit.test.ts`.
+- **Verified live in-browser again, this Phase 2 pass**: built a real 2-board mission (Mission 1's
+  real map abutted E-W, via each board's own local E edge, to a rotated-180° blank board) — the merged
+  picture rendered as one seamless, correctly-adjacent rectangle with zero gaps/overlaps; painted an
+  obstacle right at the seam; added an Exit Zone, clicked a hex on the merged board to pick an exit
+  hex, confirmed the "Exit Hexes: …" echo updated correctly; Export Mission completed with zero
+  console errors; and — the same regression check as Phase 1 — **Mission 1 itself still played
+  correctly afterward** in the live game, confirming none of these engine changes disturbed it. Full
+  suite (typecheck/457 tests/build/conformance 0 violations) green throughout.
+
+---
+
 ## 0. Continuing in a new session (handoff)
 
 This repo is self-describing: a fresh session needs only the code + these docs.
@@ -202,7 +378,12 @@ This repo is self-describing: a fresh session needs only the code + these docs.
   the `colRowToAxial` coordinate fix, all verified live incl. the hold-Shift LOS overlay) — it's all
   live, playable content now, not placeholders. §B also has live-tested gotchas (an entry-edge-hex
   trap, the Group-reinforcement-entry UI build, and the sandbox coordinate fixes) worth reading before
-  touching reinforcements/entry-hex/mission-authoring code again.
+  touching reinforcements/entry-hex/mission-authoring code again. Also separate from the v3/M-numbered
+  roadmap: **§C's Mission Editor is built** — a visual in-app tool (`src/ui/editor/`, off
+  `SetupScreen`) for authoring a new Mission (map picker + obstacle/fortification painting, unit
+  placement, reinforcement waves, victory conditions incl. per-round overrides and starting hex
+  control, and an inert Advanced/Future section for Cards/Hidden-Units/OBA/Air-Support) that exports
+  a real, self-contained TypeScript `MissionDef` source file. Read §C before touching it again.
 
 ---
 
@@ -339,10 +520,15 @@ conflict-of-heroes/
       missions/fortificationsSandbox.ts  # non-canonical Fortifications Sandbox test mission (M10 Phase 2) — own map; ✅ same colRowToAxial fix
       missions/hexBoardDemo.ts  # ✅ §B: proves the new flat-top/multi-board substrate — 2 boards, units on the seam
       missions/catalog.ts    # ✅ M13: id -> MissionDef lookup — the online server only ever receives a `missionId` string, never a client-supplied MissionDef
+      maps/catalog.ts        # ✅ §C: Mission Editor's "choose an existing map" picker — id -> MapHexDef[]
+      editor/emitMissionSource.ts  # ✅ §C: authored editor state -> real self-contained TS MissionDef source + browser download
+      editor/__tests__/
       cards/                # deferred to the cards milestone
       __tests__/
     state/  store.ts persistence.ts             # Zustand + localStorage saves; store.ts also owns M13's online dispatch fork (see §8's M13 entry)
+    state/editorStore.ts    # ✅ §C: Mission Editor's own small Zustand store — deliberately separate from store.ts's GameState-driven one
     ui/     …  ReinforcementsPanel.tsx  MinesConfirm.tsx  …  # React + SVG (see §7)
+    ui/editor/  MissionEditor.tsx EditorBoard.tsx UnitPicker.tsx sections/*.tsx  # ✅ §C: the Mission Editor screen
   scripts/  play.ts conformance.ts              # terminal driver + v3 conformance audit
   public/hills-los-mockup.html  # ✅ kept in repo: interactive §12 LOS validator/reference (M9)
 ```

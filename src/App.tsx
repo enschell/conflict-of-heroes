@@ -18,6 +18,7 @@ import { HoverPanel } from './ui/HoverPanel';
 import { Inspector } from './ui/Inspector';
 import { Log } from './ui/Log';
 import { MinesConfirm } from './ui/MinesConfirm';
+import { MissionEditor } from './ui/editor/MissionEditor';
 import { OnlineLobby } from './ui/OnlineLobby';
 import { ReinforcementsPanel } from './ui/ReinforcementsPanel';
 import { SetupScreen } from './ui/SetupScreen';
@@ -48,6 +49,8 @@ export function App() {
   const roomCode = useGame((s) => s.roomCode);
   const peerConnected = useGame((s) => s.peerConnected);
   const leaveOnlineRoom = useGame((s) => s.leaveOnlineRoom);
+  const screen = useGame((s) => s.screen);
+  const closeMissionEditor = useGame((s) => s.closeMissionEditor);
   const [savesOpen, setSavesOpen] = useState(false);
 
   // Hold Shift to preview LOS from the hovered hex; release to hide it.
@@ -81,6 +84,8 @@ export function App() {
       window.removeEventListener('blur', blur);
     };
   }, [setShift, togglePivotPicker]);
+
+  if (screen === 'editor') return <MissionEditor onExit={closeMissionEditor} />;
 
   // M13: still connecting (or the server rejected create/join) — a distinct
   // screen from the normal hotseat menu, not just a blank board.

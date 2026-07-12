@@ -5,7 +5,15 @@ import { capCeiling } from './cap';
 import { roll2d6 } from './rng';
 import { dissipateSmoke } from './smoke';
 import type { GameState, SideId } from './types';
-import { computeWinner, gainVp, otherSide, updateVictoryHexControl, vpLeader } from './victory';
+import {
+  computeWinner,
+  gainVp,
+  otherSide,
+  updateVictoryHexControl,
+  vpForRound,
+  vpLeader,
+  vpPerSurvivorFor,
+} from './victory';
 
 const SIDES: SideId[] = ['A', 'B'];
 
@@ -64,19 +72,43 @@ export function startRound(state: GameState): void {
  */
 export function endRound(state: GameState): void {
   updateVictoryHexControl(state);
+  const isLastRound = state.round >= state.roundsTotal;
   for (const vh of state.victory.victoryHexes) {
+    // 'endOfMission' hexes only ever score once, at the Mission's real final
+    // Round-end — never on an intermediate Round (§9.1, Mission-authored).
+    if (vh.awardTiming === 'endOfMission' && !isLastRound) continue;
     const ctrl = state.hexes[vh.hexId]?.features.control;
     if (ctrl) {
-      gainVp(state, ctrl, vh.vp);
+      const vp = vpForRound(vh, state.round);
+      gainVp(state, ctrl, vp);
       state.log.push({
         type: 'vp',
         round: state.round,
         side: ctrl,
-        text: `Side ${ctrl} controls ${vh.hexId}: +${vh.vp} VP (end of Round ${state.round})`,
+        text: `Side ${ctrl} controls ${vh.hexId}: +${vp} VP (${
+          vh.awardTiming === 'endOfMission' ? 'end of Mission' : `end of Round ${state.round}`
+        })`,
       });
     }
   }
-  if (state.round >= state.roundsTotal) {
+  if (isLastRound) {
+    // §9.1 (Mission-authored): VP for enemy Units still on the Map at Mission end.
+    for (const side of SIDES) {
+      const rate = vpPerSurvivorFor(state.victory, side);
+      if (!rate) continue;
+      const opp = otherSide(side);
+      const survivors = Object.values(state.units).filter((u) => u.side === opp).length;
+      if (survivors > 0) {
+        const vp = rate * survivors;
+        gainVp(state, side, vp);
+        state.log.push({
+          type: 'vp',
+          round: state.round,
+          side,
+          text: `Side ${side}: +${vp} VP for ${survivors} enemy Unit(s) remaining (Mission end)`,
+        });
+      }
+    }
     state.phase = 'gameOver';
     state.winner = computeWinner(state);
     return;

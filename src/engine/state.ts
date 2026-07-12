@@ -16,7 +16,8 @@ import type {
   UnitTemplate,
 } from './types';
 
-function buildHex(def: FirefightDef['hexes'][number]): Hex {
+/** Authored `MapHexDef` -> runtime `Hex` (also reused by the Mission Editor's board preview). */
+export function buildHex(def: FirefightDef['hexes'][number]): Hex {
   const walls = new Array(6).fill(false) as boolean[];
   for (const w of def.walls ?? []) walls[w] = true;
   const parts = def.id.split(',');
@@ -120,12 +121,26 @@ export function initGame(def: FirefightDef): GameState {
     // Soft Target (foot) and Armored Target (vehicle) draw piles (§7.5, §15.13).
     hitPiles: { foot: footPile, vehicle: makeArmoredHitPile() },
     reinforcements,
+    exitZones: def.exitZones ?? [],
     missionId: def.id,
-    victory: { victoryHexes: def.victoryHexes, vpPerKill: def.vpPerKill },
+    victory: {
+      victoryHexes: def.victoryHexes,
+      vpPerKill: def.vpPerKill,
+      unitKillVp: def.unitKillVp,
+      vpPerSurvivor: def.vpPerSurvivor,
+    },
     log: [],
   };
 
-  // Set victory-hex control to the initial sole occupier, then start round 1.
+  // Set victory-hex control: the Mission-authored starting owner is the
+  // default, then the initial sole occupier (§9.1) overrides it if a Unit is
+  // actually present — then start round 1.
+  for (const vh of state.victory.victoryHexes) {
+    if (vh.control) {
+      const hex = state.hexes[vh.hexId];
+      if (hex) hex.features.control = vh.control;
+    }
+  }
   for (const vh of state.victory.victoryHexes) {
     const occ = Object.values(state.units).filter((u) => u.hexId === vh.hexId);
     const sides = new Set(occ.map((u) => u.side));

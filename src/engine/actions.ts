@@ -85,6 +85,10 @@ export function modifiedActionCost(state: GameState, action: Action): number | n
     }
     case 'REMOVE_HASTY_DEFENSE':
       return 0;
+    case 'EXIT': {
+      const u = state.units[action.unitId];
+      return u ? effectiveStats(state, u).move + stress(u) : null;
+    }
     default:
       return null;
   }
@@ -258,6 +262,12 @@ export function legalActionsForUnit(state: GameState, unitId: UnitId): Action[] 
   }
   // §17.6: free at-will removal, always legal whenever the marker is up.
   if (unit.hastyDefense) actions.push({ type: 'REMOVE_HASTY_DEFENSE', unitId });
+
+  // Exit the Map (§4.0, Mission-authored): legal only on one of this Unit's own
+  // side's designated exit Hexes.
+  if (eff.canMove && !carried && state.exitZones.some((z) => z.side === unit.side && z.hexIds.includes(unit.hexId))) {
+    if (actionable(eff.move)) actions.push({ type: 'EXIT', unitId, ...cr(eff.move) });
+  }
 
   // Stall (§2.8): the Unit does nothing but makes a Spent Check and is Stressed.
   if (actionable(1)) actions.push({ type: 'STALL', unitId, ...cr(1) });

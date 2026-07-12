@@ -2,10 +2,29 @@
  * Victory points and victory-hex control (rulebook §2.4, §2.5).
  */
 import { templateOf } from './hits';
-import type { GameState, SideId } from './types';
+import type { GameState, SideId, VictoryConfig, VictoryHexDef } from './types';
 
 export function otherSide(s: SideId): SideId {
   return s === 'A' ? 'B' : 'A';
+}
+
+/** VP a victory hex is worth this Round: a `roundOverrides` entry for `round`, else its base `vp`. */
+export function vpForRound(vh: VictoryHexDef, round: number): number {
+  return vh.roundOverrides?.find((o) => o.round === round)?.vp ?? vh.vp;
+}
+
+/** VP per enemy Unit destroyed, for the side gaining it — supports the plain-number and per-side forms. */
+export function vpPerKillFor(victory: VictoryConfig, side: SideId): number | undefined {
+  const v = victory.vpPerKill;
+  if (v == null) return undefined;
+  return typeof v === 'number' ? v : v[side];
+}
+
+/** VP per enemy Unit still on the Map at Mission end, for `side` — same shape as `vpPerKillFor`. */
+export function vpPerSurvivorFor(victory: VictoryConfig, side: SideId): number | undefined {
+  const v = victory.vpPerSurvivor;
+  if (v == null) return undefined;
+  return typeof v === 'number' ? v : v[side];
 }
 
 /**

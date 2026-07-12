@@ -133,7 +133,7 @@ export function polygonTopY(poly: Pt[]): number {
  * is already a clean rectangle via `edgeCut`, so this matters only for
  * hand-authored maps that don't fill a whole board.
  */
-export function fringeHexes(state: GameState): HexId[] {
+export function fringeHexes(state: Pick<GameState, 'hexes'>): HexId[] {
   const playable = new Set(Object.keys(state.hexes));
   const fringe = new Set<HexId>();
   for (const id of playable) {
@@ -153,7 +153,7 @@ export interface Bounds {
 }
 
 /** Bounding box (hex-corner inclusive) of just the PLAYABLE hexes — the clip edge. */
-export function playableBounds(state: GameState, size = HEX_SIZE): Bounds {
+export function playableBounds(state: Pick<GameState, 'hexes'>, size = HEX_SIZE): Bounds {
   let minX = Infinity;
   let minY = Infinity;
   let maxX = -Infinity;
@@ -181,7 +181,7 @@ export interface Layout {
  * area aren't cut off by the viewBox.
  */
 export function computeLayout(
-  state: GameState,
+  state: Pick<GameState, 'hexes'>,
   size = HEX_SIZE,
   pad = size * 0.7,
   extra: HexId[] = [],

@@ -211,6 +211,14 @@ interface Store {
   peerConnected: boolean;
   netError: string | null;
 
+  /** 'menu' (default) is the normal SetupScreen/OnlineLobby/game flow, entirely
+   *  untouched by the Mission Editor. 'editor' shows the Mission Editor instead
+   *  — a sibling screen with its own state (`state/editorStore.ts`), not a
+   *  `GameState` variant. */
+  screen: 'menu' | 'editor';
+  openMissionEditor: () => void;
+  closeMissionEditor: () => void;
+
   newGame: (def?: MissionDef) => void;
   resume: () => void;
   quitToMenu: () => void;
@@ -249,6 +257,8 @@ interface Store {
   hastyDefense: (unitId: UnitId) => void;
   /** §17.6: freely remove this Unit's own Hasty Defense — 0AP, no gate. */
   removeHastyDefense: (unitId: UnitId) => void;
+  /** Exit the Map via a Mission-authored exit zone (§4.0) — costs this Unit's own move stat, CAP-gated like Hasty Defense. */
+  exit: (unitId: UnitId) => void;
   /** Mortar Indirect Attack (§13.2): a Spotter Hex is picked automatically —
    *  the first legal one, via `legalActionsForUnit`/`bestSpotterFor` (§13.3
    *  places no requirement on WHICH legal Spotter Hex is used, so there's no
@@ -344,7 +354,18 @@ let netClient: NetClient | null = null;
 /** Action types that go through the single-unit CAP-confirm gate below. */
 type GateableAction = Extract<
   Action,
-  { type: 'MOVE' | 'FIRE' | 'CLOSE_COMBAT' | 'RALLY' | 'PIVOT' | 'INDIRECT_FIRE' | 'FIRE_SMOKE' | 'HASTY_DEFENSE' }
+  {
+    type:
+      | 'MOVE'
+      | 'FIRE'
+      | 'CLOSE_COMBAT'
+      | 'RALLY'
+      | 'PIVOT'
+      | 'INDIRECT_FIRE'
+      | 'FIRE_SMOKE'
+      | 'HASTY_DEFENSE'
+      | 'EXIT';
+  }
 >;
 
 export const useGame = create<Store>((set, get) => {
@@ -982,6 +1003,10 @@ export const useGame = create<Store>((set, get) => {
     peerConnected: false,
     netError: null,
 
+    screen: 'menu',
+    openMissionEditor: () => set({ screen: 'editor' }),
+    closeMissionEditor: () => set({ screen: 'menu' }),
+
     newGame: (def = MISSION_1) => {
       netClient?.close();
       netClient = null;
@@ -1509,6 +1534,8 @@ export const useGame = create<Store>((set, get) => {
       capGate({ type: 'HASTY_DEFENSE', unitId }, (a) => get().dispatch(a)),
     // §17.6 "at will": 0AP, no Spent Check, no CAP gate at all.
     removeHastyDefense: (unitId) => get().dispatch({ type: 'REMOVE_HASTY_DEFENSE', unitId }),
+    // §4.0: Exit the Map via a designated exit zone — no roll, straight through capGate to dispatch.
+    exit: (unitId) => capGate({ type: 'EXIT', unitId }, (a) => get().dispatch(a)),
 
     // Load/Unload (§15.7/§15.9) are Group Actions: legalActionsForUnit already
     // bakes in the right capCostReduce when either the Unit or the Vehicle is

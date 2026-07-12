@@ -416,11 +416,46 @@ export interface PlayerState {
 // Victory
 // ---------------------------------------------------------------------------
 
+/** One authored victory (objective) hex and its VP configuration (§9.1). */
+export interface VictoryHexDef {
+  hexId: HexId;
+  /** VP awarded to the controller at end of Round, unless overridden for that Round below. */
+  vp: number;
+  /**
+   * Mission-authored starting controller (before any occupancy is considered).
+   * `initGame` seeds `Hex.features.control` from this when set; the normal
+   * sole-occupier rule (§9.1) still overrides it if a Unit is actually present.
+   */
+  control?: SideId;
+  /** Override this hex's VP value for specific Rounds; any Round not listed falls back to `vp`. */
+  roundOverrides?: { round: number; vp: number }[];
+  /**
+   * When this hex's control VP is awarded: every Round it's held ('endOfRound',
+   * the default — today's only behavior), or once, only at the Mission's final
+   * Round-end ('endOfMission'). Never both.
+   */
+  awardTiming?: 'endOfRound' | 'endOfMission';
+}
+
 export interface VictoryConfig {
   /** Objective hexes and the VP each is worth to its controller at end of Round (§9.1). */
-  victoryHexes: { hexId: HexId; vp: number }[];
-  /** Flat VP awarded per enemy Unit destroyed; falls back to the unit's template vp. */
-  vpPerKill?: number;
+  victoryHexes: VictoryHexDef[];
+  /**
+   * VP awarded per enemy Unit destroyed; falls back to the unit's template vp.
+   * A plain number applies to both sides equally (most Missions); the
+   * per-side form lets each side score kills differently.
+   */
+  vpPerKill?: number | Partial<Record<SideId, number>>;
+  /**
+   * VP for destroying a SPECIFIC Unit (by its authored id), overriding
+   * `vpPerKill`/the unit's own template vp for that one Unit only.
+   */
+  unitKillVp?: Record<UnitId, number>;
+  /**
+   * VP awarded once, at Mission end, per enemy Unit still on the Map — a flat
+   * rate mirroring `vpPerKill`'s shape but for survival instead of destruction.
+   */
+  vpPerSurvivor?: number | Partial<Record<SideId, number>>;
 }
 
 // ---------------------------------------------------------------------------
@@ -553,6 +588,11 @@ export type Action =
   // §17.6 "a player may freely remove their Hasty Defense at will": 0AP, no
   // Spent Check, no CAP check — mirrors CHOOSE_FACING's no-cost immediacy.
   | { type: 'REMOVE_HASTY_DEFENSE'; unitId: UnitId }
+  // Exit the Map via a Mission-authored exit zone (Mission-specific — a Unit
+  // may never exit the Map "unless specified by a Mission"): costs the Unit's
+  // own move stat as AP, a real Spent Check like a Move. VP goes to the
+  // EXITING Unit's own side, not the opponent.
+  | { type: 'EXIT'; unitId: UnitId; capCostReduce?: number }
   | { type: 'PASS' };
 
 export type ActionType = Action['type'];
@@ -592,6 +632,8 @@ export interface GameState {
   hitPiles: { foot: HitPile; vehicle: HitPile };
   /** Units waiting to enter the Map (§4.12); removed here and added to `units` on ENTER. */
   reinforcements: ReinforcementUnit[];
+  /** Mission-authored zones a side's own Units may EXIT the Map through, for VP. */
+  exitZones: ExitZoneDef[];
   missionId: string;
   victory: VictoryConfig;
   log: GameEvent[];
@@ -658,6 +700,20 @@ export interface ReinforcementWaveDef {
   units: { id: UnitId; templateId: string; facing: Facing }[];
 }
 
+/**
+ * A Mission-authored zone a side's own Units may EXIT the Map through, for VP
+ * ("a Unit may never exit the Map, unless specified by a Mission" — §4.0).
+ */
+export interface ExitZoneDef {
+  id: string;
+  /** Only this side's own Units may EXIT through these Hexes. */
+  side: SideId;
+  hexIds: HexId[];
+  /** VP awarded to the exiting Unit's own side per Unit that exits here. */
+  vpPerUnit: number;
+  description?: string;
+}
+
 export interface MissionDef {
   id: string;
   name: string;
@@ -670,14 +726,56 @@ export interface MissionDef {
   firstInitiative?: SideId;
   /** Starting VP per side (§9.2), e.g. Mission 1: Soviets begin with 1 VP. */
   startVp?: Partial<Record<SideId, number>>;
-  /** Flat VP per enemy Unit destroyed (§9.1); falls back to template vp if unset. */
-  vpPerKill?: number;
+  /**
+   * VP per enemy Unit destroyed (§9.1); falls back to template vp if unset.
+   * A plain number applies to both sides equally; the per-side form lets
+   * each side score kills differently.
+   */
+  vpPerKill?: number | Partial<Record<SideId, number>>;
+  /** VP for destroying a SPECIFIC Unit (by id), overriding `vpPerKill`/template vp for that Unit. */
+  unitKillVp?: Record<UnitId, number>;
+  /** VP per enemy Unit still on the Map at Mission end (§9.1, Mission-authored). */
+  vpPerSurvivor?: number | Partial<Record<SideId, number>>;
   hexes: MapHexDef[];
   units: UnitPlacement[];
   /** Units that begin off-Map and enter later (§4.12). */
   reinforcements?: ReinforcementWaveDef[];
+  /** Zones a side's own Units may EXIT the Map through, for VP (§4.0). */
+  exitZones?: ExitZoneDef[];
   templates: UnitTemplate[];
-  victoryHexes: { hexId: HexId; vp: number }[];
+  victoryHexes: VictoryHexDef[];
+  /** General mission situation/flavor text (Mission Editor authoring; display-only, not read by the engine). */
+  situation?: string;
+  /** Short per-side "orders" text (Mission Editor authoring; display-only, not read by the engine). */
+  sideOrders?: Partial<Record<SideId, string>>;
+  /** Longer per-side victory-condition-flavored instructions (Mission Editor authoring; display-only, not read by the engine). */
+  missionInstructions?: Partial<Record<SideId, string>>;
+  /**
+   * Data authored for future milestones (M12 Cards, M8 Hidden Units, OBA
+   * scheduling, Air Support, a real map-rotation/catalog tool) that the
+   * engine does not yet consume. Carried losslessly through the Mission
+   * Editor's export so nothing typed into its "Advanced/Future" section is
+   * silently dropped; `initGame`/`reduce` never read this.
+   */
+  advancedNotes?: MissionAdvancedNotes;
+}
+
+/** See `MissionDef.advancedNotes` — inert until the corresponding milestone lands. */
+export interface MissionAdvancedNotes {
+  /** M12: Battle Cards drawn at the start of Round 1, and each Round after. */
+  battleCards?: Partial<Record<SideId, { round1: number; eachRoundAfter: number }>>;
+  /** M8: Unit ids (starting placements or reinforcements) that begin hidden. */
+  hiddenUnitIds?: UnitId[];
+  /** Rounds in which OBA may be used at all (§13.4), if the Mission restricts it. */
+  obaAllowedRounds?: number[];
+  /** A planned OBA Strike always resolves the Round after it's planned (§13.5-13.6). */
+  obaStrikes?: { id: string; plannedRound: number }[];
+  /** Round each side receives Air Support (provisional — not yet a transcribed rule). */
+  airSupport?: Partial<Record<SideId, number>>;
+  /** Named maps + rotation, for abutting more than one board (a future map-catalog/rotation tool). */
+  mapTable?: { mapId: string; rotation: 0 | 90 | -90 }[];
+  /** Terrain overlay names layered onto the base map(s) (e.g. "Mud Season", "Winter Snow"). */
+  overlays?: string[];
 }
 
 /** @deprecated 2nd-ed name; use {@link MissionDef}. */

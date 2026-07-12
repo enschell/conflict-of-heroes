@@ -5,15 +5,17 @@
 export * from './types';
 
 export { reduce } from './reducer';
-export { initGame, serialize, deserialize } from './state';
+export { initGame, serialize, deserialize, buildHex } from './state';
 export {
   legalActions,
   legalActionsForUnit,
   legalActionsForReinforcement,
   modifiedActionCost,
 } from './actions';
-export { groupConnected, groupStress, isValidSupporter } from './groups';
+export { groupConnected, groupStress, isValidSupporter, hexesConnected } from './groups';
 export { legalEntryHexes } from './reinforcements';
+export { assembleBoards, rotationClusters } from './boardAssembly';
+export type { BoardAssemblyEntry, BoardEdge, Rotation, RotationCluster } from './boardAssembly';
 
 // Selected pure helpers useful to the UI (e.g. previews, LOS overlay):
 export {
@@ -57,7 +59,17 @@ export {
   closeCombatStructureAr,
 } from './fortifications';
 export type { StructureDestroyRoll } from './fortifications';
-export { finalScores, computeWinner, otherSide, vpLeader, vpMargin, gainVp } from './victory';
+export {
+  finalScores,
+  computeWinner,
+  otherSide,
+  vpLeader,
+  vpMargin,
+  gainVp,
+  vpForRound,
+  vpPerKillFor,
+  vpPerSurvivorFor,
+} from './victory';
 export {
   AXIAL_DIRECTIONS,
   distance,

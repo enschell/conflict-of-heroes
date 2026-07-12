@@ -1006,3 +1006,604 @@ button.link {
   gap: 0.4rem;
   text-align: left;
 }
+
+/* ---------------------------------------------------------------------------
+   Mission Editor — "Field Manual" theme (dark olive/khaki, monospace, sharp
+   corners), per docs/design_handoff_mission_editor/README.md's design tokens.
+   Scoped entirely under .editor so it can never leak into the live game UI.
+--------------------------------------------------------------------------- */
+.editor {
+  display: flex;
+  height: 100vh;
+  width: 100vw;
+  background: #1b1d16;
+  color: #d9d4bd;
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+  font-size: 12.5px;
+}
+.editor * {
+  box-sizing: border-box;
+  border-radius: 0 !important;
+}
+.editor__sidebar {
+  width: 224px;
+  flex: 0 0 224px;
+  background: #15170f;
+  border-right: 1px solid #3a3d2e;
+  display: flex;
+  flex-direction: column;
+  padding: 0.9rem 0;
+}
+.editor__brand {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  color: #c9a04a;
+  padding: 0 0.9rem 0.4rem;
+}
+.editor__mission-title {
+  font-size: 13px;
+  color: #e5e0c9;
+  padding: 0 0.9rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.editor__draft-caption {
+  font-size: 10px;
+  color: #6e6c56;
+  padding: 0.2rem 0.9rem 0.8rem;
+}
+.editor__nav {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+}
+.editor__nav-row {
+  position: relative;
+  text-align: left;
+  background: transparent;
+  border: none;
+  border-left: 2px solid transparent;
+  color: #a09c81;
+  font-family: inherit;
+  font-size: 12.5px;
+  padding: 0.55rem 0.9rem;
+  cursor: pointer;
+}
+.editor__nav-row--active {
+  background: #262918;
+  border-left: 2px solid #c9a04a;
+  color: #eee0bb;
+  font-weight: 700;
+}
+.editor__nav-row--soon {
+  color: #5c5a48;
+}
+.editor__soon-badge {
+  position: absolute;
+  right: 0.9rem;
+  top: 50%;
+  transform: translateY(-50%);
+  background: #2a2c20;
+  color: #8b8871;
+  font-size: 9px;
+  padding: 2px 6px;
+}
+.editor__exit {
+  margin: 0.6rem 0.9rem 0;
+  background: transparent;
+  border: 1px solid #3a3d2e;
+  color: #a09c81;
+  font-family: inherit;
+  padding: 0.4rem;
+  cursor: pointer;
+}
+.editor__main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.editor__topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: #1f2116;
+  border-bottom: 1px solid #3a3d2e;
+  padding: 0.6rem 1rem;
+}
+.editor__topbar-label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: #8b8871;
+  font-weight: 700;
+}
+.editor__export {
+  background: #c9a04a;
+  color: #1b1d16;
+  font-family: inherit;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  border: none;
+  padding: 0.5rem 1rem;
+  cursor: pointer;
+}
+.editor__content {
+  flex: 1;
+  overflow: auto;
+  padding: 1.2rem;
+}
+.editor__section h3 {
+  color: #eee0bb;
+  font-size: 13px;
+  margin: 1.1rem 0 0.4rem;
+}
+.editor__section h4 {
+  color: #c7c2a5;
+  font-size: 12px;
+  margin: 0.8rem 0 0.3rem;
+}
+.editor__title-input {
+  width: 100%;
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid #3a3d2e;
+  color: #eee0bb;
+  font-family: inherit;
+  font-size: 17px;
+  font-weight: 700;
+  padding: 0.3rem 0;
+  margin-bottom: 0.8rem;
+}
+.editor__field-label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  font-size: 9.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #8b8871;
+  margin: 0.5rem 0;
+}
+.editor__field-label input,
+.editor__field-label textarea,
+.editor__field-label select,
+.editor__field {
+  background: #22261c;
+  border: 1px solid #3a3d2e;
+  color: #c7c2a5;
+  font-family: inherit;
+  font-size: 12.5px;
+  padding: 0.35rem 0.5rem;
+}
+.editor__field-label textarea {
+  min-height: 90px;
+  line-height: 1.65;
+  resize: vertical;
+}
+.editor__side-cards {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 20px;
+  margin-top: 0.6rem;
+}
+.editor__side-card {
+  background: #1f2116;
+  border: 1px solid #48513f;
+  padding: 0.7rem;
+}
+.editor__side-card--B {
+  border-color: #533d33;
+}
+.editor__side-head {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin-bottom: 0.5rem;
+}
+.editor__side-swatch {
+  width: 12px;
+  height: 12px;
+  background: #8a9a8a;
+  display: inline-block;
+}
+.editor__side-card--B .editor__side-swatch {
+  background: #b4553c;
+}
+.editor__side-label {
+  font-size: 13px;
+  font-weight: 700;
+  color: #eee0bb;
+}
+.editor__initiative-badge {
+  margin-left: auto;
+  font-size: 9px;
+  background: #2a2c20;
+  color: #c9a04a;
+  padding: 2px 6px;
+}
+.editor__side-stats {
+  display: flex;
+  gap: 0.6rem;
+  margin-bottom: 0.5rem;
+}
+.editor__stat-box {
+  display: flex;
+  flex-direction: column;
+  font-size: 9.5px;
+  text-transform: uppercase;
+  color: #8b8871;
+  flex: 1;
+}
+.editor__stat-box input {
+  background: transparent;
+  border: none;
+  color: #c9a04a;
+  font-size: 15px;
+  font-weight: 700;
+  text-align: right;
+  font-family: inherit;
+}
+.editor__nation-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  margin-bottom: 0.5rem;
+}
+.editor__chip {
+  background: #262918;
+  border: 1px solid #48513f;
+  color: #d9d4bd;
+  font-size: 11px;
+  padding: 0.15rem 0.4rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+.editor__side-card--B .editor__chip {
+  background: #2a2018;
+  border-color: #533d33;
+}
+.editor__chip button {
+  background: none;
+  border: none;
+  color: inherit;
+  cursor: pointer;
+  font-family: inherit;
+}
+.editor__nation-chips select {
+  background: transparent;
+  border: 1px dashed #48513f;
+  color: #8b8871;
+  font-size: 10px;
+  font-family: inherit;
+}
+.editor__bottom-row {
+  display: flex;
+  gap: 1rem;
+  margin-top: 0.8rem;
+}
+.editor__stat-card {
+  background: #1f2116;
+  border: 1px solid #3a3d2e;
+  padding: 0.6rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+.editor__big-number {
+  background: transparent;
+  border: none;
+  color: #c9a04a;
+  font-size: 26px;
+  font-weight: 700;
+  font-family: inherit;
+  width: 4rem;
+}
+.editor__initiative-picker {
+  flex: 1;
+}
+.editor__toggle-row {
+  display: flex;
+  gap: 0.4rem;
+}
+.editor__toggle {
+  background: #22261c;
+  border: 1px solid #3a3d2e;
+  color: #a09c81;
+  font-family: inherit;
+  padding: 0.4rem 0.8rem;
+  cursor: pointer;
+}
+.editor__toggle--active {
+  background: #262918;
+  border-color: #c9a04a;
+  color: #eee0bb;
+}
+.editor__caption {
+  color: #6e6c56;
+  font-size: 10.5px;
+  font-style: italic;
+}
+
+.editor__map-toprow {
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+  margin-bottom: 0.6rem;
+}
+.editor__map-body {
+  display: flex;
+  gap: 1rem;
+}
+.editor__map-board {
+  flex: 1;
+  border: 1px solid #3a3d2e;
+  background: #1f2116;
+  min-height: 320px;
+}
+.editor__map-board--small {
+  min-height: 220px;
+}
+.editor__map-tools {
+  width: 270px;
+  flex: 0 0 270px;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.editor__tool-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+.editor__tool-btn {
+  background: #22261c;
+  border: 1px solid #3a3d2e;
+  color: #a09c81;
+  font-family: inherit;
+  text-align: left;
+  padding: 0.4rem 0.6rem;
+  cursor: pointer;
+}
+.editor__tool-btn--active {
+  border-color: #c9a04a;
+  background: #262918;
+  color: #eee0bb;
+}
+.editor__placed-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  font-size: 11.5px;
+}
+.editor__placed-list li {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  background: #1f2116;
+  border: 1px solid #3a3d2e;
+  padding: 0.3rem 0.5rem;
+}
+.editor__placed-list button {
+  margin-left: auto;
+  background: none;
+  border: none;
+  color: #b4553c;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.editor__unit-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+.editor__unit-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  max-height: 260px;
+  overflow: auto;
+}
+.editor__unit-card {
+  background: #1f2116;
+  border: 1px solid #3a3d2e;
+  border-left-width: 3px;
+  padding: 0.4rem 0.6rem;
+  cursor: pointer;
+}
+.editor__unit-card--armed {
+  background: #262918;
+  border-color: #c9a04a;
+}
+.editor__unit-card-head {
+  display: flex;
+  justify-content: space-between;
+  font-size: 12px;
+}
+.editor__unit-name {
+  font-weight: 700;
+  color: #eee0bb;
+}
+.editor__unit-nation {
+  color: #8b8871;
+  font-size: 10px;
+  text-transform: uppercase;
+}
+.editor__unit-stats {
+  color: #a09c81;
+  font-size: 10.5px;
+  margin-top: 0.2rem;
+}
+.editor__unit-add {
+  margin-top: 0.3rem;
+  background: #22261c;
+  border: 1px solid #3a3d2e;
+  color: #d9d4bd;
+  font-family: inherit;
+  cursor: pointer;
+  padding: 0.2rem 0.5rem;
+}
+.editor__placement-panel {
+  border-top: 1px solid #3a3d2e;
+  padding-top: 0.5rem;
+}
+.editor__status-line {
+  color: #c7c2a5;
+  font-size: 11px;
+}
+
+.editor__table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 1rem;
+  font-size: 11.5px;
+}
+.editor__table th,
+.editor__table td {
+  border-bottom: 1px solid #3a3d2e;
+  padding: 0.35rem 0.5rem;
+  text-align: left;
+}
+.editor__table th {
+  color: #8b8871;
+  text-transform: uppercase;
+  font-size: 9.5px;
+}
+.editor__table button {
+  background: none;
+  border: none;
+  color: #b4553c;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.editor__wave-card {
+  background: #1f2116;
+  border: 1px solid #3a3d2e;
+  padding: 0.6rem 0.8rem;
+  margin-bottom: 0.6rem;
+}
+.editor__wave-summary {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  font-size: 11.5px;
+}
+.editor__wave-summary strong {
+  color: #eee0bb;
+}
+.editor__wave-summary button {
+  margin-left: auto;
+  background: #22261c;
+  border: 1px solid #3a3d2e;
+  color: #d9d4bd;
+  font-family: inherit;
+  cursor: pointer;
+  padding: 0.2rem 0.6rem;
+}
+.editor__wave-expanded {
+  margin-top: 0.6rem;
+  border-top: 1px solid #3a3d2e;
+  padding-top: 0.6rem;
+}
+.editor__wave-row {
+  display: flex;
+  gap: 1rem;
+}
+.editor__hex-echo {
+  color: #a09c81;
+  font-size: 10.5px;
+}
+.editor__warning {
+  color: #d8b25c;
+  font-size: 11px;
+}
+
+.editor__add-row {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  border: 1px dashed #3a3d2e;
+  padding: 0.5rem;
+  margin: 0.6rem 0;
+}
+.editor__add-row input,
+.editor__add-row select {
+  background: #22261c;
+  border: 1px solid #3a3d2e;
+  color: #c7c2a5;
+  font-family: inherit;
+  padding: 0.3rem 0.5rem;
+}
+.editor__victory-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+.editor__victory-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  background: #1f2116;
+  border: 1px solid #3a3d2e;
+  padding: 0.4rem 0.6rem;
+}
+.editor__victory-hex {
+  color: #c9a04a;
+  font-weight: 700;
+  font-size: 14px;
+}
+.editor__override-panel {
+  flex-basis: 100%;
+  border-top: 1px solid #3a3d2e;
+  margin-top: 0.4rem;
+  padding-top: 0.4rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+.editor__override-row {
+  display: flex;
+  gap: 0.6rem;
+  align-items: center;
+  font-size: 10.5px;
+}
+
+.editor__warning-banner {
+  background: #2a2410;
+  border: 1px solid #55491f;
+  color: #d8b25c;
+  padding: 0.6rem 0.8rem;
+  margin-bottom: 0.8rem;
+}
+.editor__round-checks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  font-size: 11px;
+}
+.editor__checklist {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  font-size: 11.5px;
+}
+.editor__empty {
+  color: #6e6c56;
+  font-style: italic;
+}

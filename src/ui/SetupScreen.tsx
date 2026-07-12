@@ -16,6 +16,7 @@ export function SetupScreen() {
   const resume = useGame((s) => s.resume);
   const createOnlineRoom = useGame((s) => s.createOnlineRoom);
   const joinOnlineRoom = useGame((s) => s.joinOnlineRoom);
+  const openMissionEditor = useGame((s) => s.openMissionEditor);
   const canResume = hasAuto();
   const [joinCode, setJoinCode] = useState('');
 
@@ -66,6 +67,16 @@ export function SetupScreen() {
           />
           <button disabled={!joinCode.trim()} onClick={() => joinOnlineRoom(joinCode.trim())}>
             Join Game
+          </button>
+        </div>
+      </div>
+
+      <div className="setup__card">
+        <h2>Mission Editor</h2>
+        <p>Author a new Mission — map, starting forces, reinforcements, and victory conditions.</p>
+        <div className="setup__actions">
+          <button className="primary" onClick={openMissionEditor}>
+            Open Mission Editor
           </button>
         </div>
       </div>

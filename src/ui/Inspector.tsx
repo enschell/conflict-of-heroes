@@ -4,7 +4,7 @@
  * Move/fire are also available by clicking the board. v3: each Action is
  * followed by a Spent Check (§2.5) and Stresses the unit (§2.6).
  */
-import { attackContext, closeCombatContext, directionTo, legalActionsForUnit, RALLY_AP_COST, templateOf } from '../engine';
+import { attackContext, closeCombatContext, directionTo, effectiveStats, legalActionsForUnit, RALLY_AP_COST, templateOf } from '../engine';
 import { isHopelessShot } from './odds';
 import { HIT_MARKERS, hitMarkerEffects, markerName } from '../data/hitMarkers';
 import type { Facing, GameState, Unit } from '../engine/types';
@@ -69,6 +69,7 @@ export function Inspector() {
   const rally = useGame((s) => s.rally);
   const hastyDefense = useGame((s) => s.hastyDefense);
   const removeHastyDefense = useGame((s) => s.removeHastyDefense);
+  const exit = useGame((s) => s.exit);
   const pivot = useGame((s) => s.pivot);
   const chooseFacing = useGame((s) => s.chooseFacing);
   const load = useGame((s) => s.load);
@@ -89,6 +90,7 @@ export function Inspector() {
 
   const unit = game.units[selectedUnitId]!;
   const tmpl = templateOf(game, unit);
+  const eff = effectiveStats(game, unit);
   const player = game.players[unit.side];
   const yours = unit.side === game.currentSide;
   const acts = yours ? legalActionsForUnit(game, unit.id) : [];
@@ -114,6 +116,11 @@ export function Inspector() {
   const hastyDefenseAct = acts.find((a) => a.type === 'HASTY_DEFENSE');
   const hastyDefenseCost = 5 + (unit.stressed ? 1 : 0);
   const hastyDefenseAffordable = unit.status !== 'spent' || player.capCurrent >= hastyDefenseCost;
+
+  // Exit the Map (§4.0, Mission-authored): legal only on a designated exit Hex.
+  const exitAct = acts.find((a) => a.type === 'EXIT');
+  const exitCost = eff.move + (unit.stressed ? 1 : 0);
+  const exitAffordable = unit.status !== 'spent' || player.capCurrent >= exitCost;
   // §3.2: exclude a target no CAP could ever make hittable — same UI
   // convenience as store.ts's hexClick/ActionChooser.tsx, not a rules change.
   const fireActs = acts
@@ -239,6 +246,19 @@ export function Inspector() {
           {hastyDefenseAct && spentRally && !hastyDefenseAffordable && (
             <button disabled title="Not enough CAP to reach 0AP">
               Hasty Defense needs {hastyDefenseCost} CAP (have {player.capCurrent})
+            </button>
+          )}
+          {exitAct && !spentRally && (
+            <button onClick={() => exit(unit.id)}>Exit the Map ({exitCost} AP, §4.0)</button>
+          )}
+          {exitAct && spentRally && exitAffordable && (
+            <button onClick={() => exit(unit.id)}>
+              Exit the Map — spend {exitCost} CAP → 0AP (§3.4)
+            </button>
+          )}
+          {exitAct && spentRally && !exitAffordable && (
+            <button disabled title="Not enough CAP to reach 0AP">
+              Exit needs {exitCost} CAP (have {player.capCurrent})
             </button>
           )}
           {hasMove && !isVehicle && <p className="dim">Move: click a highlighted green hex.</p>}

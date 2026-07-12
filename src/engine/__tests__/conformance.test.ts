@@ -8,7 +8,7 @@ import { describe, expect, it } from 'vitest';
 import { reduce } from '../reducer';
 import { legalActions } from '../actions';
 import { initGame } from '../state';
-import { otherSide } from '../victory';
+import { otherSide, vpForRound, vpPerKillFor } from '../victory';
 import { MISSION_1 } from '../../data/missions/mission1';
 import type { Action, GameState } from '../types';
 
@@ -47,16 +47,18 @@ function play(seed: number) {
     let vpToB = 0;
     for (const id of destroyed) {
       const u = pre.units[id]!;
-      const vp = pre.victory.vpPerKill ?? pre.templates[u.templateId]!.vp;
-      if (otherSide(u.side) === 'A') vpToA += vp;
+      const opp = otherSide(u.side);
+      const vp = vpPerKillFor(pre.victory, opp) ?? pre.templates[u.templateId]!.vp;
+      if (opp === 'A') vpToA += vp;
       else vpToB += vp;
     }
     const roundEnded = action.type === 'PASS' && (post.round > pre.round || post.phase === 'gameOver');
     if (roundEnded) {
       for (const vh of post.victory.victoryHexes) {
         const ctrl = post.hexes[vh.hexId]?.features.control;
-        if (ctrl === 'A') vpToA += vh.vp;
-        else if (ctrl === 'B') vpToB += vh.vp;
+        const vp = vpForRound(vh, pre.round);
+        if (ctrl === 'A') vpToA += vp;
+        else if (ctrl === 'B') vpToB += vp;
       }
     }
     expect(post.players.A.vp - pre.players.A.vp).toBe(vpToA);
