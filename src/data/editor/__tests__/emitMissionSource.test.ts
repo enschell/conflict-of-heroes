@@ -1,6 +1,6 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import { emitMissionSource } from '../emitMissionSource';
-import { BLANK_SINGLE_BOARD } from '../../maps/catalog';
+import { BLANK_SINGLE_BOARD, MAP_CATALOG } from '../../maps/catalog';
 import { UNIT_TEMPLATES } from '../../units';
 import { initGame } from '../../../engine/state';
 import type { EditorAuthoredState } from '../../../state/editorStore';
@@ -36,6 +36,9 @@ function fixture(): EditorAuthoredState {
       armedTemplateId: null,
       armedSide: 'A',
       armedFacing: 0,
+      setupPool: [],
+      setupFirstSide: 'A',
+      setupInstructions: '',
     },
     reinforcements: {
       activeSide: 'A',
@@ -91,6 +94,86 @@ function fixture(): EditorAuthoredState {
 }
 
 describe('emitMissionSource', () => {
+  afterEach(() => {
+    delete MAP_CATALOG['blank-single']!.overlayImage;
+  });
+
+  it('omits mapOverlays when no picked board has a saved overlay image', () => {
+    const src = emitMissionSource(fixture());
+    expect(src).not.toContain('mapOverlays');
+  });
+
+  it('inlines a picked board\'s saved overlay image, keyed by its mapNumber', () => {
+    MAP_CATALOG['blank-single']!.overlayImage = 'data:image/png;base64,XYZ';
+    const src = emitMissionSource(fixture());
+    const n = BLANK_SINGLE_BOARD[0]!.mapNumber!;
+    expect(src).toContain('mapOverlays:');
+    expect(src).toContain(`'${n}': 'data:image/png;base64,XYZ'`);
+
+    const match = src.match(/export const \w+: MissionDef = ([\s\S]*);\s*$/);
+    const plainJs = match![1]!.replace(/\]!/g, ']');
+    // eslint-disable-next-line @typescript-eslint/no-implied-eval
+    const missionDef = new Function('UNIT_TEMPLATES', `return (${plainJs});`)(UNIT_TEMPLATES) as MissionDef;
+    expect(missionDef.mapOverlays).toEqual({ [n]: 'data:image/png;base64,XYZ' });
+    const game = initGame(missionDef);
+    expect(game.mapOverlays).toEqual({ [n]: 'data:image/png;base64,XYZ' });
+  });
+
+  it('omits mapRotations when no board is rotated 90/-90', () => {
+    const src = emitMissionSource(fixture());
+    expect(src).not.toContain('mapRotations');
+  });
+
+  it('records a 90/-90 board rotation, keyed by its mapNumber; 0/180 emit nothing', () => {
+    const f = fixture();
+    f.map.boards[0]!.rotation = 90;
+    const src = emitMissionSource(f);
+    const n = BLANK_SINGLE_BOARD[0]!.mapNumber!;
+    expect(src).toContain('mapRotations:');
+    expect(src).toContain(`'${n}': 90`);
+
+    const match = src.match(/export const \w+: MissionDef = ([\s\S]*);\s*$/);
+    const plainJs = match![1]!.replace(/\]!/g, ']');
+    // eslint-disable-next-line @typescript-eslint/no-implied-eval
+    const missionDef = new Function('UNIT_TEMPLATES', `return (${plainJs});`)(UNIT_TEMPLATES) as MissionDef;
+    expect(missionDef.mapRotations).toEqual({ [n]: 90 });
+    expect(initGame(missionDef).mapRotations).toEqual({ [n]: 90 });
+
+    const f180 = fixture();
+    f180.map.boards[0]!.rotation = 180;
+    expect(emitMissionSource(f180)).not.toContain('mapRotations');
+  });
+
+  it('omits setupForces/setupFirstSide/setupInstructions when the pool is empty', () => {
+    const src = emitMissionSource(fixture());
+    expect(src).not.toContain('setupForces');
+    expect(src).not.toContain('setupFirstSide');
+  });
+
+  it('emits a real setupForces pool and round-trips through initGame into the setup phase', () => {
+    const f = fixture();
+    f.forces.setupPool = [
+      { id: 'A-setup-1', side: 'A', templateId: 'ger-rifle', facing: 0 },
+      { id: 'B-setup-1', side: 'B', templateId: 'sov-rifle', facing: 3 },
+    ];
+    f.forces.setupFirstSide = 'B';
+    f.forces.setupInstructions = 'Side B sets up first, within 3 hexes of the south edge.';
+    const src = emitMissionSource(f);
+    expect(src).toContain('setupForces:');
+    expect(src).toContain("setupFirstSide: 'B'");
+    expect(src).toContain('setupInstructions:');
+
+    const match = src.match(/export const \w+: MissionDef = ([\s\S]*);\s*$/);
+    const plainJs = match![1]!.replace(/\]!/g, ']');
+    // eslint-disable-next-line @typescript-eslint/no-implied-eval
+    const missionDef = new Function('UNIT_TEMPLATES', `return (${plainJs});`)(UNIT_TEMPLATES) as MissionDef;
+    expect(missionDef.setupForces).toHaveLength(2);
+    const game = initGame(missionDef);
+    expect(game.phase).toBe('setup');
+    expect(game.setupSide).toBe('B');
+    expect(game.setupPool).toHaveLength(2);
+  });
+
   it('produces well-formed, self-contained TypeScript source', () => {
     const src = emitMissionSource(fixture());
     expect(src).toContain("import { UNIT_TEMPLATES } from '../units';");
@@ -139,6 +222,18 @@ describe('emitMissionSource', () => {
 
     const defaultSrc = emitMissionSource(fixture());
     expect(defaultSrc).not.toContain('awardTiming');
+  });
+
+  it('a specificRounds award timing emits both awardTiming and awardRounds', () => {
+    const f = fixture();
+    f.victory.hexes[0]!.awardTiming = 'specificRounds';
+    f.victory.hexes[0]!.awardRounds = [3, 4, 5];
+    const src = emitMissionSource(f);
+    expect(src).toContain("awardTiming: 'specificRounds'");
+    expect(src).toContain('awardRounds:');
+    expect(src).toContain('3,');
+    expect(src).toContain('4,');
+    expect(src).toContain('5,');
   });
 
   it('throws a clear error when the Map section has an invalid multi-board configuration', () => {

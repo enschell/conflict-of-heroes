@@ -11,9 +11,12 @@ import { MISSION_1 } from './mission1';
 import { ARMOR_SANDBOX } from './sandbox';
 import { FIRE_SUPPORT_SANDBOX } from './fireSupportSandbox';
 import { HILLS_SANDBOX } from './hillsSandbox';
+import { NEW_MISSION_MISSION } from './new-mission';
 import { OBSTACLES_SANDBOX } from './obstaclesSandbox';
 import { FORTIFICATIONS_SANDBOX } from './fortificationsSandbox';
 import { HEX_BOARD_DEMO } from './hexBoardDemo';
+import { SETUP_PHASE_SANDBOX } from './setupPhaseSandbox';
+import { SOS_MISSION_4_MISSION } from './sos-mission-4';
 
 export const MISSION_CATALOG: Record<string, MissionDef> = {
   [MISSION_1.id]: MISSION_1,
@@ -23,6 +26,9 @@ export const MISSION_CATALOG: Record<string, MissionDef> = {
   [OBSTACLES_SANDBOX.id]: OBSTACLES_SANDBOX,
   [FORTIFICATIONS_SANDBOX.id]: FORTIFICATIONS_SANDBOX,
   [HEX_BOARD_DEMO.id]: HEX_BOARD_DEMO,
+  [SETUP_PHASE_SANDBOX.id]: SETUP_PHASE_SANDBOX,
+  [SOS_MISSION_4_MISSION.id]: SOS_MISSION_4_MISSION,
+  [NEW_MISSION_MISSION.id]: NEW_MISSION_MISSION,
 };
 
 export function missionById(id: string): MissionDef | undefined {

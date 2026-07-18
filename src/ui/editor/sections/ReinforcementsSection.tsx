@@ -1,5 +1,5 @@
 import { useMemo } from 'react';
-import { assembledMap, useEditorStore } from '../../../state/editorStore';
+import { assembledMap, assembledMapOverlays, assembledRotationClusters, useEditorStore } from '../../../state/editorStore';
 import type { EditorWave } from '../../../state/editorStore';
 import { UNIT_TEMPLATES } from '../../../data/units';
 import { hexesConnected } from '../../../engine';
@@ -20,6 +20,8 @@ function WaveCard({ side, wave }: { side: SideId; wave: EditorWave }) {
   const setReinf = useEditorStore((s) => s.setReinf);
   const map = useEditorStore((s) => s.map);
   const { hexes: mapHexes, error: mapError } = useMemo(() => assembledMap(map), [map]);
+  const mapOverlays = useMemo(() => assembledMapOverlays(map), [map]);
+  const rotationClusters = useMemo(() => assembledRotationClusters(map), [map]);
 
   const expanded = expandedWaveId === wave.id;
   const connected = hexesConnected(wave.entryHexIds);
@@ -95,6 +97,8 @@ function WaveCard({ side, wave }: { side: SideId; wave: EditorWave }) {
               hexes={mapHexes}
               highlightedHexIds={highlighted}
               onHexClick={(hex) => toggleWaveHex(side, wave.id, hex)}
+              mapOverlays={mapOverlays}
+              rotationClusters={rotationClusters}
             />
           </div>
           <p className="editor__hex-echo">Entry Hexes: {wave.entryHexIds.join(', ') || '(none selected)'}</p>

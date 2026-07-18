@@ -11,6 +11,7 @@ import type {
   HitPile,
   PlayerState,
   ReinforcementUnit,
+  SetupPoolUnit,
   SideId,
   Unit,
   UnitTemplate,
@@ -29,6 +30,7 @@ export function buildHex(def: FirefightDef['hexes'][number]): Hex {
     mapNumber: def.mapNumber,
     edgeCut: def.edgeCut,
     terrain: def.terrain,
+    art: def.art,
     elevation: def.elevation ?? 0,
     walls,
     road: def.road ?? false,
@@ -95,6 +97,18 @@ export function initGame(def: FirefightDef): GameState {
     }
   }
 
+  // Pre-Mission Setup phase (Mission-configurable): a pool of Units each side
+  // places onto any empty Hex before Round 1 — empty for every Mission that
+  // doesn't use this, in which case setup is skipped entirely (unchanged
+  // behavior from before this feature existed).
+  const setupPool: SetupPoolUnit[] = (def.setupForces ?? []).map((u) => ({
+    id: u.id,
+    side: u.side,
+    nation: templates[u.templateId]?.nation ?? u.side,
+    templateId: u.templateId,
+    facing: u.facing,
+  }));
+
   const footPile: HitPile = makeFootHitPile();
 
   const firstInitiativeSide: SideId = def.firstInitiative ?? 'A';
@@ -123,6 +137,20 @@ export function initGame(def: FirefightDef): GameState {
     reinforcements,
     exitZones: def.exitZones ?? [],
     missionId: def.id,
+    mapOverlays: def.mapOverlays ?? {},
+    mapRotations: def.mapRotations ?? {},
+    setupPool,
+    // The authored "goes first" side, UNLESS it has nothing to place (then
+    // skip straight to whichever side actually has pool Units) — a side with
+    // an empty pool has no legal SETUP_PLACE at all, so it can never be left
+    // "current" with nothing to do.
+    setupSide: (() => {
+      const first = def.setupFirstSide ?? 'A';
+      if (setupPool.some((u) => u.side === first)) return first;
+      const other: SideId = first === 'A' ? 'B' : 'A';
+      return setupPool.some((u) => u.side === other) ? other : undefined;
+    })(),
+    setupInstructions: def.setupInstructions,
     victory: {
       victoryHexes: def.victoryHexes,
       vpPerKill: def.vpPerKill,
@@ -150,7 +178,10 @@ export function initGame(def: FirefightDef): GameState {
     }
   }
 
-  startRound(state);
+  // A Mission with a real setup phase leaves `phase: 'setup'`/`setupSide` in
+  // place instead — `reducer.ts`'s `doSetupPlace` calls `startRound` itself
+  // once both sides have finished placing their pool.
+  if (!state.setupSide) startRound(state);
   return state;
 }
 

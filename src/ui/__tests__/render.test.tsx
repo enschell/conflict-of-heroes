@@ -42,7 +42,9 @@ afterEach(() => {
 describe('UI renders', () => {
   it('shows the setup screen before a game starts', () => {
     useGame.setState({ game: null });
-    expect(render()).toContain('Start Mission 1');
+    const html = render();
+    expect(html).toContain('Missions');
+    expect(html).toContain('Mission 1');
   });
 
   it('renders the board + panels in-game', () => {
@@ -99,6 +101,20 @@ describe('UI renders', () => {
     const finished = { ...useGame.getState().game!, phase: 'gameOver' as const, vpMarker: 3 };
     useGame.setState({ game: finished });
     expect(render()).toContain('Germans win!'); // Mission 1's Side A nation — no bare "Side A" text
+  });
+
+  it('renders a mapOverlays image as real gameplay art, replacing per-hex tiles', () => {
+    useGame.getState().newGame();
+    const game = useGame.getState().game!;
+    const mapNumber = Object.values(game.hexes).find((h) => h.mapNumber != null)!.mapNumber!;
+    const overlayUrl = 'data:image/png;base64,FAKEOVERLAYDATA';
+    useGame.setState({ game: { ...game, mapOverlays: { [mapNumber]: overlayUrl } } });
+    const html = render();
+    expect(html).toContain(overlayUrl);
+    // Mission 1 is one single board (every hex shares mapNumber 1), so
+    // covering it with an overlay replaces per-hex terrain tiles entirely —
+    // no `/assets/terrain/` tile art should remain.
+    expect(html).not.toContain('/assets/terrain/');
   });
 
   it('shows the under-cursor hover panel with terrain of the hovered hex', () => {

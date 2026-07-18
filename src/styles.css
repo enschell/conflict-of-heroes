@@ -561,8 +561,8 @@ button.link {
 
 /* ---- setup ---- */
 .setup {
-  max-width: 640px;
-  margin: 6vh auto;
+  max-width: 1400px;
+  margin: 4vh auto;
   padding: 1.5rem;
   text-align: center;
 }
@@ -573,24 +573,99 @@ button.link {
   color: var(--dim);
   margin-top: 0;
 }
+.setup__topbar {
+  display: flex;
+  justify-content: center;
+  gap: 0.6rem;
+  margin-top: 1.2rem;
+}
+/* Tests (left) | Missions + Play (middle) | selected-mission details (right) */
+.setup__layout {
+  display: grid;
+  grid-template-columns: 240px minmax(320px, 1fr) minmax(380px, 1.4fr);
+  align-items: start;
+  gap: 1.5rem;
+  margin-top: 1.5rem;
+  text-align: left;
+}
+/* Selecting a mission highlights it green — selection only, never a start. */
+.setup__mission-btn.is-selected {
+  border-color: #5ad17a;
+  background: rgba(90, 209, 122, 0.18);
+  color: #7fe89c;
+}
+.setup__details h2 {
+  margin-top: 0;
+}
+.setup__details h4 {
+  margin: 0.9rem 0 0.3rem;
+}
+.setup__detail-line {
+  margin: 0.2rem 0;
+  font-size: 0.9rem;
+}
+.setup__detail-situation {
+  white-space: pre-wrap;
+  font-size: 0.88rem;
+  color: var(--dim);
+}
+/* ~quarter-scale board preview: the real board is ~972px wide at HEX_SIZE=36,
+   so a ~300px-wide box reads as the requested 0.25× view. */
+.setup__map-thumb {
+  width: 100%;
+  max-width: 320px;
+  margin: 0.6rem 0;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--bg);
+}
+.setup__main {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
 .setup__card {
   background: var(--panel);
   border: 1px solid var(--line);
   border-radius: 10px;
   padding: 1.2rem;
-  margin-top: 1.5rem;
   text-align: left;
+}
+.setup__tests {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 1.2rem;
+  text-align: left;
+}
+.setup__tests h2 {
+  margin-top: 0;
 }
 .setup__actions {
   display: flex;
   gap: 0.6rem;
   margin-top: 1rem;
 }
+.setup__actions--vertical {
+  flex-direction: column;
+  align-items: stretch;
+}
 .setup__join {
   display: flex;
   gap: 0.6rem;
   margin-top: 0.6rem;
 }
+/* Authored Setup-phase guidance (GameState.setupInstructions) — free text
+   with real paragraph breaks, so preserve them. */
+.setup-panel__instructions {
+  white-space: pre-wrap;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 0.5rem 0.7rem;
+  font-size: 0.85rem;
+}
+
 .setup__join input {
   flex: 1 1 auto;
   min-width: 0;
@@ -1180,7 +1255,7 @@ button.link {
   padding: 0.35rem 0.5rem;
 }
 .editor__field-label textarea {
-  min-height: 90px;
+  min-height: 180px;
   line-height: 1.65;
   resize: vertical;
 }

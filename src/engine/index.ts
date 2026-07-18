@@ -14,6 +14,7 @@ export {
 } from './actions';
 export { groupConnected, groupStress, isValidSupporter, hexesConnected } from './groups';
 export { legalEntryHexes } from './reinforcements';
+export { legalSetupHexes } from './setup';
 export { assembleBoards, rotationClusters } from './boardAssembly';
 export type { BoardAssemblyEntry, BoardEdge, Rotation, RotationCluster } from './boardAssembly';
 

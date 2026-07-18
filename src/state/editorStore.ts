@@ -9,6 +9,8 @@
  */
 import { create } from 'zustand';
 import { mapById } from '../data/maps/catalog';
+import { missionById } from '../data/missions/catalog';
+import { buildEditorStateFromMission } from '../data/editor/loadMissionSource';
 import { assembleBoards, rotationClusters as engineRotationClusters } from '../engine';
 import type { BoardAssemblyEntry, BoardEdge, Rotation, RotationCluster } from '../engine';
 import type { Facing, HexId, MapHexDef, NationId, SideId } from '../engine/types';
@@ -160,6 +162,42 @@ export function assembledRotationClusters(map: EditorMapState): RotationCluster[
   }
 }
 
+/**
+ * Real gameplay art overrides (Map Editor "Overlay mode", CLAUDE.md §D) for
+ * every picked board that was itself authored with one — keyed by that
+ * board's own `mapNumber` (stamped on every one of its hexes; unaffected by
+ * rotation, which is a display-only pixel transform, not a data change), so
+ * `MissionDef.mapOverlays`/`GameState.mapOverlays` can resolve it per-hex at
+ * runtime without needing to carry the Mission Editor's own board-id concept
+ * into the exported Mission at all.
+ */
+export function assembledMapOverlays(map: EditorMapState): Record<number, string> {
+  const overlays: Record<number, string> = {};
+  for (const b of map.boards) {
+    const entry = mapById(b.mapId);
+    const n = entry?.hexes[0]?.mapNumber;
+    if (entry?.overlayImage && n != null) overlays[n] = entry.overlayImage;
+  }
+  return overlays;
+}
+
+/**
+ * Which boards were authored at a 90°/-90° rotation, keyed by that board's
+ * own `mapNumber` — see `MissionDef.mapRotations`'s header comment for why
+ * only this rotation family needs recording (0°/180° are already baked into
+ * the merged hex coordinates and need no extra data).
+ */
+export function assembledMapRotations(map: EditorMapState): Record<number, 90 | -90> {
+  const rotations: Record<number, 90 | -90> = {};
+  for (const b of map.boards) {
+    if (b.rotation !== 90 && b.rotation !== -90) continue;
+    const entry = mapById(b.mapId);
+    const n = entry?.hexes[0]?.mapNumber;
+    if (n != null) rotations[n] = b.rotation;
+  }
+  return rotations;
+}
+
 // ---------------------------------------------------------------------------
 // Starting Forces
 // ---------------------------------------------------------------------------
@@ -172,6 +210,17 @@ export interface PlacedUnit {
   facing: Facing;
 }
 
+/**
+ * A pre-Mission Setup-phase pool Unit (no `hexId` — unlike `PlacedUnit`, its
+ * Hex is chosen by the player during the real Setup phase, not authored here).
+ */
+export interface EditorSetupUnit {
+  id: string;
+  side: SideId;
+  templateId: string;
+  facing: Facing;
+}
+
 export interface EditorForcesState {
   placed: PlacedUnit[];
   search: string;
@@ -179,10 +228,27 @@ export interface EditorForcesState {
   armedTemplateId: string | null;
   armedSide: SideId;
   armedFacing: Facing;
+  /** Pre-Mission Setup phase (Mission-configurable): coexists with `placed` —
+   *  a Mission may mix fixed-location Units with a player-placed pool. */
+  setupPool: EditorSetupUnit[];
+  /** Which side sets up first, before the other side places its own pool. */
+  setupFirstSide: SideId;
+  /** Free-text guidance for how the Setup phase should proceed (display-only). */
+  setupInstructions: string;
 }
 
 function defaultForces(): EditorForcesState {
-  return { placed: [], search: '', nationFilter: 'all', armedTemplateId: null, armedSide: 'A', armedFacing: 0 };
+  return {
+    placed: [],
+    search: '',
+    nationFilter: 'all',
+    armedTemplateId: null,
+    armedSide: 'A',
+    armedFacing: 0,
+    setupPool: [],
+    setupFirstSide: 'A',
+    setupInstructions: '',
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -236,8 +302,14 @@ export interface EditorVictoryHex {
   vp: number;
   control: 'neutral' | SideId;
   overrides?: VictoryOverride[];
-  /** Every Round it's held (default), or once, only at the Mission's final Round-end. Never both. */
-  awardTiming: 'endOfRound' | 'endOfMission';
+  /**
+   * Every Round it's held (default), once at the Mission's final Round-end, or
+   * only on the explicit `awardRounds` list below (e.g. "Rounds 3, 4, and 5
+   * only"). Never more than one at a time.
+   */
+  awardTiming: 'endOfRound' | 'endOfMission' | 'specificRounds';
+  /** Only meaningful when `awardTiming === 'specificRounds'`. */
+  awardRounds?: number[];
 }
 /** VP for destroying one SPECIFIC placed/reinforcement Unit, overriding the general per-kill value for it. */
 export interface EditorUnitKillVp {
@@ -317,6 +389,23 @@ function genId(prefix: string): string {
   return `${prefix}${Date.now().toString(36)}${seq}`;
 }
 
+/**
+ * EVERY authored unit id in the mission — fixed placements, the Setup Pool,
+ * and every reinforcement wave. A new id must be unique across ALL THREE:
+ * they all end up as keys in the same `game.units` map at play time, so a
+ * collision means a reinforcement ENTER silently overwrites an
+ * already-placed unit (caught live — a Setup Pool 'B-sov-rifle-43-2'
+ * colliding with a wave unit of the same id, because the wave's own id
+ * generator only checked placements + waves, not the pool).
+ */
+function allUnitIds(st: Pick<EditorStore, 'forces' | 'reinforcements'>): string[] {
+  return [
+    ...st.forces.placed.map((p) => p.id),
+    ...st.forces.setupPool.map((p) => p.id),
+    ...Object.values(st.reinforcements.waves).flatMap((ws) => ws.flatMap((w) => w.units.map((u) => u.id))),
+  ];
+}
+
 /** `side-templateId-n`, matching the existing hand-authored id convention (e.g. 'G-rifle-1'). */
 function nextUnitId(existing: Iterable<string>, side: SideId, templateId: string): string {
   const base = `${side}-${templateId}`;
@@ -329,6 +418,10 @@ function nextUnitId(existing: Iterable<string>, side: SideId, templateId: string
 export interface EditorStore {
   section: EditorSection;
   setSection: (s: EditorSection) => void;
+  /** "Load Existing Mission": replaces every authoring slice with the given
+   *  Mission's own data — see `data/editor/loadMissionSource.ts` for the
+   *  reverse-mapping and its one real limitation (the Map section). */
+  loadMission: (missionId: string) => boolean;
 
   info: EditorInfo;
   setInfo: (patch: Partial<EditorInfo>) => void;
@@ -351,6 +444,10 @@ export interface EditorStore {
   placeAtHex: (hexId: HexId) => void;
   removePlaced: (id: string) => void;
   updatePlacedFacing: (id: string, facing: Facing) => void;
+  addToSetupPool: (side: SideId, templateId: string, facing: Facing) => void;
+  removeFromSetupPool: (id: string) => void;
+  setSetupFirstSide: (side: SideId) => void;
+  setSetupInstructions: (text: string) => void;
 
   reinforcements: EditorReinforcementsState;
   setReinf: (patch: Partial<EditorReinforcementsState>) => void;
@@ -395,6 +492,12 @@ export interface EditorStore {
 export const useEditorStore = create<EditorStore>((set) => ({
   section: 'info',
   setSection: (s) => set({ section: s }),
+  loadMission: (missionId) => {
+    const def = missionById(missionId);
+    if (!def) return false;
+    set({ section: 'info', ...buildEditorStateFromMission(def) });
+    return true;
+  },
 
   info: defaultInfo(),
   setInfo: (patch) => set((st) => ({ info: { ...st.info, ...patch } })),
@@ -484,8 +587,7 @@ export const useEditorStore = create<EditorStore>((set) => ({
     set((st) => {
       const { armedTemplateId, armedSide, armedFacing } = st.forces;
       if (!armedTemplateId) return st;
-      const existingIds = st.forces.placed.map((p) => p.id);
-      const id = nextUnitId(existingIds, armedSide, armedTemplateId);
+      const id = nextUnitId(allUnitIds(st), armedSide, armedTemplateId);
       const entry: PlacedUnit = { id, side: armedSide, templateId: armedTemplateId, hexId, facing: armedFacing };
       return { forces: { ...st.forces, placed: [...st.forces.placed, entry] } };
     }),
@@ -494,6 +596,16 @@ export const useEditorStore = create<EditorStore>((set) => ({
     set((st) => ({
       forces: { ...st.forces, placed: st.forces.placed.map((p) => (p.id === id ? { ...p, facing } : p)) },
     })),
+  addToSetupPool: (side, templateId, facing) =>
+    set((st) => {
+      const id = nextUnitId(allUnitIds(st), side, templateId);
+      const entry: EditorSetupUnit = { id, side, templateId, facing };
+      return { forces: { ...st.forces, setupPool: [...st.forces.setupPool, entry] } };
+    }),
+  removeFromSetupPool: (id) =>
+    set((st) => ({ forces: { ...st.forces, setupPool: st.forces.setupPool.filter((p) => p.id !== id) } })),
+  setSetupFirstSide: (side) => set((st) => ({ forces: { ...st.forces, setupFirstSide: side } })),
+  setSetupInstructions: (text) => set((st) => ({ forces: { ...st.forces, setupInstructions: text } })),
 
   reinforcements: defaultReinforcements(),
   setReinf: (patch) => set((st) => ({ reinforcements: { ...st.reinforcements, ...patch } })),
@@ -557,11 +669,7 @@ export const useEditorStore = create<EditorStore>((set) => ({
     set((st) => {
       const wave = st.reinforcements.waves[side].find((w) => w.id === waveId);
       if (!wave) return st;
-      const existingIds = [
-        ...st.forces.placed.map((p) => p.id),
-        ...Object.values(st.reinforcements.waves).flatMap((ws) => ws.flatMap((w) => w.units.map((u) => u.id))),
-      ];
-      const id = nextUnitId(existingIds, side, templateId);
+      const id = nextUnitId(allUnitIds(st), side, templateId);
       return {
         reinforcements: {
           ...st.reinforcements,

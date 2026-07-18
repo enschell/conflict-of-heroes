@@ -6,70 +6,16 @@
  * only `UNIT_TEMPLATES` is imported by reference, so the mission stays in
  * sync with the real catalog instead of duplicating stat data.
  */
-import { assembledMap } from '../../state/editorStore';
+import { assembledMap, assembledMapOverlays, assembledMapRotations } from '../../state/editorStore';
 import type { EditorAuthoredState } from '../../state/editorStore';
 import type { ExitZoneDef, HexId, MapHexDef, SideId, VictoryHexDef } from '../../engine/types';
-
-// ---------------------------------------------------------------------------
-// A tiny JS-value -> TypeScript-source pretty printer. `raw(code)` escapes a
-// value out of quoting/escaping so real code (an identifier expression, e.g.
-// `UNIT_TEMPLATES['ger-rifle']!`) can be spliced in verbatim.
-// ---------------------------------------------------------------------------
-
-const RAW = Symbol('raw');
-interface RawCode {
-  [RAW]: true;
-  code: string;
-}
-function raw(code: string): RawCode {
-  return { [RAW]: true, code };
-}
-function isRaw(v: unknown): v is RawCode {
-  return !!v && typeof v === 'object' && RAW in (v as object);
-}
-
-const IDENT = /^[A-Za-z_$][A-Za-z0-9_$]*$/;
-
-function quote(s: string): string {
-  return `'${s.replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/\n/g, '\\n')}'`;
-}
-
-function toSource(value: unknown, indent = 0): string {
-  const pad = '  '.repeat(indent);
-  const padIn = '  '.repeat(indent + 1);
-  if (isRaw(value)) return value.code;
-  if (value === undefined) return 'undefined';
-  if (value === null) return 'null';
-  if (typeof value === 'string') return quote(value);
-  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
-  if (Array.isArray(value)) {
-    if (value.length === 0) return '[]';
-    const items = value.map((v) => `${padIn}${toSource(v, indent + 1)}`).join(',\n');
-    return `[\n${items},\n${pad}]`;
-  }
-  if (typeof value === 'object') {
-    const entries = Object.entries(value).filter(([, v]) => v !== undefined);
-    if (entries.length === 0) return '{}';
-    const lines = entries
-      .map(([k, v]) => `${padIn}${IDENT.test(k) ? k : quote(k)}: ${toSource(v, indent + 1)}`)
-      .join(',\n');
-    return `{\n${lines},\n${pad}}`;
-  }
-  throw new Error(`emitMissionSource: cannot serialize value of type ${typeof value}`);
-}
-
-function slugify(title: string): string {
-  const s = title
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/(^-|-$)/g, '');
-  return s || 'mission';
-}
+import { quote, raw, slugify, toSource } from './tsSource';
 
 /** Every distinct template id referenced by this mission's placements/reinforcements. */
 function collectTemplateIds(state: EditorAuthoredState): string[] {
   const ids = new Set<string>();
   for (const p of state.forces.placed) ids.add(p.templateId);
+  for (const p of state.forces.setupPool) ids.add(p.templateId);
   for (const side of ['A', 'B'] as const) {
     for (const w of state.reinforcements.waves[side]) {
       for (const u of w.units) ids.add(u.templateId);
@@ -102,6 +48,7 @@ function buildVictoryHexes(state: EditorAuthoredState, hexes: MapHexDef[]): Vict
     control: v.control === 'neutral' ? undefined : (v.control as SideId),
     roundOverrides: v.overrides?.length ? v.overrides.map((o) => ({ round: o.round, vp: o.vp })) : undefined,
     awardTiming: v.awardTiming === 'endOfRound' ? undefined : v.awardTiming,
+    awardRounds: v.awardTiming === 'specificRounds' && v.awardRounds?.length ? v.awardRounds : undefined,
   }));
 }
 
@@ -142,7 +89,7 @@ function buildAdvancedNotes(state: EditorAuthoredState) {
 /** Produce the full, self-contained TypeScript `MissionDef` source text. */
 export function emitMissionSource(state: EditorAuthoredState): string {
   const { info } = state;
-  const id = slugify(info.title);
+  const id = slugify(info.title, 'mission');
   const seed = Date.now();
   const templateIds = collectTemplateIds(state);
 
@@ -181,6 +128,8 @@ export function emitMissionSource(state: EditorAuthoredState): string {
   );
 
   const hexes = buildHexes(state);
+  const mapOverlays = assembledMapOverlays(state.map);
+  const mapRotations = assembledMapRotations(state.map);
 
   const missionDef = {
     id,
@@ -196,10 +145,17 @@ export function emitMissionSource(state: EditorAuthoredState): string {
     vpPerSurvivor: Object.keys(vpPerSurvivor).length ? vpPerSurvivor : undefined,
     hexes,
     units: state.forces.placed.map((p) => ({ id: p.id, side: p.side, templateId: p.templateId, hexId: p.hexId, facing: p.facing })),
+    setupForces: state.forces.setupPool.length
+      ? state.forces.setupPool.map((p) => ({ id: p.id, side: p.side, templateId: p.templateId, facing: p.facing }))
+      : undefined,
+    setupFirstSide: state.forces.setupPool.length && state.forces.setupFirstSide !== 'A' ? state.forces.setupFirstSide : undefined,
+    setupInstructions: state.forces.setupInstructions || undefined,
     reinforcements: reinforcements.length ? reinforcements : undefined,
     exitZones: buildExitZones(state),
     templates: raw(`[${templateIds.map((tid) => `UNIT_TEMPLATES[${quote(tid)}]!`).join(', ')}]`),
     victoryHexes: buildVictoryHexes(state, hexes),
+    mapOverlays: Object.keys(mapOverlays).length ? mapOverlays : undefined,
+    mapRotations: Object.keys(mapRotations).length ? mapRotations : undefined,
     situation: info.situation || undefined,
     sideOrders: Object.keys(sideOrders).length ? sideOrders : undefined,
     missionInstructions: Object.keys(missionInstructions).length ? missionInstructions : undefined,
@@ -237,7 +193,7 @@ export function downloadMissionSource(state: EditorAuthoredState): void {
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = `${slugify(state.info.title)}.ts`;
+  a.download = `${slugify(state.info.title, 'mission')}.ts`;
   document.body.appendChild(a);
   a.click();
   a.remove();

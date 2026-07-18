@@ -9,7 +9,7 @@
  * picker. Clicks/hover route through the store.
  */
 import { useEffect, useRef, useState } from 'react';
-import { attackContext, directionTo, distance, effectiveStats, fortificationAt, legalActionsForUnit, legalEntryHexes, moveCost, neighbor, neighbors, parseHexId, idOf, planVehicleMove, templateOf, visibleHexesFrom } from '../engine';
+import { attackContext, directionTo, distance, effectiveStats, fortificationAt, legalActionsForUnit, legalEntryHexes, legalSetupHexes, moveCost, neighbor, neighbors, parseHexId, idOf, planVehicleMove, templateOf, visibleHexesFrom } from '../engine';
 import type { Action, Facing, FortificationKind, Unit } from '../engine/types';
 import { useGame } from '../state/store';
 import { artForHex } from '../data/hexArt';
@@ -18,7 +18,9 @@ import {
   EDGE_CORNERS,
   HEX_SIZE,
   clipHexPolygon,
+  computeDisplayRotationCluster,
   computeLayout,
+  computeMapOverlayGroups,
   fringeHexes,
   hexCenter,
   hexCorners,
@@ -31,6 +33,16 @@ import { HEX_STROKE, ROAD_STROKE, TERRAIN_FILL, WALL_STROKE } from './theme';
 import { UnitCounter } from './UnitCounter';
 import { UnitPicker } from './UnitPicker';
 
+/** Rotate point `p` by `deg` degrees around `pivot` — plain 2D math (not an SVG transform). */
+function rotateAround(p: { x: number; y: number }, pivot: { x: number; y: number }, deg: number): { x: number; y: number } {
+  const rad = (deg * Math.PI) / 180;
+  const cos = Math.cos(rad);
+  const sin = Math.sin(rad);
+  const dx = p.x - pivot.x;
+  const dy = p.y - pivot.y;
+  return { x: pivot.x + dx * cos - dy * sin, y: pivot.y + dx * sin + dy * cos };
+}
+
 export function Board() {
   const game = useGame((s) => s.game);
   const selectedUnitId = useGame((s) => s.selectedUnitId);
@@ -40,6 +52,7 @@ export function Board() {
   const placingReinforcementQueue = useGame((s) => s.placingReinforcementQueue);
   const placingReinforcementFacing = useGame((s) => s.placingReinforcementFacing);
   const placingReinforcementDone = useGame((s) => s.placingReinforcementDone);
+  const armedSetupUnitId = useGame((s) => s.armedSetupUnitId);
   const losMode = useGame((s) => s.losMode);
   const losSource = useGame((s) => s.losSource);
   const shiftHeld = useGame((s) => s.shiftHeld);
@@ -199,6 +212,12 @@ export function Board() {
       }
     }
   }
+  // Pre-Mission Setup phase: an armed Setup Pool Unit's legal (empty) Hexes —
+  // reuses the same purple highlight as reinforcement entry, since visually
+  // it's the identical "click here to place a Unit" affordance.
+  if (game.phase === 'setup' && armedSetupUnitId) {
+    for (const h of legalSetupHexes(game)) entryTargets.add(h);
+  }
   // While a just-placed reinforcement Unit awaits its facing choice, keep its
   // chosen Hex highlighted the same purple — clicking it again keeps the
   // wave's default facing (store.ts's hexClick).
@@ -248,6 +267,30 @@ export function Board() {
 
   const objectives = new Map(game.victory.victoryHexes.map((v) => [v.hexId, v.vp]));
   const ids = Object.keys(game.hexes);
+
+  // "Overlay mode" (Map Editor, CLAUDE.md §D): a board authored with a real
+  // gameplay-art image REPLACES per-hex terrain tiles for every hex on it —
+  // terrain type/mechanics are unaffected, only which art renders.
+  const overlayGroups = computeMapOverlayGroups(game.hexes, game.mapOverlays, HEX_SIZE);
+  const overlaidHexIds = new Set(overlayGroups.flatMap((g) => g.hexIds));
+
+  // Display-only {90°,-90°} board rotation (Mission/Map Editor, CLAUDE.md §B/
+  // §C): a pixel-only spin over an otherwise-unrotated hex assembly — see
+  // `computeDisplayRotationCluster`'s own comment for why "any entry in
+  // mapRotations at all" implies every Hex in this Mission is in the cluster.
+  // `hexRotationTransform` wraps a Hex's own rendered content in the shared
+  // `rotate(...)` around the cluster's pivot; `hexCounterRotation` undoes just
+  // that spin for legibility-only content (coordinate labels, VP numbers,
+  // elevation glyphs, etc.) — matching `EditorBoard.tsx`'s established
+  // technique exactly, since this is the same rendering problem the Mission
+  // Editor's own board preview already solved.
+  const rotationCluster = computeDisplayRotationCluster(game.hexes, game.mapRotations, HEX_SIZE);
+  const hexRotationTransform = (id: string): string | undefined =>
+    rotationCluster?.hexIds.has(id)
+      ? `rotate(${rotationCluster.rotation} ${rotationCluster.pivot.x} ${rotationCluster.pivot.y})`
+      : undefined;
+  const hexCounterRotation = (id: string, center: { x: number; y: number }): string | undefined =>
+    rotationCluster?.hexIds.has(id) ? `rotate(${-rotationCluster.rotation} ${center.x} ${center.y})` : undefined;
 
   const unitsByHex = new Map<string, Unit[]>();
   for (const u of Object.values(game.units)) {
@@ -456,6 +499,30 @@ export function Board() {
               );
             })}
           </g>
+          {/* "Overlay mode" real gameplay art (§D): one stretched image per
+              board that has one, clipped to the UNION of that board's own
+              (edge-clipped) hex polygons so it never spills past the real
+              board silhouette — drawn once, behind every per-hex fill/tile
+              below, which are themselves skipped for these hexes. */}
+          {overlayGroups.map((g) => {
+            const clipId = `map-overlay-clip-${g.mapNumber}`;
+            return (
+              <g
+                key={`overlay-${g.mapNumber}`}
+                pointerEvents="none"
+                transform={g.hexIds.length ? hexRotationTransform(g.hexIds[0]!) : undefined}
+              >
+                <defs>
+                  <clipPath id={clipId}>
+                    {g.clipPolygons.map((p, i) => (
+                      <polygon key={i} points={p} />
+                    ))}
+                  </clipPath>
+                </defs>
+                <image href={g.url} x={g.x} y={g.y} width={g.width} height={g.height} preserveAspectRatio="none" clipPath={`url(#${clipId})`} />
+              </g>
+            );
+          })}
           {ids.map((id) => {
             const hex = game.hexes[id]!;
             const c = hexCenter(id);
@@ -466,11 +533,12 @@ export function Board() {
             const corners = hexCorners(c);
             const clipped = hex.edgeCut ? clipHexPolygon(corners, c, hex.edgeCut) : corners;
             const pts = pointsAttr(clipped);
-            const art = artForHex(hex);
+            const hasOverlayArt = overlaidHexIds.has(id);
+            const art = hasOverlayArt ? null : artForHex(hex);
             const losDim = visible ? !visible.has(id) && id !== losActive : false;
             const artClipId = hex.edgeCut ? `hexclip-${id}` : 'hexclip';
             return (
-              <g key={id}>
+              <g key={id} transform={hexRotationTransform(id)}>
                 {hex.edgeCut && (
                   <defs>
                     <clipPath id={artClipId}>
@@ -478,7 +546,7 @@ export function Board() {
                     </clipPath>
                   </defs>
                 )}
-                <polygon points={pts} fill={TERRAIN_FILL[hex.terrain]} />
+                {!hasOverlayArt && <polygon points={pts} fill={TERRAIN_FILL[hex.terrain]} />}
                 {art && (
                   <g transform={`translate(${c.x},${c.y})`} clipPath={`url(#${artClipId})`}>
                     <image href={art} x={-artW / 2} y={-HEX_SIZE} width={artW} height={2 * HEX_SIZE} preserveAspectRatio="xMidYMid slice" />
@@ -497,6 +565,7 @@ export function Board() {
                     textAnchor="middle"
                     dominantBaseline="central"
                     pointerEvents="none"
+                    transform={hexCounterRotation(id, c)}
                   >
                     {hex.boardNumber}
                   </text>
@@ -509,6 +578,7 @@ export function Board() {
                       fill={HEX_STROKE}
                       textAnchor="middle"
                       pointerEvents="none"
+                      transform={hexCounterRotation(id, c)}
                     >
                       {hex.label}
                     </text>
@@ -531,7 +601,17 @@ export function Board() {
                 {pathSet.has(id) && (
                   <>
                     <polygon points={pts} fill="#4aa3ff" opacity={0.32} stroke="#4aa3ff" strokeWidth={2} />
-                    <text x={c.x} y={c.y} fontSize={HEX_SIZE * 0.5} fill="#fff" textAnchor="middle" dominantBaseline="central" fontWeight={700} pointerEvents="none">
+                    <text
+                      x={c.x}
+                      y={c.y}
+                      fontSize={HEX_SIZE * 0.5}
+                      fill="#fff"
+                      textAnchor="middle"
+                      dominantBaseline="central"
+                      fontWeight={700}
+                      pointerEvents="none"
+                      transform={hexCounterRotation(id, c)}
+                    >
                       {movePath.indexOf(id) + 1}
                     </text>
                   </>
@@ -558,24 +638,32 @@ export function Board() {
             if (!hex.road) return null;
             const a = parseHexId(id);
             const c = hexCenter(id);
-            return ([0, 1, 5] as Facing[]).map((dir) => {
-              const nId = idOf(neighbor(a, dir));
-              if (!game.hexes[nId]?.road) return null;
-              const nc = hexCenter(nId);
-              return <line key={`${id}-r${dir}`} x1={c.x} y1={c.y} x2={nc.x} y2={nc.y} stroke={ROAD_STROKE} strokeWidth={6} strokeLinecap="round" pointerEvents="none" />;
-            });
+            return (
+              <g key={`road-${id}`} transform={hexRotationTransform(id)}>
+                {([0, 1, 5] as Facing[]).map((dir) => {
+                  const nId = idOf(neighbor(a, dir));
+                  if (!game.hexes[nId]?.road) return null;
+                  const nc = hexCenter(nId);
+                  return <line key={`${id}-r${dir}`} x1={c.x} y1={c.y} x2={nc.x} y2={nc.y} stroke={ROAD_STROKE} strokeWidth={6} strokeLinecap="round" pointerEvents="none" />;
+                })}
+              </g>
+            );
           })}
 
           {ids.map((id) => {
             const hex = game.hexes[id]!;
             const corners = hexCorners(hexCenter(id));
-            return hex.walls.map((has, dir) => {
-              if (!has) return null;
-              const [i, j] = EDGE_CORNERS[dir]!;
-              const p1 = corners[i]!;
-              const p2 = corners[j]!;
-              return <line key={`${id}-w${dir}`} x1={p1.x} y1={p1.y} x2={p2.x} y2={p2.y} stroke={WALL_STROKE} strokeWidth={5} strokeLinecap="round" pointerEvents="none" />;
-            });
+            return (
+              <g key={`wall-${id}`} transform={hexRotationTransform(id)}>
+                {hex.walls.map((has, dir) => {
+                  if (!has) return null;
+                  const [i, j] = EDGE_CORNERS[dir]!;
+                  const p1 = corners[i]!;
+                  const p2 = corners[j]!;
+                  return <line key={`${id}-w${dir}`} x1={p1.x} y1={p1.y} x2={p2.x} y2={p2.y} stroke={WALL_STROKE} strokeWidth={5} strokeLinecap="round" pointerEvents="none" />;
+                })}
+              </g>
+            );
           })}
 
           {/* Elevation (§12.1): a small ▲/▲▲ glyph per Hill Hex so Steep drop-offs are legible. */}
@@ -584,18 +672,20 @@ export function Board() {
             if (!hex.elevation) return null;
             const c = hexCenter(id);
             return (
-              <text
-                key={`elev-${id}`}
-                x={c.x}
-                y={c.y - HEX_SIZE * 0.62}
-                fontSize={HEX_SIZE * 0.32}
-                fill="#5a4322"
-                textAnchor="middle"
-                fontWeight={700}
-                pointerEvents="none"
-              >
-                {hex.elevation === 2 ? '▲▲' : '▲'}
-              </text>
+              <g key={`elev-${id}`} transform={hexRotationTransform(id)}>
+                <text
+                  x={c.x}
+                  y={c.y - HEX_SIZE * 0.62}
+                  fontSize={HEX_SIZE * 0.32}
+                  fill="#5a4322"
+                  textAnchor="middle"
+                  fontWeight={700}
+                  pointerEvents="none"
+                  transform={hexCounterRotation(id, c)}
+                >
+                  {hex.elevation === 2 ? '▲▲' : '▲'}
+                </text>
+              </g>
             );
           })}
 
@@ -608,19 +698,21 @@ export function Board() {
             const c = hexCenter(id);
             const label = obstacle.kind === 'barbedWire' ? 'WIRE' : obstacle.kind === 'mines' ? 'MINES' : 'BLOCK';
             return (
-              <text
-                key={`obstacle-${id}`}
-                x={c.x}
-                y={c.y + HEX_SIZE * 0.68}
-                fontSize={HEX_SIZE * 0.24}
-                fill={obstacle.destroyed ? '#888' : '#b23a3a'}
-                textAnchor="middle"
-                fontWeight={700}
-                textDecoration={obstacle.destroyed ? 'line-through' : undefined}
-                pointerEvents="none"
-              >
-                {label}
-              </text>
+              <g key={`obstacle-${id}`} transform={hexRotationTransform(id)}>
+                <text
+                  x={c.x}
+                  y={c.y + HEX_SIZE * 0.68}
+                  fontSize={HEX_SIZE * 0.24}
+                  fill={obstacle.destroyed ? '#888' : '#b23a3a'}
+                  textAnchor="middle"
+                  fontWeight={700}
+                  textDecoration={obstacle.destroyed ? 'line-through' : undefined}
+                  pointerEvents="none"
+                  transform={hexCounterRotation(id, c)}
+                >
+                  {label}
+                </text>
+              </g>
             );
           })}
 
@@ -633,19 +725,21 @@ export function Board() {
             const c = hexCenter(id);
             const label = fort.kind === 'trench' ? 'TRENCH' : 'BUNKER';
             return (
-              <text
-                key={`fort-${id}`}
-                x={c.x}
-                y={c.y + HEX_SIZE * 0.68}
-                fontSize={HEX_SIZE * 0.24}
-                fill={fort.destroyed ? '#888' : '#3a6ab2'}
-                textAnchor="middle"
-                fontWeight={700}
-                textDecoration={fort.destroyed ? 'line-through' : undefined}
-                pointerEvents="none"
-              >
-                {label}
-              </text>
+              <g key={`fort-${id}`} transform={hexRotationTransform(id)}>
+                <text
+                  x={c.x}
+                  y={c.y + HEX_SIZE * 0.68}
+                  fontSize={HEX_SIZE * 0.24}
+                  fill={fort.destroyed ? '#888' : '#3a6ab2'}
+                  textAnchor="middle"
+                  fontWeight={700}
+                  textDecoration={fort.destroyed ? 'line-through' : undefined}
+                  pointerEvents="none"
+                  transform={hexCounterRotation(id, c)}
+                >
+                  {label}
+                </text>
+              </g>
             );
           })}
 
@@ -657,24 +751,28 @@ export function Board() {
             if (!fort || fort.kind !== 'bunker' || fort.destroyed || fort.facing == null) return null;
             const corners = hexCorners(hexCenter(id));
             const arcDirs = [((fort.facing + 5) % 6) as Facing, fort.facing, ((fort.facing + 1) % 6) as Facing];
-            return arcDirs.map((dir) => {
-              const [i, j] = EDGE_CORNERS[dir]!;
-              const p1 = corners[i]!;
-              const p2 = corners[j]!;
-              return (
-                <line
-                  key={`bunker-arc-${id}-${dir}`}
-                  x1={p1.x}
-                  y1={p1.y}
-                  x2={p2.x}
-                  y2={p2.y}
-                  stroke="#4fd1e8"
-                  strokeWidth={5}
-                  strokeLinecap="round"
-                  pointerEvents="none"
-                />
-              );
-            });
+            return (
+              <g key={`bunker-arc-${id}`} transform={hexRotationTransform(id)}>
+                {arcDirs.map((dir) => {
+                  const [i, j] = EDGE_CORNERS[dir]!;
+                  const p1 = corners[i]!;
+                  const p2 = corners[j]!;
+                  return (
+                    <line
+                      key={`bunker-arc-${id}-${dir}`}
+                      x1={p1.x}
+                      y1={p1.y}
+                      x2={p2.x}
+                      y2={p2.y}
+                      stroke="#4fd1e8"
+                      strokeWidth={5}
+                      strokeLinecap="round"
+                      pointerEvents="none"
+                    />
+                  );
+                })}
+              </g>
+            );
           })}
 
           {[...objectives.entries()].map(([id, vp]) => {
@@ -682,51 +780,82 @@ export function Board() {
             const ctrl = game.hexes[id]?.features.control;
             const ring = ctrl === 'A' ? '#9fb0c4' : ctrl === 'B' ? '#e08a8a' : '#e9c46a';
             return (
-              <g key={`obj-${id}`} pointerEvents="none">
+              <g key={`obj-${id}`} pointerEvents="none" transform={hexRotationTransform(id)}>
                 <circle cx={c.x} cy={c.y} r={HEX_SIZE * 0.82} fill="none" stroke={ring} strokeWidth={3} strokeDasharray="5 4" />
-                <text x={c.x} y={c.y - HEX_SIZE * 0.52} fontSize={HEX_SIZE * 0.3} fill={ring} textAnchor="middle" fontWeight={700}>★{vp}</text>
+                <text
+                  x={c.x}
+                  y={c.y - HEX_SIZE * 0.52}
+                  fontSize={HEX_SIZE * 0.3}
+                  fill={ring}
+                  textAnchor="middle"
+                  fontWeight={700}
+                  transform={hexCounterRotation(id, c)}
+                >
+                  ★{vp}
+                </text>
               </g>
             );
           })}
 
-          {[...unitsByHex.entries()].flatMap(([hexId, list]) => {
+          {[...unitsByHex.entries()].map(([hexId, list]) => {
             const c = hexCenter(hexId);
             const n = list.length;
             const ordered = [...list].sort((a, b) => (a.id === selectedUnitId ? 1 : 0) - (b.id === selectedUnitId ? 1 : 0));
-            const nodes = ordered.map((u) => {
-              const k = list.indexOf(u);
-              const off = n > 1 ? (k - (n - 1) / 2) * 10 : 0;
-              return (
-                <g key={u.id} onMouseMove={(e) => setHover({ id: u.hexId, x: e.clientX, y: e.clientY })}>
-                  <UnitCounter
-                    game={game}
-                    unit={u}
-                    center={{ x: c.x + off, y: c.y + off }}
-                    size={HEX_SIZE}
-                    selected={u.id === selectedUnitId}
-                    inGroup={groupSel.includes(u.id)}
-                    stressed={u.stressed}
-                    onClick={(e) => hexClick(u.hexId, { ctrl: e.ctrlKey, x: e.clientX, y: e.clientY })}
-                  />
-                </g>
-              );
-            });
-            if (n > 1) {
-              nodes.push(
-                <g key={`${hexId}-stack`} pointerEvents="none">
-                  <circle cx={c.x + HEX_SIZE * 0.7} cy={c.y - HEX_SIZE * 0.7} r={HEX_SIZE * 0.28} fill="#000a" />
-                  <text x={c.x + HEX_SIZE * 0.7} y={c.y - HEX_SIZE * 0.62} fontSize={HEX_SIZE * 0.3} fill="#fff" textAnchor="middle" fontWeight={700}>×{n}</text>
-                </g>,
-              );
-            }
-            return nodes;
+            return (
+              <g key={hexId} transform={hexRotationTransform(hexId)}>
+                {ordered.map((u) => {
+                  const k = list.indexOf(u);
+                  const off = n > 1 ? (k - (n - 1) / 2) * 10 : 0;
+                  return (
+                    <g key={u.id} onMouseMove={(e) => setHover({ id: u.hexId, x: e.clientX, y: e.clientY })}>
+                      <UnitCounter
+                        game={game}
+                        unit={u}
+                        center={{ x: c.x + off, y: c.y + off }}
+                        size={HEX_SIZE}
+                        selected={u.id === selectedUnitId}
+                        inGroup={groupSel.includes(u.id)}
+                        stressed={u.stressed}
+                        onClick={(e) => hexClick(u.hexId, { ctrl: e.ctrlKey, x: e.clientX, y: e.clientY })}
+                      />
+                    </g>
+                  );
+                })}
+                {n > 1 && (
+                  <g pointerEvents="none">
+                    <circle cx={c.x + HEX_SIZE * 0.7} cy={c.y - HEX_SIZE * 0.7} r={HEX_SIZE * 0.28} fill="#000a" />
+                    <text
+                      x={c.x + HEX_SIZE * 0.7}
+                      y={c.y - HEX_SIZE * 0.62}
+                      fontSize={HEX_SIZE * 0.3}
+                      fill="#fff"
+                      textAnchor="middle"
+                      fontWeight={700}
+                      transform={hexCounterRotation(hexId, c)}
+                    >
+                      ×{n}
+                    </text>
+                  </g>
+                )}
+              </g>
+            );
           })}
 
           {/* Rendered last so it's always above every Hex fill and Unit counter. */}
           {facingHighlightHex && (
             <g pointerEvents="none">
               {(() => {
-                const c = hexCenter(facingHighlightHex);
+                // A floating instructional callout, not physical board content
+                // — it should stay upright and keep reading "above" the Hex
+                // regardless of board rotation, so this computes the Hex's
+                // real ROTATED screen position by math (not an SVG group
+                // transform, which would also spin the pill's own shape/offset
+                // direction) and draws the pill normally from there.
+                const cRaw = hexCenter(facingHighlightHex);
+                const c =
+                  rotationCluster?.hexIds.has(facingHighlightHex)
+                    ? rotateAround(cRaw, rotationCluster.pivot, rotationCluster.rotation)
+                    : cRaw;
                 // Width scales with the label text so longer variants (e.g.
                 // the Group Move one) don't get clipped — same ratio the
                 // original two-case hardcoded 2.6/4.6 split already implied.

@@ -131,6 +131,61 @@ describe('awardTiming (§9.1 endOfRound vs endOfMission)', () => {
   });
 });
 
+describe('specificRounds award mode (§9.1, e.g. "VP for K09 in Rounds 3, 4, and 5 only")', () => {
+  function scene(awardRounds: number[]) {
+    const s = baseState();
+    addHex(s, 0, 0);
+    addTemplate(s, rifleTemplate());
+    addUnit(s, 'A1', 'A', 0, 0, 0);
+    s.victory = { victoryHexes: [{ hexId: '0,0', vp: 1, awardTiming: 'specificRounds', awardRounds }] };
+    s.roundsTotal = 5;
+    return s;
+  }
+
+  it('awards nothing on a Round not in the list', () => {
+    const s = scene([3, 4, 5]);
+    s.round = 1;
+    const before = s.players.A.vp;
+    endRound(s);
+    expect(s.players.A.vp).toBe(before);
+  });
+
+  it('awards the vp on every Round that IS in the list', () => {
+    const s = scene([3, 4, 5]);
+    const before = s.players.A.vp;
+    for (const r of [3, 4, 5]) {
+      s.round = r;
+      endRound(s);
+    }
+    expect(s.players.A.vp - before).toBe(3); // 1 VP * 3 listed Rounds
+  });
+
+  it('still respects a roundOverrides amount on a listed Round', () => {
+    const s = baseState();
+    addHex(s, 0, 0);
+    addTemplate(s, rifleTemplate());
+    addUnit(s, 'A1', 'A', 0, 0, 0);
+    s.victory = {
+      victoryHexes: [
+        { hexId: '0,0', vp: 1, awardTiming: 'specificRounds', awardRounds: [3, 4], roundOverrides: [{ round: 4, vp: 9 }] },
+      ],
+    };
+    s.roundsTotal = 5;
+    s.round = 4;
+    const before = s.players.A.vp;
+    endRound(s);
+    expect(s.players.A.vp - before).toBe(9);
+  });
+
+  it('an unset awardRounds list awards nothing at all (defensive default)', () => {
+    const s = scene([]);
+    s.round = 3;
+    const before = s.players.A.vp;
+    endRound(s);
+    expect(s.players.A.vp).toBe(before);
+  });
+});
+
 describe('unitKillVp (§9.1 specific-Unit destruction VP override)', () => {
   it('overrides the general per-kill/template VP for that one Unit', () => {
     const s = baseState();

@@ -19,6 +19,7 @@ import {
   isValidSupporter,
   legalActionsForUnit,
   legalEntryHexes,
+  legalSetupHexes,
   minesOwnerSide,
   minesTargetsFor,
   modifiedActionCost,
@@ -179,6 +180,9 @@ interface Store {
   /** Finished placements (Hex + facing decided), accumulated until the queue
    *  empties, then dispatched as one ENTER Action (§4.12 Group entry). */
   placingReinforcementDone: { unitId: UnitId; hexId: HexId; facing: Facing }[];
+  /** Pre-Mission Setup phase (`game.phase === 'setup'`): the Setup Pool Unit
+   *  currently armed for placement — clicking a legal (empty) Hex places it. */
+  armedSetupUnitId: UnitId | null;
   losMode: boolean;
   losSource: HexId | null;
   shiftHeld: boolean;
@@ -212,12 +216,15 @@ interface Store {
   netError: string | null;
 
   /** 'menu' (default) is the normal SetupScreen/OnlineLobby/game flow, entirely
-   *  untouched by the Mission Editor. 'editor' shows the Mission Editor instead
-   *  — a sibling screen with its own state (`state/editorStore.ts`), not a
-   *  `GameState` variant. */
-  screen: 'menu' | 'editor';
+   *  untouched by the Mission Editor. 'editor' shows the Mission Editor and
+   *  'mapEditor' shows the Map Editor (terrain authoring) instead — sibling
+   *  screens with their own state (`state/editorStore.ts`/
+   *  `state/mapEditorStore.ts`), not `GameState` variants. */
+  screen: 'menu' | 'editor' | 'mapEditor';
   openMissionEditor: () => void;
   closeMissionEditor: () => void;
+  openMapEditor: () => void;
+  closeMapEditor: () => void;
 
   newGame: (def?: MissionDef) => void;
   resume: () => void;
@@ -259,6 +266,10 @@ interface Store {
   removeHastyDefense: (unitId: UnitId) => void;
   /** Exit the Map via a Mission-authored exit zone (§4.0) — costs this Unit's own move stat, CAP-gated like Hasty Defense. */
   exit: (unitId: UnitId) => void;
+  /** Pre-Mission Setup phase: arm (or disarm, pass `null`) a Setup Pool Unit for placement. */
+  armSetupUnit: (unitId: UnitId | null) => void;
+  /** Places the given Setup Pool Unit at `hexId` — free, no CAP gate, no Spent Check. */
+  placeSetupUnit: (unitId: UnitId, hexId: HexId) => void;
   /** Mortar Indirect Attack (§13.2): a Spotter Hex is picked automatically —
    *  the first legal one, via `legalActionsForUnit`/`bestSpotterFor` (§13.3
    *  places no requirement on WHICH legal Spotter Hex is used, so there's no
@@ -547,6 +558,7 @@ export const useGame = create<Store>((set, get) => {
     placingReinforcementQueue: [],
     placingReinforcementFacing: null,
     placingReinforcementDone: [],
+    armedSetupUnitId: null,
     history: [] as GameState[],
     future: [] as GameState[],
     picker: null,
@@ -982,6 +994,7 @@ export const useGame = create<Store>((set, get) => {
     placingReinforcementQueue: [],
     placingReinforcementFacing: null,
     placingReinforcementDone: [],
+    armedSetupUnitId: null,
     losMode: false,
     losSource: null,
     shiftHeld: false,
@@ -1006,6 +1019,8 @@ export const useGame = create<Store>((set, get) => {
     screen: 'menu',
     openMissionEditor: () => set({ screen: 'editor' }),
     closeMissionEditor: () => set({ screen: 'menu' }),
+    openMapEditor: () => set({ screen: 'mapEditor' }),
+    closeMapEditor: () => set({ screen: 'menu' }),
 
     newGame: (def = MISSION_1) => {
       netClient?.close();
@@ -1023,6 +1038,7 @@ export const useGame = create<Store>((set, get) => {
         placingReinforcementQueue: [],
         placingReinforcementFacing: null,
         placingReinforcementDone: [],
+        armedSetupUnitId: null,
         losMode: false,
         losSource: null,
         pivotPicker: false,
@@ -1090,6 +1106,30 @@ export const useGame = create<Store>((set, get) => {
       // A board click anywhere dismisses an open action chooser.
       if (get().chooser) {
         set({ chooser: null });
+        return;
+      }
+
+      // Pre-Mission Setup phase: only two clicks mean anything while this is
+      // ongoing — choosing the just-placed Unit's facing, or placing the next
+      // armed Setup Pool Unit onto a legal (empty) Hex.
+      if (game.phase === 'setup') {
+        // The free facing-correction window a SETUP_PLACE grants (§4.5's
+        // existing mechanism) — same logic as the normal-play branch further
+        // down, which this early-return otherwise makes unreachable (caught
+        // live: the "Choose facing" callout appeared after placing, but no
+        // click could actually set the facing until setup ended).
+        if (selectedUnitId && game.pendingFacingChoices?.includes(selectedUnitId)) {
+          const u = game.units[selectedUnitId];
+          const dir = u ? directionTo(u.hexId, hexId) : -1;
+          if (dir >= 0) {
+            get().chooseFacing(selectedUnitId, dir as Facing);
+            return;
+          }
+        }
+        const armed = get().armedSetupUnitId;
+        if (armed && legalSetupHexes(game).includes(hexId)) {
+          get().placeSetupUnit(armed, hexId);
+        }
         return;
       }
 
@@ -1537,6 +1577,14 @@ export const useGame = create<Store>((set, get) => {
     // §4.0: Exit the Map via a designated exit zone — no roll, straight through capGate to dispatch.
     exit: (unitId) => capGate({ type: 'EXIT', unitId }, (a) => get().dispatch(a)),
 
+    // Pre-Mission Setup phase: arm a Setup Pool Unit, then a board click on a
+    // legal Hex places it — free, no CAP gate, no roll, straight to dispatch.
+    armSetupUnit: (unitId) => set({ armedSetupUnitId: unitId }),
+    placeSetupUnit: (unitId, hexId) => {
+      get().dispatch({ type: 'SETUP_PLACE', unitId, hexId });
+      set({ armedSetupUnitId: null });
+    },
+
     // Load/Unload (§15.7/§15.9) are Group Actions: legalActionsForUnit already
     // bakes in the right capCostReduce when either the Unit or the Vehicle is
     // Spent (matching how GROUP_MOVE/GROUP_RALLY/GROUP_ATTACK are dispatched
@@ -1613,6 +1661,7 @@ export const useGame = create<Store>((set, get) => {
         placingReinforcementQueue: eligible,
         placingReinforcementFacing: null,
         placingReinforcementDone: [],
+        armedSetupUnitId: null,
         selectedUnitId: null,
         groupMode: false,
         groupSel: [],
@@ -1873,6 +1922,7 @@ export const useGame = create<Store>((set, get) => {
         placingReinforcementQueue: [],
         placingReinforcementFacing: null,
         placingReinforcementDone: [],
+        armedSetupUnitId: null,
         pendingRoll: null,
         pendingConfirm: null,
         chooser: null,
@@ -1898,6 +1948,7 @@ export const useGame = create<Store>((set, get) => {
         placingReinforcementQueue: [],
         placingReinforcementFacing: null,
         placingReinforcementDone: [],
+        armedSetupUnitId: null,
         pendingRoll: null,
         pendingConfirm: null,
         chooser: null,

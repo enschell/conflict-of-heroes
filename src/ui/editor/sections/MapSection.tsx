@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { assembledMap, assembledRotationClusters, useEditorStore } from '../../../state/editorStore';
+import { assembledMap, assembledMapOverlays, assembledRotationClusters, useEditorStore } from '../../../state/editorStore';
 import type { EditorBoard as EditorBoardEntry, MapTool } from '../../../state/editorStore';
 import { MAP_CATALOG, mapById } from '../../../data/maps/catalog';
 import { SIDE_COLOR } from '../../theme';
@@ -133,6 +133,7 @@ export function MapSection() {
   const activeTool = TOOLS.find((t) => t.id === map.tool);
   const { hexes, error } = useMemo(() => assembledMap(map), [map]);
   const clusters = useMemo(() => assembledRotationClusters(map), [map]);
+  const mapOverlays = useMemo(() => assembledMapOverlays(map), [map]);
 
   const markers = useMemo<EditorMarker[]>(() => {
     const list: EditorMarker[] = [];
@@ -184,6 +185,7 @@ export function MapSection() {
             markers={markers}
             onHexClick={paintMapHex}
             rotationClusters={clusters}
+            mapOverlays={mapOverlays}
           />
         </div>
         <div className="editor__map-tools">

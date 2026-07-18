@@ -77,6 +77,9 @@ export function endRound(state: GameState): void {
     // 'endOfMission' hexes only ever score once, at the Mission's real final
     // Round-end — never on an intermediate Round (§9.1, Mission-authored).
     if (vh.awardTiming === 'endOfMission' && !isLastRound) continue;
+    // 'specificRounds' hexes only score on the exact Rounds listed — a Round
+    // not in `awardRounds` awards nothing at all, unlike 'endOfRound'.
+    if (vh.awardTiming === 'specificRounds' && !(vh.awardRounds ?? []).includes(state.round)) continue;
     const ctrl = state.hexes[vh.hexId]?.features.control;
     if (ctrl) {
       const vp = vpForRound(vh, state.round);

@@ -4,8 +4,10 @@
  * `docs/design_handoff_mission_editor/README.md`, ported onto the real engine
  * types instead of the design's placeholder ones.
  */
+import { useState } from 'react';
 import { useEditorStore } from '../../state/editorStore';
 import type { EditorSection } from '../../state/editorStore';
+import { MISSION_CATALOG } from '../../data/missions/catalog';
 import { MissionInfoSection } from './sections/MissionInfoSection';
 import { MapSection } from './sections/MapSection';
 import { StartingForcesSection } from './sections/StartingForcesSection';
@@ -27,6 +29,8 @@ export function MissionEditor({ onExit }: { onExit: () => void }) {
   const section = useEditorStore((s) => s.section);
   const setSection = useEditorStore((s) => s.setSection);
   const title = useEditorStore((s) => s.info.title);
+  const loadMission = useEditorStore((s) => s.loadMission);
+  const [loadPick, setLoadPick] = useState(Object.keys(MISSION_CATALOG)[0] ?? '');
 
   const sectionLabel = NAV.find((n) => n.id === section)?.label ?? section;
 
@@ -50,6 +54,38 @@ export function MissionEditor({ onExit }: { onExit: () => void }) {
             </button>
           ))}
         </nav>
+
+        <div className="editor__section" style={{ padding: '0 0.9rem' }}>
+          <label className="editor__field-label">
+            Load Existing Mission
+            <select value={loadPick} onChange={(e) => setLoadPick(e.target.value)}>
+              {Object.values(MISSION_CATALOG).map((m) => (
+                <option key={m.id} value={m.id}>
+                  {m.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <button
+            className="editor__toggle"
+            disabled={!loadPick}
+            onClick={() => {
+              if (
+                window.confirm(
+                  'Load this Mission for editing? This discards any unsaved changes in the editor. ' +
+                    'Note: the Map section will show one merged board (rotation/multi-board structure ' +
+                    "isn't recoverable from an exported Mission) — everything else round-trips exactly.",
+                )
+              ) {
+                loadMission(loadPick);
+              }
+            }}
+          >
+            Load for Editing
+          </button>
+        </div>
+
+        <div style={{ flex: 1 }} />
         <button className="editor__exit" onClick={onExit}>
           ← Exit Editor
         </button>

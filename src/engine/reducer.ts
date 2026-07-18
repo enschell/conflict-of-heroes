@@ -32,8 +32,9 @@ import { directionTo, moveCost, pivotCost, planVehicleMove } from './movement';
 import { destroysBarbedWire, minesOwnerSide, minesTargetsFor, rollMinesAttack } from './obstacles';
 import { RALLY_AP_COST, rollRally } from './rally';
 import { legalEntryHexes } from './reinforcements';
+import { legalSetupHexes } from './setup';
 import { spentCheck } from './spent';
-import { endRound, switchTurn } from './turn';
+import { endRound, startRound, switchTurn } from './turn';
 import { gainVp, otherSide, updateVictoryHexControl, vpPerKillFor } from './victory';
 import type {
   Action,
@@ -47,7 +48,16 @@ import type {
 } from './types';
 
 export function reduce(state: GameState, action: Action): ReduceResult {
-  if (state.phase !== 'playing') {
+  // Pre-Mission Setup phase: ONLY SETUP_PLACE — plus the free CHOOSE_FACING
+  // correction a SETUP_PLACE itself grants (`doSetupPlace` opens the same
+  // §4.5 `pendingFacingChoices` window a Move does; without this carve-out
+  // the placed Unit's facing pick was silently no-op'd until setup ended,
+  // caught live) — is legal while it's ongoing. SETUP_PLACE is never legal
+  // once it's over (or if the Mission never had one) — everything else
+  // behaves exactly as before this feature existed.
+  if (state.phase === 'setup') {
+    if (action.type !== 'SETUP_PLACE' && action.type !== 'CHOOSE_FACING') return { state, events: [] };
+  } else if (state.phase !== 'playing' || action.type === 'SETUP_PLACE') {
     return { state, events: [] };
   }
 
@@ -1092,6 +1102,56 @@ export function reduce(state: GameState, action: Action): ReduceResult {
     return finish();
   };
 
+  /**
+   * Pre-Mission Setup phase (Mission-configurable): place one `setupPool`
+   * Unit onto any empty Hex. Free — no AP, no Spent Check, no Stress, no
+   * Turn to hand off (there's no "Turn" yet) — only the facing-correction
+   * window (§4.5's mechanism, reused) opens afterward. Once the acting
+   * side's pool empties, hand setup to the other side if it still has Units
+   * waiting, or finish setup and start the real Round 1.
+   */
+  const doSetupPlace = (a: Extract<Action, { type: 'SETUP_PLACE' }>): ReduceResult => {
+    if (next.phase !== 'setup') return deny('the Setup phase has already ended');
+    const pool = next.setupPool ?? [];
+    const entry = pool.find((u) => u.id === a.unitId);
+    if (!entry) return deny('no such Setup Unit');
+    if (entry.side !== next.setupSide) return deny("not your side's turn to set up");
+    if (!legalSetupHexes(next).includes(a.hexId)) return deny(`${a.hexId} is not a legal Setup Hex`);
+
+    const unit: Unit = {
+      id: entry.id,
+      side: entry.side,
+      nation: entry.nation,
+      templateId: entry.templateId,
+      hexId: a.hexId,
+      facing: a.facing ?? entry.facing,
+      status: 'fresh',
+      stressed: false,
+      hitMarkers: [],
+      assignedWeaponCards: [],
+    };
+    next.units[unit.id] = unit;
+    next.setupPool = pool.filter((u) => u.id !== entry.id);
+    grantFacingChoice(unit.id);
+    log('setup', `${unit.id} sets up at ${a.hexId}`, unit.side);
+
+    const sideDone = !next.setupPool.some((u) => u.side === entry.side);
+    if (sideDone) {
+      const other = otherSide(entry.side);
+      const otherHasMore = next.setupPool.some((u) => u.side === other);
+      if (otherHasMore) {
+        next.setupSide = other;
+        log('setup', `Side ${entry.side} has finished setup — Side ${other} sets up next`);
+      } else {
+        next.setupSide = undefined;
+        updateVictoryHexControl(next);
+        log('setup', 'Setup phase complete');
+        startRound(next);
+      }
+    }
+    return finish();
+  };
+
   /** §17.6: a Foot Unit spends 5AP to build a Hasty Defense on itself. */
   const doHastyDefense = (a: Extract<Action, { type: 'HASTY_DEFENSE' }>): ReduceResult => {
     const unit = next.units[a.unitId];
@@ -1183,6 +1243,8 @@ export function reduce(state: GameState, action: Action): ReduceResult {
       return doUnload(action);
     case 'ENTER':
       return doEnter(action);
+    case 'SETUP_PLACE':
+      return doSetupPlace(action);
     case 'HASTY_DEFENSE':
       return doHastyDefense(action);
     case 'REMOVE_HASTY_DEFENSE':

@@ -1,5 +1,5 @@
 import { useMemo } from 'react';
-import { assembledMap, useEditorStore } from '../../../state/editorStore';
+import { assembledMap, assembledMapOverlays, assembledRotationClusters, useEditorStore } from '../../../state/editorStore';
 import { UNIT_TEMPLATES } from '../../../data/units';
 import { EditorBoardOrError } from '../EditorBoard';
 
@@ -23,6 +23,8 @@ export function VictorySection() {
   const waves = useEditorStore((s) => s.reinforcements.waves);
   const map = useEditorStore((s) => s.map);
   const { hexes: mapHexes, error: mapError } = useMemo(() => assembledMap(map), [map]);
+  const mapOverlays = useMemo(() => assembledMapOverlays(map), [map]);
+  const rotationClusters = useMemo(() => assembledRotationClusters(map), [map]);
 
   const allUnits = [
     ...placed.map((p) => ({ id: p.id, label: `${UNIT_TEMPLATES[p.templateId]?.name ?? p.templateId} (${p.id})` })),
@@ -109,7 +111,26 @@ export function VictorySection() {
             >
               <option value="endOfRound">Every Round</option>
               <option value="endOfMission">Once at Mission end</option>
+              <option value="specificRounds">Only specific Rounds</option>
             </select>
+            {v.awardTiming === 'specificRounds' && (
+              <label className="editor__field-label editor__field-label--inline">
+                Rounds
+                <input
+                  type="text"
+                  placeholder="e.g. 3, 4, 5"
+                  defaultValue={(v.awardRounds ?? []).join(', ')}
+                  onBlur={(e) =>
+                    updateVictoryHex(v.id, {
+                      awardRounds: e.target.value
+                        .split(',')
+                        .map((s) => parseInt(s.trim(), 10))
+                        .filter((n) => Number.isFinite(n) && n > 0),
+                    })
+                  }
+                />
+              </label>
+            )}
             <button onClick={() => toggleVictoryVaries(v.id)}>{v.overrides ? 'Varies per round ✓' : 'Same every round'}</button>
             <button onClick={() => removeVictoryHex(v.id)}>×</button>
             {v.overrides && (
@@ -214,6 +235,8 @@ export function VictorySection() {
                 hexes={mapHexes}
                 highlightedHexIds={new Set(z.hexIds)}
                 onHexClick={(hex) => toggleExitZoneHex(z.id, hex)}
+                mapOverlays={mapOverlays}
+                rotationClusters={rotationClusters}
               />
             </div>
             <p className="editor__hex-echo">Exit Hexes: {z.hexIds.join(', ') || '(none selected)'}</p>

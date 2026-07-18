@@ -19,8 +19,10 @@ import { Inspector } from './ui/Inspector';
 import { Log } from './ui/Log';
 import { MinesConfirm } from './ui/MinesConfirm';
 import { MissionEditor } from './ui/editor/MissionEditor';
+import { MapEditor } from './ui/mapEditor/MapEditor';
 import { OnlineLobby } from './ui/OnlineLobby';
 import { ReinforcementsPanel } from './ui/ReinforcementsPanel';
+import { SetupPanel } from './ui/SetupPanel';
 import { SetupScreen } from './ui/SetupScreen';
 import { TrackSheet } from './ui/TrackSheet';
 import { TurnBanner } from './ui/TurnBanner';
@@ -51,6 +53,7 @@ export function App() {
   const leaveOnlineRoom = useGame((s) => s.leaveOnlineRoom);
   const screen = useGame((s) => s.screen);
   const closeMissionEditor = useGame((s) => s.closeMissionEditor);
+  const closeMapEditor = useGame((s) => s.closeMapEditor);
   const [savesOpen, setSavesOpen] = useState(false);
 
   // Hold Shift to preview LOS from the hovered hex; release to hide it.
@@ -86,6 +89,7 @@ export function App() {
   }, [setShift, togglePivotPicker]);
 
   if (screen === 'editor') return <MissionEditor onExit={closeMissionEditor} />;
+  if (screen === 'mapEditor') return <MapEditor onExit={closeMapEditor} />;
 
   // M13: still connecting (or the server rejected create/join) — a distinct
   // screen from the normal hotseat menu, not just a blank board.
@@ -110,11 +114,17 @@ export function App() {
     <div className="layout">
       <header className="topbar">
         <div className="topbar__turn" data-side={cs}>
-          <span className="topbar__dot" data-side={cs} />
-          Round {game.round}/{game.roundsTotal} — Side {cs} · {nation}
-          <em className="topbar__hint">
-            {shiftHeld ? ' · LOS: hovered hex' : ' · hold Shift for LOS · Ctrl+click to pick a unit'}
-          </em>
+          <span className="topbar__dot" data-side={game.phase === 'setup' ? game.setupSide : cs} />
+          {game.phase === 'setup' ? (
+            <>Pre-Mission Setup — Side {game.setupSide} ({nationNameFor(game.setupSide!)}) places its forces</>
+          ) : (
+            <>
+              Round {game.round}/{game.roundsTotal} — Side {cs} · {nation}
+              <em className="topbar__hint">
+                {shiftHeld ? ' · LOS: hovered hex' : ' · hold Shift for LOS · Ctrl+click to pick a unit'}
+              </em>
+            </>
+          )}
         </div>
         {/* M13, functional-minimum placeholder — see CLAUDE.md's M13 plan. A
             real visual design may replace this later. */}
@@ -128,27 +138,33 @@ export function App() {
           </div>
         )}
         <div className="topbar__controls">
-          <button onClick={() => dispatch({ type: 'PASS' })}>Pass</button>
-          <button
-            disabled={!stallUnitId}
-            title="Stall (§2.8): a unit does nothing but makes a Spent Check and is Stressed"
-            onClick={() => stallUnitId && dispatch({ type: 'STALL', unitId: stallUnitId })}
-          >
-            Stall
-          </button>
-          {mode !== 'online' && (
+          {game.phase !== 'setup' && (
             <>
-              <button onClick={undo}>Undo</button>
-              <button onClick={redo}>Redo</button>
+              <button onClick={() => dispatch({ type: 'PASS' })}>Pass</button>
+              <button
+                disabled={!stallUnitId}
+                title="Stall (§2.8): a unit does nothing but makes a Spent Check and is Stressed"
+                onClick={() => stallUnitId && dispatch({ type: 'STALL', unitId: stallUnitId })}
+              >
+                Stall
+              </button>
+              {mode !== 'online' && (
+                <>
+                  <button onClick={undo}>Undo</button>
+                  <button onClick={redo}>Redo</button>
+                </>
+              )}
             </>
           )}
           <button onClick={() => setSavesOpen(true)}>Saves</button>
           <button className={losMode ? 'on' : ''} onClick={toggleLosMode} title="Pin LOS by click (or hold Shift to hover)">
             LOS
           </button>
-          <button className={groupMode ? 'on' : ''} onClick={toggleGroupMode} title="Group Actions (§10): click your Fresh units to build a Group">
-            Group
-          </button>
+          {game.phase !== 'setup' && (
+            <button className={groupMode ? 'on' : ''} onClick={toggleGroupMode} title="Group Actions (§10): click your Fresh units to build a Group">
+              Group
+            </button>
+          )}
           <button onClick={toggleMute} title="toggle sound">
             {muted ? '🔇' : '🔊'}
           </button>
@@ -179,7 +195,7 @@ export function App() {
       </main>
 
       <aside className="right">
-        {groupMode ? <GroupPanel /> : <Inspector />}
+        {game.phase === 'setup' ? <SetupPanel /> : groupMode ? <GroupPanel /> : <Inspector />}
         <HoverPanel />
         <Log />
       </aside>

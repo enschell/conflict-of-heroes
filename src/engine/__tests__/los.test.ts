@@ -34,6 +34,29 @@ describe('line of sight (rulebook §6.0)', () => {
     expect(hasLOS(s, '0,0', '1,1')).toBe(false);
   });
 
+  it('Plowed Field blocks LOS through it, same as any other blocking terrain', () => {
+    const s = baseState();
+    addHex(s, 0, 0, 'open'); // A
+    addHex(s, 1, 0, 'plowed'); // B (blocks)
+    addHex(s, 2, 0, 'open'); // C
+    expect(hasLOS(s, '0,0', '1,0')).toBe(true); // into the field is fine
+    expect(hasLOS(s, '0,0', '2,0')).toBe(false); // blocked by B
+  });
+
+  it('a Unit standing IN a Plowed Field (or any blocking terrain) can still be targeted — the target\'s own hex is never a blocking hex to itself, only intervening hexes are (§5.2 "endpoints excluded")', () => {
+    const adjacent = baseState();
+    addHex(adjacent, 0, 0, 'open'); // attacker
+    addHex(adjacent, 1, 0, 'plowed'); // target's own hex — adjacent, no intervening hex at all
+    expect(hasLOS(adjacent, '0,0', '1,0')).toBe(true);
+
+    // Same check with a real (clear) intervening hex in between.
+    const atRange = baseState();
+    addHex(atRange, 0, 0, 'open'); // attacker
+    addHex(atRange, 1, 0, 'open'); // intervening, clear
+    addHex(atRange, 2, 0, 'plowed'); // target's own hex, two hexes away
+    expect(hasLOS(atRange, '0,0', '2,0')).toBe(true);
+  });
+
   it('visibleHexesFrom partitions the board', () => {
     const s = baseState();
     addHex(s, 0, 0, 'open');

@@ -213,12 +213,7 @@ export function Inspector() {
 
       {yours && (
         <div className="actions">
-          {unit.status === 'spent' && (
-            <p className="dim">
-              Spent — an Action only possible by spending CAPs to reduce
-              cost to 0AP (§3.4).
-            </p>
-          )}
+
           {rallyable && !spentRally && (
             <button onClick={() => rally(unit.id)}>Rally ({rallyCost} AP)</button>
           )}
@@ -285,7 +280,7 @@ export function Inspector() {
 
           {canPivot && (
             <div className="pivot-row">
-              <span className="dim">Pivot (free, §4.5/§15.11):</span>
+              <span className="dim">Pivot (or press P):</span>
               {ARROWS.map((arrow, f) => (
                 <button key={f} className="icon-btn" disabled={f === unit.facing} onClick={() => pivot(unit.id, f as Facing)}>
                   {arrow}

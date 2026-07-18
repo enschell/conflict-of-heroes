@@ -9,6 +9,7 @@
  * needed — this is the programmatic mapping the art flows through.
  */
 import type { Hex, HexId, TerrainId } from '../engine/types';
+import { terrainArtVariantUrl } from './terrainArtVariants';
 
 /** Master switch: set to false to fall back to flat terrain colors. */
 export const USE_HEX_ART = true;
@@ -32,8 +33,13 @@ export const TERRAIN_ART: Record<TerrainId, string> = {
  */
 export const HEX_ART_OVERRIDES: Record<HexId, string> = {};
 
-/** Resolve the art URL for a hex: per-hex override wins, else terrain default. */
+/**
+ * Resolve the art URL for a hex: a Map-Editor-authored `hex.art` variant wins
+ * first (see `data/terrainArtVariants.ts`), then a hand-pinned per-hex
+ * override, then the plain terrain default.
+ */
 export function artForHex(hex: Hex): string | null {
   if (!USE_HEX_ART) return null;
-  return HEX_ART_OVERRIDES[hex.id] ?? TERRAIN_ART[hex.terrain] ?? null;
+  const variant = hex.art ? terrainArtVariantUrl(hex.art) : undefined;
+  return variant ?? HEX_ART_OVERRIDES[hex.id] ?? TERRAIN_ART[hex.terrain] ?? null;
 }

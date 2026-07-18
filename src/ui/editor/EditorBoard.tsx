@@ -9,9 +9,10 @@
 import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { buildHex } from '../../engine';
 import type { RotationCluster } from '../../engine';
-import { EDGE_CORNERS, clipHexPolygon, hexCenter, hexCorners, playableBounds, pointsAttr, HEX_SIZE } from '../hexgeo';
+import { EDGE_CORNERS, clipHexPolygon, computeMapOverlayGroups, hexCenter, hexCorners, playableBounds, pointsAttr, tightHexBounds, HEX_SIZE } from '../hexgeo';
 import { HEX_STROKE, TERRAIN_FILL, WALL_STROKE } from '../theme';
 import type { Facing, Hex, HexId, MapHexDef, TerrainId } from '../../engine/types';
+import { terrainArtVariantUrl } from '../../data/terrainArtVariants';
 
 /**
  * Terrain artwork for the editor's own board preview — a small, self-contained
@@ -31,8 +32,9 @@ const EDITOR_TERRAIN_ART: Partial<Record<TerrainId, string>> = {
   buildingWood: '/assets/terrain/buildingWood.png',
   buildingStone: '/assets/terrain/buildingStone.png',
 };
-function artForTerrain(terrain: TerrainId): string {
-  return EDITOR_TERRAIN_ART[terrain] ?? DEFAULT_TERRAIN_ART;
+function artForHex(hex: Hex): string {
+  const variant = hex.art ? terrainArtVariantUrl(hex.art) : undefined;
+  return variant ?? EDITOR_TERRAIN_ART[hex.terrain] ?? DEFAULT_TERRAIN_ART;
 }
 /** Same proportions Board.tsx's own terrain art uses (a flat-top hex's width). */
 const ART_WIDTH = Math.sqrt(3) * HEX_SIZE;
@@ -96,6 +98,26 @@ export interface EditorBoardProps {
    * mirroring `docs/hex_board_spec/Hex Map.dc.html`'s own technique.
    */
   rotationClusters?: RotationCluster[];
+  /**
+   * Optional full-board reference image (Map Editor's "trace a source image"
+   * feature) — stretched (`preserveAspectRatio="none"`, matching the design
+   * handoff's own "Overlay mode" technique) across the playable bounding box,
+   * drawn BEHIND every hex. Terrain tiles/fill render at reduced opacity
+   * while an overlay is present so both layers stay visible at once (a
+   * light-table effect) — hex strokes, labels, walls, and the click layer
+   * stay at full opacity/interactivity regardless.
+   */
+  overlay?: { url: string } | null;
+  /**
+   * Real, per-board gameplay art (Map Editor "Overlay mode", CLAUDE.md §D) —
+   * keyed by `Hex.mapNumber`, the SAME shape as `GameState.mapOverlays` (the
+   * live game reads this directly; here it's derived from whichever board(s)
+   * are picked, via `assembledMapOverlays()`). Unlike `overlay` above, this is
+   * a read-only PREVIEW of what real gameplay will actually show — rendered
+   * at full opacity with per-hex terrain tiles fully skipped (not dimmed),
+   * since there's no terrain-painting happening on this screen to reveal.
+   */
+  mapOverlays?: Record<number, string>;
 }
 
 /** A hex's screen center, corner polygon, and everything needed to render it once. */
@@ -105,7 +127,15 @@ function computeHexGeometry(hex: Hex) {
   return { center, corners, pts: pointsAttr(corners) };
 }
 
-export function EditorBoard({ hexes, markers = [], highlightedHexIds, onHexClick, rotationClusters = [] }: EditorBoardProps) {
+export function EditorBoard({
+  hexes,
+  markers = [],
+  highlightedHexIds,
+  onHexClick,
+  rotationClusters = [],
+  overlay = null,
+  mapOverlays,
+}: EditorBoardProps) {
   // Unique per mounted EditorBoard instance (several can render at once — the
   // Map section, a Reinforcements wave's mini-board, an Exit Zone card, ...) —
   // combined with each hex's own id below for a globally-unique clipPath id.
@@ -117,7 +147,23 @@ export function EditorBoard({ hexes, markers = [], highlightedHexIds, onHexClick
   }, [hexes]);
 
   const pseudoState = useMemo(() => ({ hexes: hexMap }), [hexMap]);
+  // Generous — used ONLY for the SVG's own viewport (a half/quarter-hex must
+  // never get clipped off by too-tight a viewBox). NOT the right basis for
+  // sizing the overlay image itself — see `traceOverlayBounds` below.
   const bounds = useMemo(() => playableBounds(pseudoState, HEX_SIZE), [pseudoState]);
+  // The overlay image must stop exactly at the real hex silhouette — the
+  // TRUE clipped-corner extent, not `bounds`' generous unclipped-hex-box
+  // rectangle (which is measurably bigger on every board-edge side and would
+  // stretch the image across more area than the clip-path ever reveals,
+  // silently losing a real margin of the source image — see `tightHexBounds`).
+  const traceOverlayBounds = useMemo(() => tightHexBounds(Object.values(hexMap), HEX_SIZE), [hexMap]);
+  const overlayClipPolys = useMemo(
+    () => Object.values(hexMap).map((hex) => computeHexGeometry(hex).pts),
+    [hexMap],
+  );
+
+  const mapOverlayGroups = useMemo(() => computeMapOverlayGroups(hexMap, mapOverlays, HEX_SIZE), [hexMap, mapOverlays]);
+  const overlaidHexIds = useMemo(() => new Set(mapOverlayGroups.flatMap((g) => g.hexIds)), [mapOverlayGroups]);
 
   const markersByHex = useMemo(() => {
     const m = new Map<HexId, EditorMarker[]>();
@@ -200,31 +246,50 @@ export function EditorBoard({ hexes, markers = [], highlightedHexIds, onHexClick
 
   const viewBox = `${pan.x} ${pan.y} ${baseWidth / zoom} ${baseHeight / zoom}`;
 
+  // While a reference overlay is showing, dim the terrain layer (fill + tile
+  // art) so both it and the source image stay visible at once (a light-table
+  // effect for tracing) — hex strokes/labels/walls/the click layer are NOT
+  // part of this group, so they stay fully legible/interactive regardless.
+  const terrainOpacity = overlay ? 0.4 : 1;
+
   const renderHex = (hex: Hex, counterRotate?: number) => {
     const { center, corners, pts } = computeHexGeometry(hex);
     const highlighted = highlightedHexIds?.has(hex.id);
     const hexMarkers = markersByHex.get(hex.id) ?? [];
-    const art = artForTerrain(hex.terrain);
+    const hasMapOverlayArt = overlaidHexIds.has(hex.id);
+    const art = hasMapOverlayArt ? null : artForHex(hex);
     const clipId = `${instanceId}-terrain-clip-${hex.id}`;
     return (
       <g key={hex.id}>
-        <polygon points={pts} fill={TERRAIN_FILL[hex.terrain]} stroke={HEX_STROKE} strokeWidth={1} />
-        <defs>
-          <clipPath id={clipId}>
-            <polygon points={pointsAttr(corners.map((p) => ({ x: p.x - center.x, y: p.y - center.y })))} />
-          </clipPath>
-        </defs>
-        <g transform={`translate(${center.x},${center.y})`} clipPath={`url(#${clipId})`}>
-          <image
-            href={art}
-            x={-ART_WIDTH / 2}
-            y={-HEX_SIZE}
-            width={ART_WIDTH}
-            height={2 * HEX_SIZE}
-            preserveAspectRatio="xMidYMid slice"
-            pointerEvents="none"
+        {!hasMapOverlayArt && (
+          <polygon
+            points={pts}
+            fill={TERRAIN_FILL[hex.terrain]}
+            fillOpacity={terrainOpacity}
+            stroke={HEX_STROKE}
+            strokeWidth={1}
           />
-        </g>
+        )}
+        {art && (
+          <>
+            <defs>
+              <clipPath id={clipId}>
+                <polygon points={pointsAttr(corners.map((p) => ({ x: p.x - center.x, y: p.y - center.y })))} />
+              </clipPath>
+            </defs>
+            <g transform={`translate(${center.x},${center.y})`} clipPath={`url(#${clipId})`} opacity={terrainOpacity}>
+              <image
+                href={art}
+                x={-ART_WIDTH / 2}
+                y={-HEX_SIZE}
+                width={ART_WIDTH}
+                height={2 * HEX_SIZE}
+                preserveAspectRatio="xMidYMid slice"
+                pointerEvents="none"
+              />
+            </g>
+          </>
+        )}
         {hex.road && <circle cx={center.x} cy={center.y} r={HEX_SIZE * 0.06} fill="#9c8456" pointerEvents="none" />}
         {hex.walls.map(
           (has, i) =>
@@ -282,6 +347,52 @@ export function EditorBoard({ hexes, markers = [], highlightedHexIds, onHexClick
 
   return (
     <svg ref={svgRef} viewBox={viewBox} width="100%" height="100%" style={{ maxHeight: '70vh' }}>
+      {overlay && (
+        <>
+          <defs>
+            <clipPath id={`${instanceId}-overlay-clip`}>
+              {overlayClipPolys.map((p, i) => (
+                <polygon key={i} points={p} />
+              ))}
+            </clipPath>
+          </defs>
+          <image
+            href={overlay.url}
+            x={traceOverlayBounds.minX}
+            y={traceOverlayBounds.minY}
+            width={traceOverlayBounds.maxX - traceOverlayBounds.minX}
+            height={traceOverlayBounds.maxY - traceOverlayBounds.minY}
+            preserveAspectRatio="none"
+            pointerEvents="none"
+            clipPath={`url(#${instanceId}-overlay-clip)`}
+          />
+        </>
+      )}
+      {mapOverlayGroups.map((g) => {
+        const clipId = `${instanceId}-map-overlay-clip-${g.mapNumber}`;
+        // A rotated board's overlay image must spin with its terrain hexes —
+        // look up the same cluster info `renderHex`'s wrapping <g> below uses
+        // (via any one of this group's own hex ids) and apply the identical
+        // transform, since the group's clip polygons/image rect are computed
+        // in the same pre-rotation absolute coordinates as the hexes are.
+        const cluster = g.hexIds.length ? clusterOfHex.get(g.hexIds[0]!) : undefined;
+        return (
+          <g
+            key={`map-overlay-${g.mapNumber}`}
+            pointerEvents="none"
+            transform={cluster ? `rotate(${cluster.rotation} ${cluster.pivot.x} ${cluster.pivot.y})` : undefined}
+          >
+            <defs>
+              <clipPath id={clipId}>
+                {g.clipPolygons.map((p, i) => (
+                  <polygon key={i} points={p} />
+                ))}
+              </clipPath>
+            </defs>
+            <image href={g.url} x={g.x} y={g.y} width={g.width} height={g.height} preserveAspectRatio="none" clipPath={`url(#${clipId})`} />
+          </g>
+        );
+      })}
       <g>{plainHexes.map((hex) => renderHex(hex))}</g>
       {[...byCluster.entries()].map(([key, { rotation, pivot, hexes: clusterHexes }]) => (
         <g key={key} transform={`rotate(${rotation} ${pivot.x} ${pivot.y})`}>

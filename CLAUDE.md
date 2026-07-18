@@ -3,397 +3,372 @@
 Guidance for Claude Code when building this project. Read this first, every session.
 
 > **Source of truth for rules:** the official *Conflict of Heroes: Awakening the Bear*
-> **3rd Edition** rulebook (Academy Games). This project migrated from a 2nd-edition (7AP) build
-> to **3rd-edition rules only** — the migration is complete; see **§A** below.
+> **3rd Edition** rulebook (Academy Games). This project is **3rd-edition rules only** (the v3
+> migration is complete — see §A).
 >
 > **Do not invent rules from memory, and do not read the PDF.** The rulebook has been transcribed
-> into a curated, section-by-section reference under **`rules/`**. Routing rule: when implementing
-> or changing a mechanic, open **`rules/INDEX.md`**, find the chapter(s) that cover it, and read the
-> matching **`rules/NN-*.md`** file(s) first. Cite the v3 section number (`N.M`) in code comments,
-> commits, and tests. The `rules/` files are **committed** and authoritative (they replace the old
-> gitignored `reference/rulebook.txt`).
+> into a curated, section-by-section reference under **`rules/`**. When implementing or changing a
+> mechanic, open **`rules/INDEX.md`**, find the chapter(s) that cover it, and read the matching
+> **`rules/NN-*.md`** file(s) first. Cite the v3 section number (`N.M`) in code comments, commits,
+> and tests. The `rules/` files are **committed** and authoritative.
 
 ---
 
 ## A. v3 migration (historical — complete)
 
 This project migrated from a 2nd-edition (7AP-pool) engine to 3rd-edition (threshold-based action
-economy) rules. The migration finished long ago — the codebase has been v3-only since M4.5, and
-M5–M7 were all built on top of it since. **Never reintroduce 7AP/`ACTIVATE_UNIT`/`MARK_SPENT` logic.**
+economy) rules. The migration finished long ago — the codebase has been v3-only since M4.5.
+**Never reintroduce 7AP/`ACTIVATE_UNIT`/`MARK_SPENT` logic.**
 
-The full plan (the 2nd→3rd-ed change table, per-module rewrite list, and build order) is preserved
-at **`docs/v3-migration-plan.md`** for archaeology — not needed for day-to-day work. Current
-mechanics live in `rules/` and this file's §6/§8.
+The full plan (change table, per-module rewrite list, build order) is preserved at
+`docs/v3-migration-plan.md` for archaeology — not needed for day-to-day work. Current mechanics
+live in `rules/` and this file's §6/§8.
 
 ---
 
-## B. Hex board migration (flat-top substrate — done; Mission 1 re-authored on it)
+## B. Hex board migration (flat-top substrate — done; every mission re-authored on it)
 
 The board's geometry was migrated from **pointy-top** to **flat-top** hexes, per
-**`docs/hex_board_spec/README.md`** (authoritative — geometry, labels, rotation, and multi-board
-abutment; not to be re-derived from memory). This isn't a departure from the rulebook's own
-convention — `rules/01-game-components.md`'s **"(Map #)–(Column Letter & Row #)"** citation (e.g.
-"1-E05") is the *same* scheme as the new spec's `A01`..`S12` + board number; only the board number's
-presentation changed (a large graphic in its own cell, not a text prefix). Status:
+**`docs/hex_board_spec/README.md`** (authoritative — geometry, labels, rotation, multi-board
+abutment; not to be re-derived from memory). This matches the rulebook's own
+**"(Map #)–(Column Letter & Row #)"** labeling (`rules/01`) — only the board number's presentation
+changed (a large graphic, not a text prefix).
 
-- **Substrate — done:** `engine/hex.ts`'s `axialToPixel` is flat-top. `engine/hexBoard.ts` bridges
-  the spec's per-board column/row grid (`A01`..`S12` labels, the board-number cell, multi-board seam
-  merging into one shared axial space) to the engine's existing axial adjacency math — see its
-  header comment for the derivation (the naive per-axis board-pitch translation is **wrong**; the
-  flat-top pixel formula couples `r` to `q`, so a corrected embedding was needed and is proven
-  numerically + by test). `ui/hexgeo.ts` draws flat-top hexes with real half/quarter-hex edge
-  clipping (`clipHexPolygon`, Sutherland–Hodgman against each hex's own center — every board clip
-  line passes exactly through the affected hex's center, verified). `Board.tsx` renders the clipped
-  polygons, per-hex coordinate labels, and the large board-number cell. Proven by a non-canonical
-  `Hex Board Demo` mission (`data/missions/hexBoardDemo.ts` — a `TWO_BOARDS` flag toggles between a
-  blank single-board reference canvas and two boards abutted east-west with units straddling the
-  seam) and `engine/__tests__/hexBoard.test.ts` / `ui/__tests__/hexgeo.test.ts` /
-  `data/missions/__tests__/hexBoardDemo.test.ts`.
-- **Mission 1 — done, re-authored from scratch onto the new grid** (not reprojected — a locked
-  decision; reprojecting the old pointy-top `q,r` data would keep adjacency correct but visually
-  scramble the intended battlefield shape, since it's a different linear projection, not a
-  rotation). Real terrain, reinforcements, CAPs (6 German / 7 Soviet), starting units, and the
-  victory hex were rebuilt hex-by-hex directly with the user. Authoring workflow, reusable for future
-  missions: `data/hexBoardMap.ts`'s `applyTerrainJson(boards, json)` takes a
-  `{ boardNumber: { label: code } }` JSON map (`TERRAIN_CODES` for the valid code strings, incl.
-  `<terrain>_road` compounds like `heavy_woods_road` — a Road doesn't change the hex's terrain for
-  defense purposes, only negates its Difficult-Terrain movement cost road-to-road, §5.0.1 — already
-  how `movement.ts`/`combat.ts` work, no engine change needed for that) on top of
-  `generateOpenBoard`'s all-open base; unmentioned hexes stay Open. See `data/maps/mission1.ts` for
-  the live example. The rulebook's own terrain table (`rules/04`) has exactly 8 types, all already
-  implemented — "more terrain types" almost always means art variety
-  (`data/hexArt.ts`'s per-hex `HEX_ART_OVERRIDES`), not a new mechanical type.
-- **Sandboxes — all fixed now.** `sandbox.ts` (Armor) and `fireSupportSandbox.ts` were already fine —
-  both reuse `data/maps/mission1.ts`'s real `MISSION1_MAP`, so they got the flat-top substrate for
-  free. `hillsSandbox.ts`, `obstaclesSandbox.ts`, and `fortificationsSandbox.ts` each originally
-  placed their own small custom grid via raw `hexId(q, r)` — correct for the old pointy-top renderer,
-  but a sheared parallelogram under flat-top (adjacency was never wrong, just the visual shape).
-  Fixed identically in all three: every hex, unit, and the victory hex now goes through a local
-  `at(c, r)` helper that calls `engine/hexBoard.ts`'s `colRowToAxial({ c, r })` (the same column/
-  row→axial formula the real board substrate uses — column parity shifts axial `r` by
-  `-floor(c/2)`) instead of the raw axial pair. Nothing else about any of the three missions changed
-  — same terrain/CAP/unit/obstacle/fortification data, same `R{row}C{col}` labels (no need for real
-  `A01`-style labels or a board-number cell on a non-canonical test map). Verified live for all three
-  (board renders as a proper rectangle in each) plus Mission 1/Armor/Fire-Support-Sandbox as a
-  regression check: the **hold-Shift LOS-preview overlay** (`Board.tsx`'s `losActive`/
-  `visibleHexesFrom`) still lights up correctly on every one of the 6 missions — it was never actually
-  at risk (LOS is pure axial-index math, orientation-agnostic, same reasoning as §B's closing
-  paragraph below), but worth confirming after touching mission coordinate data since a coordinate
-  bug could in principle corrupt adjacency, unlike a pure-rendering bug. Also reverified the
-  mission-specific LOS set-pieces these sandboxes exist to demonstrate still hold post-fix: Hills
-  Sandbox's G-hilltop→S-rifle downhill shot, G-mesa↔S-mesa same-level sightline, and the §12.6 Blind
-  Spot pair (R2C6 hidden from the ridge peak, R2C7 visible beyond it) all reproduced correctly.
-- **Rotation is still not built** — see memory `conflict-of-heroes-hex-board-rotation` for the
-  locked requirements (labels always render upright; only same-length board edges abut) to apply
-  whenever a real mission needs it.
-- **Three real gotchas found live-testing Mission 1, all worth remembering:**
-  1. **The literal board-edge column/row is never a valid "full Hex" entry edge.** Column A (or S,
-     or row 1/12) is entirely half/quarter-hexes by construction (`edgeCut` is set on every cell) —
-     there is no such thing as "a full Hex on the boundary column." A §4.12 entry requirement like
-     "enters along the west edge" means the **first full column in from the boundary** (column B,
-     not A) — exactly mirroring how the original Mission 1 already used Row B, not Row A, for its
-     south edge. Caught because a unit was allowed to enter onto a half-hex; the fix was in mission
-     data (`WEST_EDGE` in `data/missions/mission1.ts`), not the engine — `legalEntryHexes` doesn't
-     filter for full hexes on its own, callers must build entry-hex lists that already exclude them
-     (see `withinPlayableFullHex` in that same file for the pattern).
-  2. **§4.12 Stress-on-entry was already correct, not a bug** — worth noting only because it's easy
-     to *suspect* it's broken when something else nearby (the half-hex entry, above) actually is.
-     `reducer.ts`'s `doEnter` → `afterGroupAction(placed, 0)` applies Stress unconditionally
-     regardless of the 0AP cost, and `engine/__tests__/reinforcements.test.ts` already had a
-     passing test for exactly this. Don't re-fix what isn't broken — verify against the existing
-     test/code first.
-  3. **The SAME half-hex-entry bug (#1) recurred on the Soviet side, later, even after #1 was
-     documented right here.** `sov-r2-reinforcements`' `entryHexIds` used the scenario's own named
-     Hex, `S06` — but column S is the board's literal east edge, so S06 has `edgeCut: {e: true}`
-     just like every column-A hex does. Fixing #1 for the German west-edge wave didn't prompt a check
-     of every OTHER wave's entry hex in the same mission for the identical mistake. Fixed the same
-     way: the nearest full-Hex neighbor that's still on the Road (`R07` — its other full neighbor,
-     `R06`, isn't on the Road, so it wouldn't have preserved "Road Hex"), verified via
-     `neighbors()`/`edgeCut` directly rather than assumed. **Lesson: when a mission-authoring rule
-     like this gets caught once, grep the SAME mission's other `entryHexIds` (or any other
-     hex-label reference) for the same class of mistake immediately — don't wait for each one to be
-     independently reported.**
-- **Group reinforcement entry — done.** §4.12 allows multiple Reinforcement Units to enter together
-  as a Group (10.2) in one Action (no Spent Check, one shared Stress-all outcome), with each Unit
-  free to choose its own facing. Engine: `groups.ts` exports `hexesConnected(hexIds)` (extracted from
-  its existing `groupConnected` flood-fill, "same-or-neighbour chain" relation), and `reducer.ts`'s
-  `doEnter` now denies a multi-placement `ENTER` whose Hexes aren't `hexesConnected` — §4.12's "same
-  or adjacent entry Hexes" is enforced, not just per-hex legality (`reinforcements.test.ts` covers
-  both a connected and a scattered case). UI: `store.ts` replaced the old single-unit
-  `placingReinforcementId` with a queue (`placingReinforcementQueue`/`placingReinforcementFacing`/
-  `placingReinforcementDone`) — `startPlaceReinforcements(unitIds)` arms one or more Units, and each
-  walks Hex → facing → (next Unit or dispatch) in turn; the final ENTER only fires once every queued
-  Unit has both. `ReinforcementsPanel.tsx` gained per-unit checkboxes + a wave-level "Place selected
-  as Group" button alongside the existing one-at-a-time `Place` button and the fast-path "Enter now"
-  (unchanged, still auto-spreads at the wave's default facing with no per-unit choice — the deliberate
-  quick option). `Board.tsx` reuses the existing blue six-neighbor facing-highlight machinery
-  (previously keyed off a live `Unit`, now generalized to work off a bare Hex id since a
-  mid-placement reinforcement has none yet) — clicking the placement Hex itself keeps the default
-  facing, clicking a neighbor sets that direction. **A real bug caught during live testing, since
-  fixed:** the entry-Hex highlight for the 2nd+ queued Unit initially still offered the wave's *full*
-  legal-entry set, not just Hexes connected to what was already placed — a user could click two
-  non-adjacent Hexes, walk both through a facing choice, and only then have the final ENTER silently
-  denied by the reducer's `hexesConnected` check, with the queue/facing state already optimistically
-  cleared (so the Units silently reappeared in the panel with zero error feedback). Fixed two ways:
-  (1) `Board.tsx`'s entry-Hex highlighting now intersects with "connected to `placingReinforcementDone`"
-  once at least one Unit has a Hex, so an illegal pick is never offered in the first place; (2)
-  `store.ts`'s `chooseReinforcementFacing` no longer clears placement state *before* dispatching —
-  it checks `lastEvents` for an `illegal` result and reopens the queue instead of silently dropping
-  the Units if the reducer ever disagrees (defense in depth, per CLAUDE.md §3's "legality lives in the
-  engine, not the UI's own assumptions"). Verified live in-browser: two German Rifle Squads entered
-  together at adjacent west-edge Hexes as one Group Action ("Group 0AP action — no Spent Check").
-  **Live preview counter while placing** ✅ (follow-up): a queued reinforcement Unit isn't a real
-  `Unit` (in `game.units`) until the whole ENTER dispatches, so with no extra handling nothing would
-  render on the board until every queued Unit had both a Hex *and* a facing — the user had to place
-  blind. `Board.tsx` now synthesizes a preview `Unit` (fresh, no hit markers, not carried) the instant
-  a Hex is chosen: while `placingReinforcementFacing` is open it renders at the wave's suggested
-  facing, and once `chooseReinforcementFacing`/`useDefaultReinforcementFacing` commits, the *next*
-  render reads the real facing straight out of `placingReinforcementDone` — a plain re-render "snap"
-  to whatever the store says, the same mechanism the real §4.5 free-facing-correction picker already
-  uses elsewhere, not a new animation/interpolation system. Preview `Unit`s merge straight into the
-  same `unitsByHex` map real ones use, so stacking/fan-out and the transition to the real `Unit` once
-  ENTER actually dispatches both come for free with zero extra code. Verified live: a single-Unit
-  placement shows the counter immediately on Hex click and updates the instant a facing is chosen; a
-  two-Unit Group placement keeps the first member's counter visible (read from
-  `placingReinforcementDone`) while the second is still being placed, and both settle into real
-  `Unit`s with no flicker/duplication once the Group ENTER commits.
+- **Substrate:** `engine/hex.ts`'s `axialToPixel` is flat-top. `engine/hexBoard.ts` bridges the
+  spec's per-board column/row grid (`A01`..`S12` labels, board-number cell, multi-board seam
+  merging) to the engine's axial adjacency math — the naive per-axis translation is wrong (flat-top
+  couples `r` to `q`); see its header comment for the derivation. `ui/hexgeo.ts` draws flat-top
+  hexes with real half/quarter-hex edge clipping (`clipHexPolygon`). Proven by the non-canonical
+  `Hex Board Demo` mission (`data/missions/hexBoardDemo.ts`) and
+  `hexBoard.test.ts`/`hexgeo.test.ts`/`hexBoardDemo.test.ts`.
+- **Mission 1 — re-authored from scratch onto the new grid**, not reprojected (locked decision:
+  reprojecting the old pointy-top `q,r` data would keep adjacency correct but visually scramble the
+  battlefield shape — a different linear projection, not a rotation). Authoring workflow for future
+  maps: `data/hexBoardMap.ts`'s `applyTerrainJson(boards, json)` takes a `{boardNumber: {label:
+  code}}` map (`TERRAIN_CODES` for valid codes, incl. `<terrain>_road` compounds — Road doesn't
+  change a hex's terrain for defense, only negates its Difficult-Terrain move cost road-to-road,
+  §5.0.1) on top of `generateOpenBoard`'s all-open base. See `data/maps/mission1.ts` for the live
+  example. **The rulebook's terrain table (`rules/04`) has exactly 8 types** — "more terrain types"
+  almost always means art variety (`data/hexArt.ts`'s `HEX_ART_OVERRIDES`, or the fuller
+  `data/terrainArtVariants.ts` system, §D), not a new mechanical type.
+- **Sandboxes** (`hillsSandbox.ts`, `obstaclesSandbox.ts`, `fortificationsSandbox.ts`) each placed
+  their own custom grid via raw `hexId(q,r)` — correct for pointy-top adjacency, but a sheared
+  parallelogram visually under flat-top. Fixed via a local `at(c,r)` helper calling
+  `engine/hexBoard.ts`'s `colRowToAxial({c,r})` (column parity shifts axial `r` by `-floor(c/2)`).
+- **Rotation IS now built for the live game board** (`Board.tsx`) — see memory
+  `conflict-of-heroes-hex-board-rotation` for the original locked requirements (labels always render
+  upright; only same-length board edges abut), both satisfied by the implementation below.
+  `GameState`/`MissionDef.mapRotations?: Record<mapNumber, 90|-90>` (same field the Mission/Map
+  Editors already used for their own preview, §C's Phase 2) is carried through by `initGame` and
+  resolved purely for rendering by `ui/hexgeo.ts`'s `computeDisplayRotationCluster(hexes,
+  mapRotations)` — never read by `reduce`/movement/LOS/combat, which stay orientation-invariant as
+  always. That helper reconstructs the cluster from FLATTENED data (no per-board list survives
+  export) by leaning on `boardAssembly.ts`'s own proof that a Mission's whole assembly is always ONE
+  rotation family (a quarter-family board can only attach to another quarter-family board) — so "any
+  entry in `mapRotations` at all" already means every Hex in the Mission is in the one cluster; only
+  which SPECIFIC 90°/-90° value to use needs a (documented, rare-edge-case) tie-break, since which
+  board was the anchor doesn't survive flattening either. `Board.tsx` wraps every per-Hex rendering
+  loop (terrain/art/labels, roads, walls, elevation glyphs, obstacle/fortification labels, Bunker
+  Arc-of-Fire, objectives, unit counters, the overlay-mode image) in the cluster's shared
+  `rotate(...)` transform; legibility-only text (coordinate labels, VP numbers, elevation glyphs,
+  stack-count) counter-rotates to stay upright, exactly mirroring `EditorBoard.tsx`'s established
+  technique — while Units/walls/roads/Bunker-arc lines rotate WITH the board (a physical marker
+  spins with the map it sits on; a label doesn't). The one exception is the floating "Choose
+  facing"/Pivot instructional callout — a pure UI element, not board content — which computes the
+  Hex's real rotated screen position by plain 2D rotation math (`rotateAround`) instead of an SVG
+  group transform, so the callout itself stays upright and keeps its own "float above the Hex"
+  offset regardless of the board's rotation. Verified live: SoS Mission 4 (a real Mission with
+  overlay art) temporarily tagged `mapRotations: {8: 90}` rendered correctly rotated in ACTUAL
+  gameplay (not just the Editor), and hex hit-testing/hover still resolved the correct Hex under the
+  cursor. (The Mission/Map Editors' OWN board previews — Map/Starting Forces/Reinforcements/Victory
+  sections — also all pass `rotationClusters` now; previously only the Map section did, so a
+  board's rotation was invisible everywhere else in the Editor.)
+- **A recurring gotcha worth remembering:** the literal board-edge column/row (A, S, row 1, row 12)
+  is never a valid "full Hex" entry edge — it's entirely half/quarter-hexes by construction
+  (`edgeCut` set on every cell). A §4.12 entry requirement like "enters along the west edge" means
+  the first FULL column in from the boundary (column B, not A). This bug was fixed once for a
+  German wave and then recurred, unnoticed, on a Soviet wave in the same Mission — **when this class
+  of mistake is caught once, grep the same mission's other `entryHexIds` for the identical mistake
+  immediately, don't wait for it to be independently reported.**
+- **Group reinforcement entry** (§4.12/§10.2): `groups.ts`'s `hexesConnected(hexIds)` + a
+  `reducer.ts doEnter` check enforce "same or adjacent entry Hexes" for a multi-unit Group ENTER
+  (one Spent Check, one shared Stress-all outcome). UI: `store.ts`'s
+  `placingReinforcementQueue`/`placingReinforcementFacing`/`placingReinforcementDone` walk each
+  queued Unit through Hex → facing before dispatching; `Board.tsx` synthesizes a preview `Unit` the
+  instant a Hex is picked (merged into the real `unitsByHex` map) so placement isn't blind before
+  the real ENTER commits. `ReinforcementsPanel.tsx` has both a per-unit "Place as Group" flow and
+  the original single-Unit/fast-path "Enter now."
 - **Why the engine itself needed no changes for the geometry swap:** `engine/hex.ts`'s adjacency
-  (`neighbor`/`distance`/`lineDraw`) and `movement.ts`'s wall-crossing (`wallBetween`) are pure
-  axial-index arithmetic with **zero pixel/orientation dependency** — only `axialToPixel` (used
-  solely for the arc-of-fire forward/flank dot-product test, itself orientation-invariant by
-  construction) and the UI rendering layer needed to change. If you're ever tempted to "fix" a
-  movement/facing/LOS bug by touching hex orientation math, it's almost certainly not an
-  orientation problem.
+  (`neighbor`/`distance`/`lineDraw`) and `movement.ts`'s wall-crossing are pure axial-index
+  arithmetic with zero pixel/orientation dependency — only `axialToPixel` (itself
+  orientation-invariant, used solely for the arc-of-fire dot-product test) and the UI rendering
+  layer needed to change. If you're ever tempted to "fix" a movement/facing/LOS bug by touching hex
+  orientation math, it's almost certainly not an orientation problem.
 
 ---
 
 ## C. Mission Editor (built)
 
 A visual, in-app tool for authoring a new Mission — no more hand-writing `MapHexDef`/
-`UnitPlacement`/`ReinforcementWaveDef` arrays by hand. Lives at `src/ui/editor/` (open it from
+`UnitPlacement`/`ReinforcementWaveDef` arrays by hand. Lives at `src/ui/editor/` (open from
 `SetupScreen`'s "Mission Editor" card), backed by its own small Zustand store
-(`state/editorStore.ts`) that is **deliberately separate** from `state/store.ts` (the live
-`GameState`-driven store) — the editor is authoring data, not a game in progress, and mixing the two
-would bloat/risk the already-large game store for no benefit. `App.tsx` gained a `screen: 'menu' |
-'editor'` store field, checked as the very first branch (before the existing `mode`/`game` checks).
+(`state/editorStore.ts`), deliberately separate from `state/store.ts` (the live `GameState` store)
+— authoring data isn't a game in progress. `App.tsx`'s `screen: 'menu' | 'editor' | 'mapEditor'`
+field is checked before the normal `mode`/`game` routing.
 
-- **Design provenance:** a claude.ai/design "Design Component" handoff bundle at
-  `docs/design_handoff_mission_editor/` (`Mission Editor.dc.html` + `support.js` + a detailed
-  `README.md` spec) — high-fidelity forms, a deliberately low-fidelity placeholder hex grid meant to
-  be replaced with the real board. Reviewed live by the user in a real browser and approved before
-  implementation began.
-- **Scope, confirmed while re-reading the approved design carefully:** the Map section does **not**
-  paint terrain — its "Paint Tool" only ever covers Obstacles (Barbed Wire/Mines/Road Block) and
-  Fortifications (Trench/Bunker). Terrain-authoring is a separate, not-yet-built tool. The Map
-  section is instead a **map picker** (`data/maps/catalog.ts`, seeded with real `MISSION1_MAP` +
-  a freshly generated `BLANK_SINGLE_BOARD` — both the same real 19-column(18 hex-wide)×12-row
-  single-board size `engine/hexBoard.ts`'s `BOARD_COLS`/`BOARD_ROWS` constants fix every board to;
-  there's no "board size" to configure) plus obstacle/fortification painting on top of whichever map
-  is picked. Unit templates are picked from the existing `UNIT_TEMPLATES` catalog only — never
-  authored here (a separate tool for that is planned by the user).
-- **Board rendering — a new `EditorBoard.tsx`, NOT a reuse of the live `Board.tsx`:** `Board.tsx` is
-  hardwired to ~15 `useGame(...)` selectors and a live `GameState`, so a prop-driven
-  `{ hexes, markers?, highlightedHexIds?, onHexClick? }` component was built instead, reusing
-  `ui/hexgeo.ts`'s pure geometry directly (real flat-top rendering, half-hex edges, `A01`..`S12`
-  labels — no placeholder grid). `hexgeo.ts`'s `fringeHexes`/`playableBounds`/`computeLayout` had
-  their `state: GameState` params widened to `Pick<GameState, 'hexes'>` (safe, backward-compatible)
-  so the editor board can call them without a live `GameState`. Obstacle/fortification board markers
-  are simple colored badges for now (matching units) — `EditorBoard.tsx`'s marker rendering is a
-  swappable per-kind lookup (`MARKER_RENDERERS`, keyed e.g. `'obstacle:mines'`) since these are
-  expected to get their own image-backed counter later (the `UnitCounter.tsx` `counterImage`
-  pattern) — a future upgrade is a localized addition to that lookup, not a rewrite.
-- **Export: a real, self-contained TypeScript `MissionDef` source file**, not JSON —
-  `data/editor/emitMissionSource.ts`, a from-scratch JS-value-to-TS-source pretty printer (no
-  `prettier` dependency added, kept minimal on purpose). Inlines the picked map's hexes +
-  obstacle/fortification overrides + unit placements + reinforcement waves as literal data; only
-  `UNIT_TEMPLATES` is imported by reference (matches the existing `hillsSandbox.ts`-style convention
-  — a mission stays in sync with the real catalog instead of duplicating stat blocks). Triggers a
-  browser download (`Blob` + `<a download>`) — no server/dev-only write path, works identically in
-  the deployed build and local dev. Round-trip tested (`data/editor/__tests__/emitMissionSource.test.ts`):
-  generates source from a fixture, strips the one TS-only construct it emits (a non-null assertion),
-  evals the object literal via `new Function`, and feeds the result through the real `initGame` —
-  proving the exported file is genuinely loadable, not just plausible-looking text. The generated
-  file's header comment reminds the author of the still-manual registration steps (import + a
-  `SetupScreen.tsx` button, optionally `data/missions/catalog.ts` for online play) — matching this
-  file's own §7 "Add a mission" convention, not automated.
-- **Victory Conditions became fully real, not inert** — small additive engine changes shipped
-  alongside the editor (all covered by new tests in `engine/__tests__/victory-config.test.ts`):
-  `VictoryHexDef` (renamed from the old inline `{hexId, vp}` shape) gained optional
-  `control?: SideId` (a victory hex's Mission-authored starting owner — `state.ts`'s `initGame` seeds
-  it before the existing sole-occupier check, which still overrides it if a Unit is actually present)
-  and `roundOverrides?: {round, vp}[]` (`turn.ts`'s `endRound` now calls a new `vpForRound` helper
-  instead of always using the flat `vp`); `vpPerKill` widened to
-  `number | Partial<Record<SideId, number>>` for per-side kill VP (`reducer.ts`'s `destroyUnit` calls
-  a new `vpPerKillFor` helper). All additive/optional — every existing Mission's tests passed
-  unchanged.
-- **Cards/Hidden Units/OBA/Air Support stayed inert, as planned** (see §8's M12/M8 entries) —
-  captured in a new `MissionAdvancedNotes` bag on `MissionDef` (`advancedNotes?`), round-tripped
-  losslessly through export, read by nothing yet. The Advanced section's permanent "Coming later —
-  not yet functional in the game engine" warning banner matches the design exactly. **Map rotation is
-  NOT in this inert list** — see the Phase 2 entry below, it shipped for real.
-- **A real gap caught mid-implementation:** `obstacles.ts`'s `rollMinesAttack` defaults an unset Hit
-  Number to 0 (an always-hits mine) — the original design had no Hit Number field for Mines at all.
-  The Map section's tool rail gained a "Mines Hit Number (§17.10)" input (default 8) whenever the
-  Mines tool is selected, to avoid silently shipping broken mines.
-- **Verified live in-browser, full click-through of all 6 sections** (Mission Info, Map, Starting
-  Forces, Reinforcements, Victory Conditions, Advanced): real Mission 1 map rendering (all 216 real
-  labels), obstacle+fortification painting, unit placement with facing, a reinforcement wave with a
-  connected 2-hex entry set (validated via the existing pure `hexesConnected` from `engine/groups.ts`,
-  newly exported from the engine barrel) plus a live check that a scattered 3rd hex correctly
-  triggers the "not one connected group (§4.12)" warning, a victory hex with a starting controller +
-  a per-round VP override, the Advanced section's hidden-units checklist correctly aggregating both
-  starting-forces AND reinforcement-wave units, Export Mission with zero console errors, Exit Editor
-  back to the menu, and — critically — **Mission 1 itself still played correctly afterward**,
-  confirming the engine touches didn't regress the live game. Full suite (typecheck/423 tests/build/
-  conformance 0 violations) green throughout.
-- **Known follow-ups, not yet done:** drag-select/shift-click-range for entry hexes (still
-  click-to-toggle, per the design's own accepted v1 scope); no persistence/localStorage for
-  in-progress editor authoring (a reload loses everything); no validation beyond the victory-hex-label
-  /connectivity checks already built (duplicate placements on one hex, empty required fields, etc.
-  aren't blocked).
+- **Design provenance:** a claude.ai/design handoff at `docs/design_handoff_mission_editor/`
+  (high-fidelity forms, a placeholder hex grid meant to be replaced with the real board) —
+  reviewed and approved by the user before implementation.
+- **Scope:** the Map section is a **map picker** (`data/maps/catalog.ts`), not a terrain painter —
+  its "Paint Tool" only covers Obstacles/Fortifications on top of whichever map is picked.
+  Terrain-authoring is §D's separate Map Editor. Units are picked from `UNIT_TEMPLATES` only, never
+  authored here.
+- **Board rendering:** a new prop-driven `EditorBoard.tsx` (`{hexes, markers?, highlightedHexIds?,
+  onHexClick?}`), NOT a reuse of the live `Board.tsx` (which is hardwired to ~15 live `GameState`
+  selectors) — reuses `ui/hexgeo.ts`'s pure geometry directly. `hexgeo.ts`'s
+  `fringeHexes`/`playableBounds`/`computeLayout` take `Pick<GameState,'hexes'>` so the editor can
+  call them without a live `GameState`.
+- **Export:** a real, self-contained TypeScript `MissionDef` source file (not JSON) via
+  `data/editor/emitMissionSource.ts` — a from-scratch JS-value-to-TS pretty printer (no `prettier`
+  dependency). Inlines the picked map's hexes + placements + waves; only `UNIT_TEMPLATES` is
+  imported by reference. Triggers a browser download; round-trip tested (evals the exported object
+  through the real `initGame`). The header comment documents the remaining manual registration
+  steps (import + a `SetupScreen.tsx` button).
+- **"Load Existing Mission"** (sidebar dropdown + button, any mission in `data/missions/catalog.ts`'s
+  `MISSION_CATALOG` — hand-authored or Editor-exported) — `data/editor/loadMissionSource.ts`'s
+  `buildEditorStateFromMission` is the reverse of `emitMissionSource.ts`, rebuilding every editor
+  slice from a real `MissionDef`. **One genuine, documented limitation:** `MissionDef.hexes` is
+  already a flat, fully-assembled `MapHexDef[]` — which catalog map(s)/attachment produced it isn't
+  preserved in the export, so a loaded Mission's Map section always comes back as ONE single anchor
+  board (a synthetic, session-local `MAP_CATALOG['__loaded_<id>']` entry built from the mission's
+  own hexes, obstacles/fortifications correctly split back out into the Map section's own overlay
+  state). Everything else — Mission Info, Starting Forces (incl. the Setup Pool), Reinforcements,
+  Victory Conditions (incl. `specificRounds`), Advanced — round-trips exactly. Confirmed with a
+  dedicated test suite (`data/editor/__tests__/loadMissionSource.test.ts`) and live in-browser:
+  loaded both Mission 1 (4 placements, 4 reinforcement waves, real map, zero errors) and the Setup
+  Phase Sandbox (Setup Pool, non-default `setupFirstSide`, `specificRounds` victory hex — every
+  field confirmed present and correctly re-populated in its own section).
+- **A board's 90°/-90° display rotation IS preserved across export/reload** (fixed same session as
+  the limitation above was first written) — `MissionDef.mapRotations?: Record<number, 90 | -90>`,
+  keyed by a board's own `mapNumber` (same key convention as `mapOverlays`). Only 90°/-90° needs
+  recording: 0°/180° are real axial-coordinate transforms already baked into the merged `hexes`
+  (`boardAssembly.ts`'s `Rotation` — a hexagon has 6-fold, not 4-fold, rotational symmetry, so
+  90°/-90° has no axial equivalent and is a pixel-only spin the renderer applies on top, otherwise
+  completely unrepresented in exported data — it would silently reset to 0° on every reload without
+  this field). `state/editorStore.ts`'s `assembledMapRotations` derives it at export time
+  (`emitMissionSource.ts`); `loadMissionSource.ts`'s `synthesizeMapEntry` reads it back to set the
+  synthesized board's `rotation`. Originally scoped to the Editor's own round-trip only — the live
+  game's `Board.tsx` didn't render rotated clusters at all yet (§B) — but that gap closed the same
+  session (§B's own bullet has the full detail): `Board.tsx` now renders `mapRotations` too, so this
+  field carries real gameplay effect, not just an Editor-authoring convenience. Verified live: set
+  SoS Mission 4's board to 90°, exported, and the downloaded source contained
+  `mapRotations: { '8': 90 }`.
+- **Victory Conditions are fully real, not inert:** `VictoryHexDef.control?`/`roundOverrides?`,
+  `vpPerKill` widened to per-side, all additive/optional (`engine/__tests__/victory-config.test.ts`).
+  `awardTiming` has a third mode, `'specificRounds'` + `awardRounds?: number[]`, alongside
+  `endOfRound`/`endOfMission` — VP awarded only on an explicit list of Rounds (e.g. "1 VP for K09 in
+  Rounds 3, 4, and 5 only," not every Round and not just at Mission end). UI: the award-timing
+  `<select>` gained a third option; picking it reveals a comma-separated Rounds text field.
+- **Cards/Hidden Units/OBA/Air Support stay inert on purpose** (§8's M12/M8), captured losslessly in
+  `MissionDef.advancedNotes` but read by nothing yet.
+- **A real gap caught mid-build:** `obstacles.ts`'s `rollMinesAttack` defaults an unset Hit Number to
+  0 (always-hits) — the Map section's tool rail gained an explicit "Mines Hit Number (§17.10)"
+  input (default 8) so this can't silently ship.
+- **Known follow-ups:** no drag-select/shift-click-range for entry hexes (still click-to-toggle);
+  no persistence/localStorage for in-progress authoring; no validation beyond victory-hex-label/
+  connectivity checks (duplicate placements, empty fields, etc. aren't blocked).
 
-### C's Phase 2 (built): multi-board rotation/abutment + richer VP categories
+### C's Phase 2: multi-board rotation/abutment + richer VP categories
 
-Live-testing §C surfaced four real gaps, all now shipped:
+- **Multi-map missions, each map independently rotatable (0°/90°/-90°/180°) and abutted.** The core
+  finding, derived and numerically verified before writing code: **a hexagon has 6-fold rotational
+  symmetry, not 4-fold — a genuine 90°/-90° rotation of a board's own axial coordinates that both
+  preserves adjacency and doesn't mirror the content does not exist** (the hex lattice's isometry
+  group is D6 — 6 rotations + 6 reflections, no 90° element; confirmed by a direct numeric
+  counterexample too). `engine/boardAssembly.ts` (`assembleBoards`, `rotationClusters`) encodes the
+  consequence: **0° and 180° are the only real axial rotations** (180° = the cube-coordinate
+  identity `(q,r)->(-q,-r)`) and freely mix with each other; **90°/-90° have no axial equivalent**,
+  so a board tagged either one borrows whichever real transform lets its attachment merge, and the
+  user-visible spin is a **display-only pixel rotation** layered on top per-cluster
+  (`ui/hexgeo.ts`/`EditorBoard.tsx`, counter-rotating labels to stay upright). Rotation families are
+  `{0°,180°}` and `{90°,-90°}` — a board from one family can never directly attach to the other
+  (their edge lengths become geometrically incompatible), so `rotationClusters` only ever returns
+  zero or one cluster. Abutment is specified via each board's own LOCAL edge labels
+  (`localEdge`/`neighborLocalEdge`), not screen-relative directions — `assembleBoards`
+  brute-force-searches for the translation that makes the two specified edges coincide exactly,
+  rejecting non-bijections. **A subtle bug worth remembering:** N/S abutment does NOT merge all 19
+  columns like E/W's 13-cell merge does — only EVEN columns have a boundary half-hex that merges at
+  a N/S seam; odd columns are already full top-to-bottom and merely sit adjacent. Getting this wrong
+  produces a translation that satisfies the edge bijection check while silently overlapping the rest
+  of the board elsewhere — `assembleBoards` now has a defensive full-collision check (candidate
+  translation only accepted if its collision count exactly matches the intended seam length) so this
+  can't recur silently. All covered by `engine/__tests__/boardAssembly.test.ts`.
+- **Victory Conditions gained three more real (not inert) categories:** award timing
+  (`awardTiming?: 'endOfRound'|'endOfMission'`), specific-Unit kill VP
+  (`VictoryConfig.unitKillVp`, overrides the general per-kill value), and VP for enemy Units
+  surviving to Mission end (`vpPerSurvivor`, same shape as `vpPerKill`).
+- **Exit the Map (§4.0) is a real gameplay Action**, not inert like Cards/OBA — the rulebook already
+  delegates this to Mission-configurable content. `MissionDef.exitZones?`, a new `EXIT` Action
+  (costs the Unit's own `move` as AP, a real Spent Check; legal only on the Unit's side's exit
+  Hexes; removes the Unit with no hit marker/CAP loss and awards `vpPerUnit` to the exiting side).
+  UI mirrors Rally/Hasty-Defense's self-targeted button pattern.
 
-- **Multi-map missions, each map independently rotatable (0°/90°/-90°/180°) and abutted** — the
-  biggest single addition to this project since the original flat-top migration (§B), because it
-  required real, from-scratch hex-grid math nobody had solved here before (the board-geometry spec's
-  own "Orientation" section only ever rotates a WHOLE assembly together, never per-board).
-  **The core finding, derived and numerically verified before any code was written (not just
-  reasoned about): a hexagon has 6-fold rotational symmetry, not 4-fold — a genuine 90°/-90°
-  rotation of a board's own axial coordinates that both preserves adjacency and doesn't mirror the
-  authored content does not exist.** Verified two ways: group theory (the hex lattice's isometry
-  group is exactly D6 — 6 rotations + 6 reflections, no 90° element), and a direct numeric
-  counterexample (rotating one real board's coordinates by the "obvious" 90° matrix broke 432 real
-  adjacencies and created 396 fake ones). New `engine/boardAssembly.ts` (`assembleBoards`,
-  `rotationClusters`) encodes the consequence: **0° and 180° are the only two REAL axial rotations**
-  (0° = identity; 180° = the exact cube-coordinate identity `(q,r) -> (-q,-r)`, since 180° = 3×60° is
-  a genuine hex-tiling symmetry) — these two freely mix with each other, in any abutment. **90°/-90°
-  have no axial equivalent at all**, so a board tagged either one borrows whichever of the two real
-  transforms lets its requested attachment actually merge (tried both, whichever succeeds is used) —
-  the user-visible spin is a **display-only pixel rotation layered on top**, applied per-cluster by
-  `ui/hexgeo.ts`/`EditorBoard.tsx` (rotate that cluster's rendered polygons+labels around the
-  cluster's own center, counter-rotating labels so they stay upright — the same technique
-  `docs/hex_board_spec/Hex Map.dc.html`'s reference prototype already uses for its own whole-assembly
-  rotation, just narrowed from "the whole mission" to "one connected cluster"). **User-facing rotation
-  families are `{0°,180°}` and `{90°,-90°}`** (confirmed with the user) — two boards may only be
-  directly attached if they're in the same family (a `{0°,180°}` board can never touch a
-  `{90°,-90°}` board — their edge lengths become geometrically incompatible after rotation); since
-  every non-anchor board must attach to an already-placed same-family board, an entire `entries` tree
-  is transitively always one single family, so `rotationClusters` only ever returns zero or one
-  cluster, never more. Abutment itself is specified via each board's own LOCAL edge labels
-  (`localEdge`/`neighborLocalEdge`, e.g. "this board's E edge touches that board's E edge") rather
-  than screen-relative directions, sidestepping the whole "which screen direction does a rotated
-  board's edge face" question entirely — `assembleBoards` brute-force-searches for the translation
-  that makes the two specified edges coincide exactly (a true bijection, 0 collisions), rejecting
-  (with a clear thrown error) anything that doesn't. **A real, subtle bug caught and fixed during
-  derivation:** the initial assumption that N/S abutment merges all 19 columns (mirroring E/W's own
-  13-cell full merge) was wrong and caused a translation that satisfied the requested edge's bijection
-  check while ALSO silently overlapping the other board's entire footprint elsewhere (a real Vitest
-  run returned 238 hexes total instead of the expected ~463 — full collision). Root cause: only EVEN
-  columns have a boundary half-hex that merges at a N/S seam (10 of 19); ODD columns are already full
-  top-to-bottom and merely sit adjacent, not merged — confirmed against the existing, already-correct
-  `generateBoardHexes` formula as ground truth. Fixed by restricting `onLocalEdge`'s N/S membership to
-  even columns only, **and** by adding a defensive full-collision check in `assembleBoards` itself (a
-  candidate translation is only accepted if its total collision count exactly matches the intended
-  seam length) so this class of bug can't recur silently. All of this is covered by
-  `engine/__tests__/boardAssembly.test.ts` — numeric adjacency-preservation checks, real E-W/N-S
-  merge-count assertions, a same-family 90°/-90° cluster, and cross-family rejection — written and
-  passing BEFORE any UI touched this, per the plan. The Map section's old single-map `<select>` picker
-  became a real board list (`state/editorStore.ts`'s `EditorMapState.boards: EditorBoard[]`, each with
-  its own map/rotation/attachTo; the merged, obstacle/fortification-overlaid `hexes` is a derived value,
-  `assembledMap()`, never stored directly) — the previously-inert Advanced section's `mapTable` stub
-  was retired outright as redundant now that this is real.
-- **Victory Conditions gained three more categories, all real (not inert), per user request:**
-  (1) **award timing** — `VictoryHexDef.awardTiming?: 'endOfRound' | 'endOfMission'` (default
-  `endOfRound`, unchanged behavior); `turn.ts`'s `endRound` now skips `endOfMission` hexes on every
-  Round except the Mission's actual last one. (2) **specific-Unit destruction VP** —
-  `VictoryConfig.unitKillVp?: Record<UnitId, number>`, checked first in `reducer.ts`'s `destroyUnit`
-  before falling back to the existing `vpPerKillFor`/template-vp chain — overrides the general
-  per-kill value for one named Unit only (e.g. "kill the enemy commander for +9"). (3) **VP for
-  enemy Units surviving to Mission end** — `VictoryConfig.vpPerSurvivor?: number | Partial<Record
-  <SideId, number>>` (same shape as `vpPerKill`), awarded once, in the same last-Round branch as (1),
-  via a new `vpPerSurvivorFor` helper mirroring `vpPerKillFor`. All three are additive/optional;
-  covered by `engine/__tests__/victory-config.test.ts`.
-- **Exit the Map (§4.0) is a new, real gameplay Action — not inert**, since the user wants actual VP
-  earned via actual in-game exits, unlike Cards/Hidden-Units/OBA/Air-Support which stay deliberately
-  inert. `rules/04-position-and-movement.md`'s own "a Unit may never exit the Map, unless specified by
-  a Mission" already delegates this to individual Missions — legitimate Mission-configurable content,
-  not rule-invention. New `MissionDef.exitZones?: ExitZoneDef[]` (`{id, side, hexIds, vpPerUnit,
-  description?}`, one per side, mirroring `ReinforcementWaveDef`'s shape for the reverse direction);
-  new `EXIT` `Action` — costs the Unit's own `move` stat as AP (a real Spent Check, confirmed with the
-  user, same as a plain Move), legal only on one of the Unit's own side's designated exit Hexes
-  (`actions.ts`), removes the Unit from `state.units` with no hit marker/no CAP loss (it's not a
-  loss) and awards `vpPerUnit` to the EXITING Unit's own side, not the opponent (`reducer.ts`'s new
-  `doExit`). Live UI: `Inspector.tsx` gets a Rally/Hasty-Defense-style self-targeted "Exit the Map (N
-  AP, §4.0)" button (3-state: Fresh / Spent-affordable / Spent-unaffordable, matching the existing
-  pattern exactly); `store.ts`'s `exit()` is CAP-gated like `hastyDefense()` (no roll needed). Editor:
-  Victory Conditions section gained an "Exit Zones" sub-section — per-side hex multi-select (reuses
-  the exact multi-select-toggle pattern `ReinforcementsSection.tsx` already built for entry hexes) + a
-  VP-per-unit field + free-text description. Covered by `engine/__tests__/exit.test.ts`.
-- **Verified live in-browser again, this Phase 2 pass**: built a real 2-board mission (Mission 1's
-  real map abutted E-W, via each board's own local E edge, to a rotated-180° blank board) — the merged
-  picture rendered as one seamless, correctly-adjacent rectangle with zero gaps/overlaps; painted an
-  obstacle right at the seam; added an Exit Zone, clicked a hex on the merged board to pick an exit
-  hex, confirmed the "Exit Hexes: …" echo updated correctly; Export Mission completed with zero
-  console errors; and — the same regression check as Phase 1 — **Mission 1 itself still played
-  correctly afterward** in the live game, confirming none of these engine changes disturbed it. Full
-  suite (typecheck/457 tests/build/conformance 0 violations) green throughout.
+### C's Phase 3: real terrain images, invalid-config UX, readability/zoom
 
-### C's Phase 3 (built): real terrain images, invalid-config UX, readability/zoom polish
+- `EditorBoard.tsx` renders real terrain art (`public/assets/terrain/*.png|svg`) via its own
+  `EDITOR_TERRAIN_ART` map (deliberately not a reuse of `data/hexArt.ts`, which has a road-asset
+  path mismatch the live game still carries).
+- **A real bug, since fixed:** an incomplete/invalid multi-board config (missing `attachTo`, or a
+  mismatched edge) makes `assembledMap()` return zero hexes — the whole board rendered blank with
+  only a small, easy-to-miss text warning, which read as "the images broke" rather than "the config
+  is invalid." Fixed with a shared `EditorBoardOrError` wrapper that shows a large, unmissable panel
+  in the board's own space instead of silently rendering nothing — applied everywhere a board
+  depends on the merged map.
+- Every font-size under the editor's CSS scope was scaled 1.5× per user request (readability);
+  `.editor__unit-list` shows exactly 6 unit cards before scrolling.
+- **Mouse-wheel zoom, 0.5×–4×**, mirrors `Board.tsx`'s own already-debugged implementation exactly
+  (see the StrictMode note in §7).
 
-Live-testing Phase 2 surfaced more real gaps, all closed:
+---
 
-- **`EditorBoard.tsx` now renders real terrain art** (`public/assets/terrain/*.png|svg`) clipped into
-  each hex — same technique the live game's `Board.tsx` uses (a per-hex `<clipPath>` + `<image>`,
-  `TERRAIN_FILL` kept underneath as a fallback) — instead of flat colors. A small, self-contained
-  `EDITOR_TERRAIN_ART` map (NOT a reuse of `data/hexArt.ts`, which the live game depends on and has a
-  pre-existing `road: '.../road.png'` bug — that file doesn't exist on disk, only `road.svg` does);
-  `open.png` is the explicit default for any terrain without a mapped asset.
-- **A real bug caught live, since fixed:** the user reported "the image tiles are now not rendering"
-  after adding a second board. Root cause: NOT an image bug at all — an incomplete/invalid multi-board
-  config (missing `attachTo`, or a mismatched edge combination) makes `assembledMap()` return zero
-  hexes, and the *entire* board area rendered blank with only a small, easy-to-miss text warning
-  elsewhere on the page — which read as "the images broke." Fixed with a new shared
-  `EditorBoardOrError` wrapper (`EditorBoard.tsx`) that renders a large, impossible-to-miss panel
-  (`.editor__map-error`) directly in the board's own space — "⚠ Map configuration invalid — nothing to
-  show" + the exact reason — instead of silently rendering nothing. Applied everywhere a board depends
-  on the merged map (Map, Starting Forces, Reinforcements, the Exit Zones board in Victory Conditions),
-  not just the Map section, since all four would otherwise go silently blank the same way.
-- **Readability: every font-size under the editor's CSS scope (`src/styles.css`, the `.editor` block
-  through EOF) scaled 1.5×** (36 rules), per user request ("too hard to see"). Done with a small Node
-  script rather than by hand — worth remembering the gotcha it hit: `styles.css` uses CRLF line
-  endings, and a naive `.match(/.../)` regex silently failed on every line because JS's `.` doesn't
-  match `\r` by default — the fix explicitly captured an optional trailing `\r?` instead of relying on
-  `.*` to consume it. A blanket `.editor { font-size: 1.5em }` wouldn't have worked either, since every
-  descendant sets its own explicit `px` value (per the design tokens table) — scaling had to touch
-  each declared value individually, not rely on inheritance.
-- **`.editor__unit-list` (`StartingForcesSection`'s catalog picker) now shows exactly 6 unit cards
-  before scrolling**, per user request — `max-height: 556px` (up from 260px, since font scaling above
-  grew each card too), measured live rather than guessed (a temporary in-page script counted actually-
-  visible cards against candidate heights until exactly 6 landed cleanly with no partial 7th peeking).
-- **Mouse-wheel zoom, 0.5×–4×, on every board in the editor** (Map, Starting Forces, Reinforcements,
-  Exit Zones) — added directly to the shared `EditorBoard.tsx` component so every section gets it for
-  free from one implementation. Deliberately mirrors `ui/Board.tsx`'s own already-debugged
-  implementation exactly, including the exact StrictMode gotcha it already documents: never call
-  `setPan` from inside `setZoom`'s updater function, since `<StrictMode>` (`main.tsx`) double-invokes
-  it and would compound the pan math — read/write a plain ref and call `setZoom`/`setPan` with
-  already-computed plain values instead. `EditorBoard`'s own bounds-derived base viewBox (rather than
-  `Board.tsx`'s `computeLayout`) needed its own base-pan offset (`baseX`/`baseY` from `playableBounds`,
-  since unlike the live board this one's natural viewBox origin isn't already near `(0,0)` — a
-  180°-rotated board's hexes can land at very negative axial coordinates). **Verification note:**
-  synthetic `dispatchEvent(new WheelEvent(...))` calls did NOT reproduce real wheel behavior at all
-  (zero effect, silently) — real, physical `computer` mouse-scroll actions were required to actually
-  exercise the listener; confirmed precisely by reading the SVG's own `viewBox` attribute before/after
-  (not just screenshots) — one tick matched the expected 1.15× factor exactly, and clamping was
-  confirmed exact at both 4.0× and 0.5×.
-- **Verified live in-browser**: terrain images render correctly at default state, after switching maps,
-  and across a rotated 2-board merge; the invalid-config panel reproduces on demand and clears the
-  instant the config is fixed, consistently across all four sections; 6 unit cards visible with a
-  working scrollbar; zoom exercised end-to-end via real mouse-wheel actions with exact viewBox
-  measurements at each clamp boundary. Full suite (typecheck/457 tests/build/conformance 0 violations)
-  green throughout; zero console errors in every check.
+## D. Map Editor (terrain authoring, built)
+
+A separate visual, in-app tool for authoring a new **Map** (`MapHexDef[]`, assigned a Map #, with
+real terrain/road/elevation painted hex-by-hex) — the "separate, not-yet-built tool" §C's Mission
+Editor always deferred to. Lives at `src/ui/mapEditor/MapEditor.tsx` + `state/mapEditorStore.ts`,
+kept apart from both other stores for the same reason they're kept apart from each other.
+
+- **Core model:** `mapEditorStore.ts` holds one directly-paintable `MapHexDef[]` canvas (a single
+  un-rotated board via `generateOpenBoard`). Tools: the 8 real `TerrainId` types, an independent
+  Road-network toggle, an Elevation stepper (L0-L2), Clear/Erase — orthogonal per-hex properties,
+  matching how the engine actually models them. Export: `data/editor/emitMapSource.ts` (+ shared
+  `tsSource.ts`, also reused by `emitMissionSource.ts`) emits a real `MapHexDef[]` TS module; "Load
+  Existing Map" resumes editing any catalog entry.
+- **Terrain Art Variants:** a genuine design handoff (`design_handoff_hex_map/`, from the user's
+  Downloads) supplied 19 real terrain tile PNGs — more than the engine's 8 mechanical `TerrainId`
+  types, but per the standing "more terrain types = art variety" rule (§B), the extra 11 (Wheat,
+  Corn, Balka, Small Balka, Anti-Tank Ditch, Stream, Ford, Marsh, Lake, plus a nicer Plowed Field)
+  became a decorative art-variant layer, not new mechanics. `Hex`/`MapHexDef` gained an optional
+  `art?: string` key resolved by `data/terrainArtVariants.ts` (that file's own header comment has
+  the full variant→TerrainId mapping and the reasoning for each ambiguous case — e.g. Ford→`open`
+  since it's specifically the passable crossing point). Both `data/hexArt.ts`'s `artForHex` (live
+  game) and `EditorBoard.tsx` prefer `hex.art` over the plain terrain default. **Not in the
+  palette:** Road (its own toggle tool), Walls (a per-edge feature, no paint tool yet), Sloping/Steep
+  Terrain (derived from neighboring-hex Elevation deltas, §12 — not an intrinsic per-hex tag; the
+  Elevation tool is the right authoring surface).
+- **Overlay image — real gameplay art, not just a tracing aid.** A picked map's overlay image
+  becomes the REAL art shown during play, replacing per-hex terrain tiles, while terrain
+  TYPE/mechanics (movement/LOS/DR) still come from the map's own `MapHexDef[]`. Data model:
+  `MapCatalogEntry.overlayImage?: string`; `MissionDef`/`GameState.mapOverlays?: Record<number,
+  string>` keyed by `Hex.mapNumber` — **per-board, not per-hex**, specifically to avoid duplicating
+  a large image reference across a board's ~200+ hexes. `ui/Board.tsx` (the live game) groups hexes
+  by `mapNumber`, drawing one stretched (`preserveAspectRatio="none"`), silhouette-clipped `<image>`
+  per group, skipping per-hex tiles entirely for those hexes — sized to just that group's own
+  sub-bounds so a multi-board Mission with only some boards overlaid doesn't smear across others.
+  `EditorBoard.tsx` has both this same read-only `mapOverlays` preview prop (used by every Mission
+  Editor section, via `state/editorStore.ts`'s `assembledMapOverlays()`) AND a separate single-image
+  `overlay` prop that's the Map Editor's own dimmed/toggleable tracing aid while actively painting —
+  both clip to the real hex silhouette (the union of every hex's own clipped polygon), not a
+  rectangular bounding box. **A real bug, since fixed:** `EditorBoard.tsx` rendered `mapOverlays`
+  images in a loop entirely separate from the `rotationClusters`-driven `<g transform="rotate(...)">`
+  wrapping applied to hex polygons/labels — a board's overlay image never rotated with it (only the
+  hex ids visibly spun). Fixed by looking up each overlay group's own cluster (via any one of its
+  member hex ids, same `clusterOfHex` map `renderHex` already uses) and applying the identical
+  transform, since the group's clip polygons/image rect are computed in the same pre-rotation
+  absolute coordinates as the hexes. Verified live: SoS Mission 4 (real overlay art) rotated to 90°
+  now visibly spins the wheat-field/building/woods artwork together with the hex silhouette.
+  This fix was Mission-Editor-preview-only when first written — `Board.tsx` (the LIVE game) didn't
+  render rotated {90°,-90°} clusters at all yet — but that gap closed the same session (§B), and
+  `Board.tsx`'s own overlay-image rendering got the identical rotation-transform fix as part of it.
+- **Recommended overlay image size: ~1.30:1 aspect ratio** (the real board's TRUE playable
+  silhouette is 972×748 app-pixel-units at `HEX_SIZE=36`) — e.g. ~1600×1232px or ~1300×1000px; any
+  resolution works since it's stretched to fill, but matching the ratio avoids losing an edge of the
+  image (see the bug note immediately below — this number is `tightHexBounds`, NOT
+  `playableBounds`). Recompute from `hexgeo.ts`'s `tightHexBounds` if `HEX_SIZE`/board dimensions
+  ever change — `playableBounds` will silently give the wrong (too-generous) number again.
+- **A real bug, since fixed:** the overlay image's own draw rect was originally sized from
+  `hexgeo.ts`'s `playableBounds` (1044×820, ratio ≈1.27) — but `playableBounds` deliberately uses
+  every hex's FULL unclipped ±`HEX_SIZE` box (so a half/quarter-hex is never cut off by too-tight an
+  SVG viewBox), which is measurably BIGGER than the board's real silhouette on every edge that's
+  actually half/quarter-clipped. The image was stretched across that bigger box, then clipped down
+  to the true (smaller) silhouette — silently losing a real margin of the uploaded image forever
+  (confirmed live: a user-uploaded 1600×1260 image, matching the old ~1.27 recommendation exactly,
+  still lost visible content). Fixed with a new `hexgeo.ts` export, `tightHexBounds` (the true
+  bounding box of the UNION of every hex's own *clipped* corners, not its unclipped box) — used for
+  the overlay image's own `x`/`y`/`width`/`height` in both `EditorBoard.tsx`'s tracing `overlay` and
+  `computeMapOverlayGroups` (shared by `Board.tsx`'s real gameplay rendering and `EditorBoard.tsx`'s
+  `mapOverlays` preview) — while `playableBounds` stays exactly as before for the SVG's own viewport
+  sizing, where the extra margin is intentional. Verified live: the drawn `<image>` rect now reads
+  exactly `x=0 y=0 width=972 height=748.25`, matching `tightHexBounds` precisely (previously
+  `x=-36 y=-36 width=1044 height=820.25`). Full suite (483 tests) green throughout.
+- **Overlay export is a real file + path reference, not an embedded data: URI.**
+  `emitMapSource.ts` emits `overlayImage` as a `/assets/maps/<slug>.<ext>` path string and triggers
+  a second browser download of the raw image bytes, which the author drops into
+  `public/assets/maps/` before registering in `catalog.ts`. **Why this matters, concretely:** an
+  earlier embedded-data-URI export (`data/maps/atb-map-1.ts`) inflated the production bundle from
+  467KB to 3.79MB once imported into the catalog — Vite bundles an inline base64 string as plain JS.
+  If bundle size balloons after a new map is registered, check whether its `.ts` file predates this
+  fix (the field itself, `MapCatalogEntry.overlayImage: string`, accepts either shape — old exports
+  aren't auto-migrated).
+- **Known follow-ups:** no Wall tool (a two-click "paint the shared edge between two hexes" gesture
+  fits `engine/hex.ts`'s existing `neighbor`/`AXIAL_DIRECTIONS`); no automatic Sloping/Steep art hint
+  from neighboring-hex Elevation deltas; no localStorage/autosave for in-progress authoring or the
+  working overlay; no validation before Export.
+
+---
+
+## E. Pre-Mission Setup phase (built)
+
+A Mission-configurable phase (not a `rules/` chapter — no such sequence exists in the base
+rulebook; added on user request, same "legitimate Mission-configurable content" footing as Exit
+Zones/§D's Overlay mode): before Round 1, one side places a pool of starting Units onto any empty
+Hex, then the other side does the same, then the real Round 1/Initiative sequence begins exactly as
+normal. Every existing Mission (no `setupForces`) skips this entirely — `initGame` only stays in
+`phase: 'setup'` when the pool is non-empty, so nothing about any prior Mission changed.
+
+- **Data model:** `MissionDef.setupForces?: {id, side, templateId, facing}[]` (a flat pool, no
+  `hexId` — chosen by the player, unlike `units`), `setupFirstSide?` (defaults to `'A'`, auto-skips
+  to whichever side actually has pool Units if the authored first side has none), `setupInstructions?`
+  (free text, display-only). `GameState.setupPool?`/`setupSide?` mirror this at runtime.
+- **Engine:** a new `SETUP_PLACE` Action, gated in `reduce()`'s very first phase check (along with
+  `CHOOSE_FACING` — see the bug note below — the ONLY two Actions legal while `phase==='setup'`;
+  `SETUP_PLACE` illegal again once it's over). `reducer.ts`'s `doSetupPlace` places the Unit
+  fresh/unstressed — free, no AP, no Spent Check — grants the EXISTING free facing-correction window
+  (`pendingFacingChoices`, reused rather than building new facing UI), and, once both sides' pools
+  are empty, calls `turn.ts`'s `startRound` itself to begin the real Round 1. `engine/setup.ts`'s
+  `legalSetupHexes` is the pure legality helper (any currently-empty Hex).
+  **A real bug, since fixed:** the facing-correction window `doSetupPlace` grants was unusable
+  DURING setup — the "Choose facing" callout appeared after placing, but every click was swallowed
+  at TWO separate layers: `reduce()`'s own phase guard no-op'd everything except `SETUP_PLACE`
+  (fixed by adding `CHOOSE_FACING` to the carve-out, same shape as M13's online turn-gate exemption
+  for this exact Action), and `store.ts`'s `hexClick` had its own early-return for the setup phase
+  that only understood "place the armed unit" (fixed by checking the open facing window first,
+  mirroring the normal-play branch). Only the LAST-placed Unit's facing ever worked before this fix,
+  since that placement ends the phase and lifts both guards.
+- **Mission Editor:** Starting Forces tab gained a Setup Pool roster (coexists with the existing
+  fixed-location placements — a Mission may freely mix both), a "Sets Up First" side toggle, and a
+  "Setup Instructions" textarea. **A real bug, since fixed:** the Editor's THREE separate unit-id
+  generators (fixed placements, Setup Pool, reinforcement waves) each checked an incomplete
+  "existing ids" list, so a fresh id could collide across sources — caught live when an exported
+  Mission had the same id on a Setup Pool Unit and a Round-2 reinforcement Unit, which would have
+  made the reinforcement's ENTER silently overwrite the already-placed Unit in `game.units` at play
+  time. Fixed with one shared `allUnitIds()` helper (`state/editorStore.ts`) all three now use.
+- **Live game:** `SetupPanel.tsx` (shown in the right sidebar in place of Inspector/GroupPanel while
+  `phase==='setup'`) lists the current `setupSide`'s remaining pool Units; "Place" arms one, then
+  clicking a highlighted (purple, same style as reinforcement entry) empty Hex places it. Also
+  renders `GameState.setupInstructions` (copied through by `initGame` from `MissionDef`
+  `setupInstructions` — display-only, never read by `reduce`) so the authored guidance is actually
+  visible to the players placing forces, not just round-tripped through the Editor.
+  Pass/Stall/Group/Undo/Redo are hidden during setup (none apply); the topbar shows "Pre-Mission
+  Setup — Side X places its forces" instead of the normal Round/Turn line.
+- **Verified live:** `Setup Phase Sandbox (test)` mission (`data/missions/setupPhaseSandbox.ts`, 2
+  Setup Pool Units per side, `setupFirstSide: 'B'` to exercise the non-default path) — Side B placed
+  both Units, hand-off to Side A worked, and placing Side A's last Unit transitioned straight into a
+  real Round 1 with initiative rolled normally. Full suite (503 tests) + typecheck + build +
+  conformance (0 violations) green throughout.
+- **Known follow-ups:** one-unit-at-a-time placement only (no Group setup placement, unlike
+  Reinforcements' queue); no per-side setup-zone Hex restriction (any empty Hex on the whole board is
+  legal); no localStorage/autosave.
 
 ---
 
@@ -401,43 +376,32 @@ Live-testing Phase 2 surfaced more real gaps, all closed:
 
 This repo is self-describing: a fresh session needs only the code + these docs.
 
-- **Canonical location:** `C:\Users\ensch\Git Repos\conflict-of-heroes` (git repo; remote
-  `origin` = https://github.com/enschell/conflict-of-heroes.git; active branch **`v3-migration`**,
-  not yet merged to `main` — that's a deliberate later step, not an oversight). **Launch Claude Code
-  from this folder** so this CLAUDE.md auto-loads.
+- **Canonical location:** `C:\Users\ensch\Git Repos\conflict-of-heroes` (remote `origin` =
+  https://github.com/enschell/conflict-of-heroes.git; active branch **`v3-migration`**, not yet
+  merged to `main` — deliberate). **Launch Claude Code from this folder** so this CLAUDE.md
+  auto-loads.
 - **Orient by reading, in order:** this file (golden rules §3, directory map §4, rules index §6,
   roadmap §8), then `README.md`, then **`rules/INDEX.md`** and the specific `rules/NN-*.md` for
   whatever you're building.
 - **Authoring a Mission from the Mission Book PDF:** follow
   `docs/extracting-missions-from-the-mission-book.md`.
-- **Verify before changing:** `npm install` (first time), then `npm test` (Vitest),
-  `npm run typecheck`, `npm run build`, and `npm run conformance`. All green = known-good baseline.
+- **Verify before changing:** `npm install` (first time), then `npm test`, `npm run typecheck`,
+  `npm run build`, `npm run conformance`. All green = known-good baseline.
 - **Run it:** `npm run dev` → http://localhost:5173. Windows: Node 24 is at
   `C:\Program Files\nodejs` (not on Git Bash's PATH; in PowerShell prepend it).
-- **Current status:** the v3 cutover, M5 (Group Actions + Group Close Combat), M6 (Vehicles +
-  **all** of Special Units §16.1–16.7, audited and confirmed complete), M7 (Mortars + Smoke), and
-  **M9 (Hills/Elevation §12)** are all done; real **Mission 1** ("Partisans") plays end-to-end with
-  real reinforcements; conformance is at 0 violations. **M8 (Hidden Units) is deliberately deferred
-  to online play** — see §8, it's a locked decision, not a gap. **M10 (Fortifications and Obstacles
-  §17) is complete** (both Phases — Obstacles and Fortifications, incl. §17.11/17.12 destroying one by
-  Attack), and **M11 (Flamethrowers + Pioneers §18) is complete** too. **The roadmap order was then
-  deliberately swapped** (user decision): **M13 (online multiplayer) built ahead of M12 (Cards)** —
-  see §8's M13 entry for full detail — because Cards need real per-client secret info (a hidden hand)
-  that only online play can actually provide; M12/OBA remain the only unbuilt v3 combat module,
-  now scheduled after M13. **§8 has the full detail on every milestone — read that, not this bullet,
-  for specifics on how something works or why a decision was made.** Separately from the v3/M-numbered
-  roadmap, **the board geometry itself was migrated pointy-top → flat-top — see §B**: the substrate
-  is done, and **every mission/sandbox has been re-authored onto it** (Mission 1 with real terrain,
-  reinforcements, CAPs, starting units directly with the user; the five non-canonical sandboxes via
-  the `colRowToAxial` coordinate fix, all verified live incl. the hold-Shift LOS overlay) — it's all
-  live, playable content now, not placeholders. §B also has live-tested gotchas (an entry-edge-hex
-  trap, the Group-reinforcement-entry UI build, and the sandbox coordinate fixes) worth reading before
-  touching reinforcements/entry-hex/mission-authoring code again. Also separate from the v3/M-numbered
-  roadmap: **§C's Mission Editor is built** — a visual in-app tool (`src/ui/editor/`, off
-  `SetupScreen`) for authoring a new Mission (map picker + obstacle/fortification painting, unit
-  placement, reinforcement waves, victory conditions incl. per-round overrides and starting hex
-  control, and an inert Advanced/Future section for Cards/Hidden-Units/OBA/Air-Support) that exports
-  a real, self-contained TypeScript `MissionDef` source file. Read §C before touching it again.
+- **Current status:** the v3 cutover, M5–M11, and M13 steps 1-4 (online multiplayer, deployed live
+  on Render) are all done; conformance is at 0 violations. **M8 (Hidden Units) is deliberately
+  deferred to online play** (§8, locked decision — a hotseat render-layer hide would be trivially
+  defeated; build it once a real per-client server exists to filter state on). **M12 (Cards/OBA)
+  remains the only unbuilt v3 combat module**, scheduled after the rest of M13 (opponent-approved
+  undo, real visual design). §8 has the full detail on every milestone and why each decision was
+  made — read that, not this bullet, for specifics.
+  Separately from the v3/M-numbered roadmap: the board geometry was migrated pointy-top → flat-top
+  (§B, done, every mission/sandbox re-authored onto it); **§C's Mission Editor** and **§D's Map
+  Editor** are both built, in-app authoring tools off `SetupScreen` — read their sections before
+  touching either again. **§E's Pre-Mission Setup phase** is also built (a Mission-configurable
+  pre-Round-1 forces-placement sequence, not a `rules/` chapter) — read it before touching
+  `setupForces`/`SETUP_PLACE`/`SetupPanel.tsx` again.
 
 ---
 
@@ -513,38 +477,34 @@ PowerShell, prepending it: `$env:Path = "C:\Program Files\nodejs;" + $env:Path`.
 conflict-of-heroes/
   CLAUDE.md                 # this file (v3 handoff)
   README.md
-  rules/                    # ✅ COMMITTED v3 rulebook reference (source of truth)
+  rules/                    # COMMITTED v3 rulebook reference (source of truth)
     INDEX.md                #   routing index → read the right NN-*.md before coding
     00-overview.md … 19-alternate-player-counts.md
   package.json  vite.config.ts  tsconfig.json  index.html
-  render.yaml               # ✅ M13 step 4 prep: one Render Blueprint (build+start commands, PORT
-                             #   already read by server/index.ts) — deploying it still needs the user's
-                             #   own Render account, see §8's M13 entry
+  render.yaml               # M13: one Render Blueprint (build+start commands, PORT read by server/index.ts)
   public/assets/            # original art + dice SFX
-  server/                   # ✅ M13: Node online-play server (see §8's M13 entry) — separate from
-                             #   the client-only `src/`, but shares its engine/protocol code directly
+  server/                   # M13: Node online-play server — separate from client-only src/, shares engine/protocol code
     index.ts                #   HTTP static-serve (dist/) + WebSocket relay, wires rooms.ts + engine
-    staticServe.ts           #   serveStatic(distDir, url, res) — extracted from index.ts so it's
-                             #   independently testable (distDir is a param, not a module constant)
-    rooms.ts                #   pure RoomManager (create/join/reconnect/turn-gate) — unit-tested, no real sockets
-    __tests__/               #   Vitest, included via tsconfig.json's/vite.config.ts's "server" entries
+    staticServe.ts           #   serveStatic(distDir, url, res) — extracted for independent test coverage
+    rooms.ts                #   pure RoomManager (create/join/reconnect/turn-gate)
+    __tests__/
   src/
     main.tsx  App.tsx
-    net/                    # ✅ M13: client↔server WebSocket layer (see §8's M13 entry)
+    net/                    # M13: client↔server WebSocket layer
       protocol.ts           #   ClientMsg/ServerMsg — same TS source imported by src/ AND server/
       client.ts             #   NetClient: thin ws wrapper, reconnect-with-backoff, no game logic
-      session.ts            #   getSessionId() — opaque per-browser id in localStorage, for reconnect
+      session.ts            #   getSessionId() — opaque per-browser id in localStorage
     engine/                 # PURE rules engine (see §3)
       types.ts              # shared types (GameState, Unit, Hex, Action, GameEvent…)
       state.ts              # GameState shape, initGame(mission), (de)serialize
       rng.ts                # seeded RNG: roll2d6, rollD6, rollSpentDie, drawHit
       spent.ts              # Spent Die [1,1,2,3,3,4,5,5,6,7] + spentCheck(cost)
       stress.ts             # Stress state + "+1AP if acted last Turn"
-      hex.ts                # axial math (flat-top, §B): neighbors, distance, direction, line, arc
-      hexBoard.ts            # ✅ §B: column/row↔axial bridge, A01-S12 labels, board number, multi-board merge
+      hex.ts                # axial math (flat-top): neighbors, distance, direction, line, arc
+      hexBoard.ts            # column/row↔axial bridge, A01-S12 labels, board number, multi-board merge
       terrain.ts            # terrain table → AP cost, DR mod, blocksLOS, isCover
-      los.ts                # LOS + arc of fire; visibleHexesFrom(hex); ✅ M9 elevation (§12.4-12.6)
-      movement.ts           # move cost, facing, pivot, backwards, roads, walls, ✅ M9 elevation (§12.2)
+      los.ts                # LOS + arc of fire; visibleHexesFrom(hex); elevation (§12.4-12.6)
+      movement.ts           # move cost, facing, pivot, backwards, roads, walls, elevation (§12.2)
       range.ts              # short +3AR (adjacent), long −2AR
       combat.ts             # AR/DR; Hit Number = DR − AR; 2d6 ≥ HN; crit by 4
       hits.ts               # draw marker, apply effects, 2nd hit = destroyed
@@ -554,46 +514,49 @@ conflict-of-heroes/
       victory.ts            # VP for kills, objective control, game end (no-tie track)
       actions.ts            # action defs + getLegalActions()
       reducer.ts            # central reduce(state, action) → { state, events }
-      groups.ts             # ✅ Group Actions §10: connectivity, support, one Spent Check/group
-      reinforcements.ts     # ✅ M2.5/§4.12: legalEntryHexes (off-Map Units, ENTER)
-      mortar.ts             # ✅ M7/§13: Direct/Indirect Attack fire zones, Spotter Hex, rollIndirectFire
-      smoke.ts              # ✅ M7/§14: Heavy/Light DR/AR, LOS-path bonus, Rally bonus, dissipation
-      obstacles.ts          # ✅ M10 Phase 1/§17.7-17.10: rollMinesAttack, minesTargetsFor/OwnerSide, destroysBarbedWire
-      fortifications.ts     # ✅ M10 Phase 2/§17.1-17.6,17.11-17.12: canOccupy, fortificationDrBonus, rollStructureDestroy
+      groups.ts             # Group Actions §10: connectivity, support, one Spent Check/group
+      reinforcements.ts     # M2.5/§4.12: legalEntryHexes (off-Map Units, ENTER)
+      setup.ts              # §E: legalSetupHexes — Pre-Mission Setup phase (SETUP_PLACE)
+      mortar.ts             # §13: Direct/Indirect Attack fire zones, Spotter Hex, rollIndirectFire
+      smoke.ts              # §14: Heavy/Light DR/AR, LOS-path bonus, Rally bonus, dissipation
+      obstacles.ts          # §17.7-17.10: rollMinesAttack, minesTargetsFor/OwnerSide, destroysBarbedWire
+      fortifications.ts     # §17.1-17.6,17.11-17.12: canOccupy, fortificationDrBonus, rollStructureDestroy
       cards.ts              # (deferred) Battle/Weapon cards §8; OBA (§13.4-13.9) waits on this too
       index.ts              # public engine API surface
       __tests__/            # Vitest
     data/                   # authored content (no logic)
       nations.ts terrainTypes.ts hitMarkers.ts units.ts hexArt.ts
-      hexBoardMap.ts         # ✅ §B: generateOpenBoard/applyTerrainJson — engine/hexBoard.ts's generator → MapHexDef[]
-      maps/mission1.ts   missions/mission1.ts   # Mission 1 "Partisans": re-authored on the new flat-top grid (§B) + setup/reinforcement waves
-      missions/sandbox.ts   # non-canonical Armor Sandbox test mission (M6) — reuses MISSION1_MAP, already flat-top
-      missions/fireSupportSandbox.ts  # non-canonical Fire Support Sandbox test mission (M7) — reuses MISSION1_MAP too
-      missions/hillsSandbox.ts  # non-canonical Hills Sandbox test mission (M9) — own map, real hills; ✅ re-authored onto flat-top via colRowToAxial (§B)
-      missions/obstaclesSandbox.ts  # non-canonical Obstacles Sandbox test mission (M10 Phase 1) — own map; ✅ same colRowToAxial fix
-      missions/fortificationsSandbox.ts  # non-canonical Fortifications Sandbox test mission (M10 Phase 2) — own map; ✅ same colRowToAxial fix
-      missions/hexBoardDemo.ts  # ✅ §B: proves the new flat-top/multi-board substrate — 2 boards, units on the seam
-      missions/catalog.ts    # ✅ M13: id -> MissionDef lookup — the online server only ever receives a `missionId` string, never a client-supplied MissionDef
-      maps/catalog.ts        # ✅ §C: Mission Editor's "choose an existing map" picker — id -> MapHexDef[]
-      editor/emitMissionSource.ts  # ✅ §C: authored editor state -> real self-contained TS MissionDef source + browser download
+      hexBoardMap.ts         # generateOpenBoard/applyTerrainJson — engine/hexBoard.ts's generator → MapHexDef[]
+      terrainArtVariants.ts # §D: decorative art-variant → TerrainId mapping
+      maps/mission1.ts   missions/mission1.ts   # Mission 1 "Partisans": setup/reinforcement waves
+      missions/sandbox.ts   # non-canonical Armor Sandbox test mission (M6)
+      missions/fireSupportSandbox.ts  # non-canonical Fire Support Sandbox test mission (M7)
+      missions/hillsSandbox.ts  # non-canonical Hills Sandbox test mission (M9)
+      missions/obstaclesSandbox.ts  # non-canonical Obstacles Sandbox test mission (M10 Phase 1)
+      missions/fortificationsSandbox.ts  # non-canonical Fortifications Sandbox test mission (M10 Phase 2)
+      missions/hexBoardDemo.ts  # §B: proves the flat-top/multi-board substrate — 2 boards, units on the seam
+      missions/setupPhaseSandbox.ts  # §E: non-canonical Setup Phase Sandbox test mission — no fixed units, both sides place from a Setup Pool
+      missions/catalog.ts    # M13: id -> MissionDef lookup — the online server only ever receives a missionId string
+      maps/catalog.ts        # §C/§D: id -> MapCatalogEntry (hexes + optional overlayImage)
+      editor/emitMissionSource.ts  # §C: authored editor state -> real self-contained TS MissionDef source
+      editor/emitMapSource.ts      # §D: authored map state -> real self-contained TS MapHexDef[] source
       editor/__tests__/
       cards/                # deferred to the cards milestone
       __tests__/
-    state/  store.ts persistence.ts             # Zustand + localStorage saves; store.ts also owns M13's online dispatch fork (see §8's M13 entry)
-    state/editorStore.ts    # ✅ §C: Mission Editor's own small Zustand store — deliberately separate from store.ts's GameState-driven one
-    ui/     …  ReinforcementsPanel.tsx  MinesConfirm.tsx  …  # React + SVG (see §7)
-    ui/editor/  MissionEditor.tsx EditorBoard.tsx UnitPicker.tsx sections/*.tsx  # ✅ §C: the Mission Editor screen
+    state/  store.ts persistence.ts             # Zustand + localStorage saves; store.ts also owns M13's online dispatch fork
+    state/editorStore.ts    # §C: Mission Editor's own small Zustand store
+    state/mapEditorStore.ts # §D: Map Editor's own small Zustand store
+    ui/     …  ReinforcementsPanel.tsx  SetupPanel.tsx  MinesConfirm.tsx  …  # React + SVG (see §7)
+    ui/editor/  MissionEditor.tsx EditorBoard.tsx UnitPicker.tsx sections/*.tsx  # §C: the Mission Editor screen
+    ui/mapEditor/  MapEditor.tsx  # §D: the Map Editor screen
   scripts/  play.ts conformance.ts              # terminal driver + v3 conformance audit
-  public/hills-los-mockup.html  # ✅ kept in repo: interactive §12 LOS validator/reference (M9)
+  public/hills-los-mockup.html  # kept in repo: interactive §12 LOS validator/reference (M9)
 ```
 
 > **Current state:** engine/data/state/ui/scripts compile and pass under 3rd-ed (v3) rules
-> (conformance 0 violations — see §0/§8 for the milestone status). Data is the real **Mission 1** on
-> `maps/mission1.ts` + `missions/mission1.ts` (the 2nd-ed `firefights/`/`maps/partisans.ts` are
-> deleted), plus the non-canonical `missions/sandbox.ts` (vehicles), `missions/fireSupportSandbox.ts`
-> (mortars/smoke), `missions/hillsSandbox.ts` (elevation), `missions/obstaclesSandbox.ts`
-> (Obstacles), `missions/fortificationsSandbox.ts` (Fortifications), and `missions/hexBoardDemo.ts`
-> (§B's new flat-top/multi-board substrate) test missions. `rules/` is the committed source of truth.
+> (conformance 0 violations). Data is the real Mission 1, plus the non-canonical Armor/Fire-Support/
+> Hills/Obstacles/Fortifications sandboxes and the Hex Board Demo. `rules/` is the committed source
+> of truth.
 
 ---
 
@@ -644,6 +607,7 @@ GameState = {
   victory: VictoryConfig
   log: GameEvent[]
   winner?: SideId | null
+  mapOverlays?: Record<number, string> // §D: per-board real gameplay art, replaces per-hex tiles
 }
 ```
 (`history`/`future` — the undo/redo stacks — live in the Zustand store, not `GameState` itself.)
@@ -713,823 +677,252 @@ target's DR colour (blue → vehicle pile, red → foot pile).
 ## 7. Conventions
 
 - **Everything is data-driven.** Adding a nation, unit, card, or mission should be a `data/` edit.
-  - **Add a unit:** stat template `{ nation, fp:{red,blue}, dr:{front,flank,color}, move, range,
-    apToFire, vp, flags, whiteBoxFp? }` in `data/units.ts`. (v3: `apToFire`/`move` are **Spent-Check
-    thresholds**, not pool spend.) **Vehicles** (`kind:'vehicle'`) add `propulsion:'wheeled'|'tracked'`
-    and `bonusMoves?: number` (§15.1–15.2); any `kind:'vehicle'` template may Transport one foot Unit
-    (§15.6) — no separate flag needed. A **Mobile Vehicle** (§16.4, a Wheeled vehicle that also
-    carries Track Bonus Move symbols) adds `mobileTrackBonusMoves?: number` alongside its (Wheel)
-    `bonusMoves` — those extra Bonus Moves may be spent in any order, may enter Open Terrain
-    (a plain Wheeled vehicle's Bonus Moves can't), and ignore Road Congestion. **Special Units (§16):**
-    `turreted?` (fire outside Arc, +2AP),
-    `openTopped?` (red Flank DR + Soft marker vs red-FP CC), `apcTransport?` (+2DR for a carried Soft
-    Target), `cannotControlHex?`/`noCapLossOnDestroy?`/`attackMode?:'closeCombatOnly'|'none'` (Trucks/
-    Wagons, §16.1). Field Guns (§16.7) are just `kind:'gun'` + `propulsion:'wheeled'` — already towable
-    since Load's damage precondition only applies to `kind:'vehicle'`. **Mortars (§13, M7):**
-    `kind:'mortar'` templates add `minRange?` (Minimum Range) and `indirectApToFire?` (Indirect Attack
-    Cost, separate from `apToFire`'s Direct cost); every `kind:'mortar'` automatically fires HE (always
-    vs Flank DR, Air Burst exception) via `combat.ts`, no extra flag needed. `canFireSmoke?` (any kind)
-    marks a Unit that may `FIRE_SMOKE` (§14.0: 80mm+ mortars, Artillery Cards, Pioneers, some Tanks).
-    **Flamethrowers + Pioneers (§18, M11):** `hasFlamethrower?` (Foot or Vehicle) lets a FIRE/
-    CLOSE_COMBAT Action set `useFlamethrower: true` for a flat 3 red/3 blue FP, max Range 1 profile
-    that always hits Flank DR and ignores every DR modifier but Smoke; `pioneer?` (Foot only) adds the
-    §18.1 exceptions on top — immune to Mines Attacks, and its own `canFireSmoke` is capped to Range 1
-    regardless of the Unit's normal (longer) Range. **Counter art (prototype):** `counterImage?: string`
-    (a `public/assets/units/...` path) swaps a Unit's board/HoverPanel/Inspector counter from the plain
-    nation-color+text rendering to the redesigned image-backed layout — see `UnitCounter.tsx` under
-    "Requested UI features" below. Opt-in per template; omit the field to keep the old rendering.
-  - **Add a card:** `{ id, type:'action'|'bonus'|'mission'|'artillery', cost:{green?,blue?}, effect }`
-    in `data/cards/` (v3 Green/Blue cost, 8.5). Effects are engine actions/modifiers, not UI code.
-  - **Add a mission:** new file in `data/missions/` with maps, placements (by hex label), starting
-    CAPs per side, rounds, victory config, deck, hidden-unit slots. To build the map on the new §B
-    flat-top substrate (real `A01`..`S12` labels, board number, correct multi-board merging), start
-    from `data/hexBoardMap.ts`'s `generateOpenBoard(boards)` (open terrain everywhere) and override
-    individual hexes' `terrain`/`walls`/`road`/etc. by `id` — see `data/missions/hexBoardDemo.ts`.
-    Hand-authoring a bespoke irregular map (Mission 1's/the sandboxes' current approach) still works
-    exactly as before; it just won't have `label`/`boardNumber`/`edgeCut` set.
-- **Actions** are plain serializable objects (see `engine/types.ts`'s `Action` union for the exact
-  shapes): `MOVE` (unitId, toHexId, optional vehicle `path`, `capCostReduce?`, `minesCapMods?`),
-  `PIVOT` (`capCostReduce?`, `minesCapMods?`), `FIRE`/`CLOSE_COMBAT` (attackerId, targetId,
-  `capDiceMod?`, `capCostReduce?`; `CLOSE_COMBAT` also `minesCapMods?`), `RALLY`, `STALL`, `PASS`;
-  Group Actions `GROUP_MOVE`/`GROUP_ATTACK`/`GROUP_RALLY` (§10); Transport `LOAD`/`UNLOAD` (§15.7/
-  §15.9); reinforcement `ENTER` (`{ placements: {unitId, hexId, facing?}[] }`, §4.12); Mortar
-  `INDIRECT_FIRE` (attackerId, targetHexId, spotterHexId, §13.2) and `FIRE_SMOKE` (unitId, targetHexId,
-  optional spotterHexId for Indirect, §14.1). `minesCapMods` (`Record<UnitId, number>`, §17.10) is
-  resolved by the store's Mines CAP-choice dialog (`MinesConfirm.tsx`) *before* dispatch — the Mines'
-  owning side may not be the acting side, so this can't reuse the normal `capDiceMod` pre-roll flow.
-  Cards (`PLAY_CARD`) are deferred, not yet a real action type.
-  **Removed in v3:** `ACTIVATE_UNIT`, `MARK_SPENT` (no activation/pool).
-- **Tests:** colocate in `__tests__/`. **Reproduce the v3 red-box examples** from `rules/NN-*.md` as
-  fixtures — they are worked rule implementations (Spent Checks, Stress, combat HN, rally, OBA drift,
-  bunker DR, etc.) and make excellent oracles. Shared per-module fixture builders (a `scene()`-style
-  helper reused by several test files in the same directory) belong in that directory's own
-  `helpers.ts` — `src/engine/__tests__/helpers.ts` and `src/state/__tests__/helpers.ts` are the two
-  that exist so far; check there before writing a new inline scene-builder a sibling test file might
-  already have (or duplicate). **A full staleness audit of all 45 test files** (a 4-agent parallel
-  review, one per subsystem cluster) found the suite in good health overall — no leftover 7AP-pool or
-  pointy-top-hex relics, no skipped/dead tests — but did catch two worth remembering the pattern of: a
-  test's `it(...)` title had drifted from what it actually asserted (an honest comment nearby explained
-  the gap, but the title itself was never corrected — read the assertions, not just the title, when
-  judging whether a test still describes real behavior), and a test whose entire premise (the reducer
-  gates a certain roll on Hex occupancy) turned out to be false once checked against the actual
-  `reducer.ts` code — it was deleted, not fixed, since there was nothing true left to assert. **A tried
-  fix that was itself wrong, caught and reverted:** attempting to extend the misleadingly-titled test
-  into a *true* full reproduction of the rulebook's exact worked-example numbers by adding an elevation
-  difference produced an arithmetic error, since it was done without the actual rulebook text open —
-  reverted per this file's own "do not invent rules from memory" instruction, and fixed the title
-  instead of guessing the numbers.
+  - **Add a unit:** stat template `{nation, fp:{red,blue}, dr:{front,flank,color}, move, range,
+    apToFire, vp, flags, whiteBoxFp?}` in `data/units.ts`. `apToFire`/`move` are Spent-Check
+    thresholds, not pool spend. **Vehicles** (`kind:'vehicle'`) add `propulsion:'wheeled'|'tracked'`
+    and `bonusMoves?` (§15.1-15.2); any vehicle may Transport one foot Unit (§15.6). A **Mobile
+    Vehicle** (§16.4) adds `mobileTrackBonusMoves?` alongside `bonusMoves` (spendable in any order,
+    can enter Open Terrain, ignores Road Congestion). **Special Units (§16):** `turreted?`,
+    `openTopped?`, `apcTransport?`, `cannotControlHex?`/`noCapLossOnDestroy?`/
+    `attackMode?:'closeCombatOnly'|'none'` (Trucks/Wagons). Field Guns are just `kind:'gun'` +
+    `propulsion:'wheeled'`. **Mortars (§13):** `kind:'mortar'` adds `minRange?`/`indirectApToFire?`;
+    every mortar auto-fires HE. `canFireSmoke?` marks a Unit that may `FIRE_SMOKE`. **Flamethrowers +
+    Pioneers (§18):** `hasFlamethrower?` lets a FIRE/CLOSE_COMBAT set `useFlamethrower: true` (flat
+    3 red/3 blue FP, max Range 1, always Flank DR, zeroes every DR modifier but Smoke); `pioneer?`
+    adds immunity to Mines Attacks + Fire Smoke capped to Range 1. **Counter art (prototype):**
+    `counterImage?: string` swaps a Unit's counter to the image-backed `UnitCounter.tsx` layout
+    (opt-in; omit to keep the old rendering).
+  - **Add a card:** `{id, type, cost:{green?,blue?}, effect}` in `data/cards/` — deferred, not yet
+    a real action type.
+  - **Add a mission:** new file in `data/missions/`. To build on the flat-top substrate (real
+    labels/board number/multi-board merging), start from `data/hexBoardMap.ts`'s
+    `generateOpenBoard(boards)` and override hexes by `id` (see `hexBoardDemo.ts`). Hand-authoring a
+    bespoke map (Mission 1's approach) still works, it just won't have `label`/`boardNumber`/
+    `edgeCut` set.
+- **Actions** are plain serializable objects (`engine/types.ts`'s `Action` union): `MOVE`, `PIVOT`,
+  `FIRE`/`CLOSE_COMBAT` (+ `capDiceMod?`/`capCostReduce?`/`minesCapMods?`), `RALLY`, `STALL`,
+  `PASS`; Group Actions `GROUP_MOVE`/`GROUP_ATTACK`/`GROUP_RALLY`; Transport `LOAD`/`UNLOAD`;
+  reinforcement `ENTER`; Mortar `INDIRECT_FIRE`/`FIRE_SMOKE`. `minesCapMods` is resolved by the
+  store's Mines CAP-choice dialog (`MinesConfirm.tsx`) *before* dispatch, since the Mines' owning
+  side may not be the acting side. Cards (`PLAY_CARD`) deferred. **Removed in v3:**
+  `ACTIVATE_UNIT`, `MARK_SPENT`.
+- **Tests:** colocate in `__tests__/`. Reproduce the v3 red-box examples from `rules/NN-*.md` as
+  fixtures — they're worked rule implementations and make excellent oracles. Shared fixture builders
+  belong in that directory's own `helpers.ts` (`engine/__tests__/helpers.ts`,
+  `state/__tests__/helpers.ts` exist so far — check there before writing a new inline
+  scene-builder). Never invent a rule's numbers to "complete" a test — if the real rulebook text
+  isn't open, fix the test's premise/title instead of guessing (see memory
+  `conflict-of-heroes-test-audit-lessons`).
 - **No engine→UI imports.** UI imports engine; never the reverse.
 
 ### Requested UI features (all implemented — keep them working)
-*(presentation is edition-agnostic; only the readouts change: show **Fresh/Spent + Stress** and the
-Spent-Check die instead of a remaining-AP pool)*
-- **Real hex board** ✅ (`Board.tsx`/`hexgeo.ts`) — **flat-top** as of §B's migration (was pointy-top);
-  the square ASCII grid in `play.ts` is debug-only. Board-edge half/quarter-hexes, coordinate labels
-  (`A01`..`S12`), and the board-number cell are all real (§B) — a mission using
-  `data/hexBoardMap.ts`'s generator gets them for free; hand-authored missions (Mission 1, the
-  sandboxes) don't set `Hex.edgeCut`/`boardNumber` and so render as plain full hexes with no labels,
-  same as before §B.
-- **Mouse-wheel zoom, centered on the cursor** ✅ `Board.tsx` drives the `<svg>`'s own `viewBox`
-  directly from `zoom`/`pan` state (default `zoom=1, pan={0,0}` = today's fixed viewBox exactly, a
-  no-op for anyone who never scrolls) — no CSS transform needed. A real native `wheel` listener
-  (attached once via a ref) computes the cursor's position in the *current* viewBox's user-space via
-  `getScreenCTM().inverse()`, then solves for the new `pan` that keeps that exact point fixed under
-  the cursor at the new zoom level; clamped to `[0.5, 4]×`. **A real bug caught and fixed before
-  shipping:** the first version computed the new `pan` via `setPan(...)` called *from inside*
-  `setZoom`'s functional-updater callback — impure (a `setState` call is a side effect), and
-  `<StrictMode>` (`main.tsx`) deliberately double-invokes updater functions to catch exactly this,
-  which visibly made the zoom drift off the cursor instead of staying put. Fixed by reading/writing a
-  plain ref (`viewRef`, kept current every render) instead of nested updater functions — `setZoom`/
-  `setPan` are now called with already-computed plain values, never a function with a side effect
-  inside it. Verified via `getScreenCTM()`-based round-trip checks (dispatch a wheel event, re-measure
-  the same screen point in SVG-space, confirm it hasn't moved) at both zoom-in and zoom-out, plus
-  confirmed the `[0.5, 4]×` clamp holds under repeated ticks (must be dispatched with a settle/RAF
-  between each in tests — firing several synchronously in one JS turn without waiting starves the
-  ref of updates between them and under-counts, a test-methodology gotcha, not a real one: actual
-  browser wheel events always arrive as separate tasks).
-- **Unit facing (§4.1)** ✅ `UnitCounter.tsx` rotates the whole counter (not an overlay arrow) so its
-  **green top-edge bar** (+ a small outward notch) sits flush against whichever of the six hexsides it
-  faces — matching the physical counter/rotate-in-place metaphor exactly (a corner is never a legal
-  facing). Rotation = `atan2(facingVector) + 90°`, applied via one `<g transform="rotate(...)">`
-  wrapping the whole counter, so every printed stat rotates with it, just like flipping a physical chit.
-- **Free facing correction (§4.5/§15.11)** ✅ after a Move (solo or Group) or an automatic unload from
-  a destroyed Transport, `GameState.pendingFacingChoices` grants the affected Unit(s) a follow-up,
-  **0AP/no-Spent-Check** `CHOOSE_FACING` action (`reducer.ts`) — matches "may freely Pivot after
-  moving" / "placed facing any direction." Turn-agnostic (a normal Action already handed the turn to
-  the other side) and closes the instant any other Action resolves. Store auto-selects the pending
-  Unit (plain click-to-select is current-side-only and couldn't reach it); `Inspector.tsx`'s
-  arrow-button picker renders outside the `yours`-only gate so it's visible regardless of turn. Regular
-  Unload (§15.9) grants the same follow-up. `Board.tsx` also highlights the six neighbor Hexes **blue**
-  (`#3a8ee0`) with an on-board "Choose facing" label (rendered last in the SVG so it's always on top) —
-  clicking a blue Hex faces that direction, a second way in alongside the arrow picker. Tests:
-  `facing-choice.test.ts` + the `transport.test.ts` §15.11 case.
-- **Facing already governs both Arc of Fire and Front/Flank DR, and backwards movement already costs
-  extra** (verified, no code changes needed): `combat.ts`'s `attackContext` denies a shot outside the
-  attacker's own Arc of Fire unless it's Turreted (§16.2, `+2AP`, `outOfArc`/`inArc`), and separately
-  picks the target's Front vs Flank DR from whether the attacker sits inside *the target's* arc
-  (§6.1/§6.3, `attackerInTargetFront`). `movement.ts`'s `moveCost`/`planVehicleMove` add **+1AP**
-  whenever the destination isn't in the mover's own front arc (§4.11/§15.1, `isInFrontArc`) — a
-  Backwards Move.
-- **Custom per-hex artwork** ✅ via `data/hexArt.ts` (`TERRAIN_ART` + `HEX_ART_OVERRIDES`, SVG
-  `clipPath`); `USE_HEX_ART=false` → flat colors.
+*(presentation is edition-agnostic; readouts show Fresh/Spent + Stress and the Spent-Check die, not
+an AP pool)*
+
+- **Real hex board** ✅ `Board.tsx`/`hexgeo.ts` — flat-top (§B). Board-edge half/quarter-hexes,
+  labels, board-number cell are real for boards from `hexBoardMap.ts`'s generator.
+- **Main menu (`SetupScreen.tsx`) is a three-panel layout, not one long list of buttons** ✅ Tests
+  (left) — every non-canonical sandbox/demo Mission, click-to-start same as before; Missions
+  (middle) — only the real, hand-authored Missions (currently Mission 1 and SoS Mission 4);
+  clicking one just SELECTS it (green highlight via `.setup__mission-btn.is-selected`), it never
+  starts the game. The Play card underneath has its own "Local Hotseat"/"Play Online" choice —
+  Hotseat starts the currently-selected Mission immediately; Play Online reveals the existing
+  Create-Room/room-code/Join controls (Create now uses the SELECTED Mission's id, not always
+  Mission 1). Selecting a Mission renders live details at right, straight from its own `MissionDef`
+  — situation text, a ~0.25× map preview (reuses `ui/editor/EditorBoard.tsx`, including overlay art
+  and any `mapRotations` spin — a Mission's whole-assembly rotation cluster is synthesized inline
+  the same way `computeDisplayRotationCluster` does, since this is a read-only preview with no
+  board-list to walk), per-side Starting Forces (fixed placements AND the Setup Pool, labeled
+  "placed by the player pre-Round 1"), and Reinforcements per wave. Nothing here reads live
+  `GameState` — it's pure `MissionDef` inspection, so it works before any game exists.
+- **Mouse-wheel zoom, centered on the cursor** ✅ `Board.tsx` drives the `<svg>` `viewBox` from
+  `zoom`/`pan` state, clamped `[0.5,4]×`. **Never call `setPan` from inside `setZoom`'s functional
+  updater** — `<StrictMode>` double-invokes updaters and would compound the pan math; read/write a
+  plain ref and call both setters with already-computed values instead (see memory
+  `conflict-of-heroes-strictmode-nested-setstate`).
+- **Unit facing (§4.1)** ✅ `UnitCounter.tsx` rotates the whole counter (green top-edge bar = Front)
+  via one `<g transform="rotate(...)">`.
+- **Free facing correction (§4.5/§15.11)** ✅ after a Move/Group Move or an auto-unload from a
+  destroyed Transport, `GameState.pendingFacingChoices` grants a follow-up 0AP `CHOOSE_FACING`
+  action — turn-agnostic, closes on the next Action by either side. `Board.tsx` highlights the six
+  neighbor Hexes blue as a second way to pick, alongside `Inspector.tsx`'s arrow picker.
+- **Facing already governs Arc of Fire, Front/Flank DR, and Backwards-move cost** — no extra code
+  needed; `combat.ts`'s `attackContext`/`attackerInTargetFront` and `movement.ts`'s
+  `moveCost`/`isInFrontArc` already handle it.
+- **Custom per-hex artwork** ✅ `data/hexArt.ts` (`TERRAIN_ART` + `HEX_ART_OVERRIDES`);
+  `USE_HEX_ART=false` → flat colors.
 - **Under-cursor panel** ✅ `HoverPanel.tsx` — terrain rules + half-size unit renders.
-- **LOS visibility mode** ✅ hold **Shift** → `los.visibleHexesFrom` shades visible hexes; topbar
-  button pins it.
-- **Fire-odds popup** ✅ with a unit selected, hovering a target shows hit %/crit % + AR/DR detail
-  (`ui/odds.ts`); a shot resolving a stacked hex lists one row per enemy (6.9).
-- **Stacked units / selection** ✅ fanned with `×N` badge; click auto-selects a Fresh unit; **Ctrl+
-  click** opens `UnitPicker`; click selected to deselect.
-- **Action chooser** ✅ `ActionChooser.tsx` when a hex affords >1 action (e.g. move into an enemy
-  hex vs close-combat it). **Fixed:** it used to derive "can Move/Fire/CC here" from
-  `legalActionsForUnit`'s CAP-gated list, so for a Spent Unit that could afford one option but not the
-  other, the unaffordable one silently vanished and the click just executed the sole survivor (no
-  chooser). `store.ts`'s `hexClick` and `ActionChooser.tsx` now check **rules legality directly**
-  (`moveCost(...).ap`, `attackContext(...).legal`, `closeCombatContext(...).legal` — same as the odds
-  popup) so a Spent Unit still gets offered the option; choosing it still runs the normal CAP-confirm
-  flow (§3.4). Indirect Fire/Fire Smoke/Load stay CAP-gated (out of scope). See memory
-  `conflict-of-heroes-chooser-legality`.
-- **Spent-Check / opportunity confirm** ✅ acting with a unit prompts the Spent-Check die flow
-  (replaces the old opportunity-spend confirm); `ConfirmDialog`.
-- **Turn banner** ✅ `TurnBanner.tsx` "Start of turn N".
-- **Turn flash** ✅ `TurnFlash.tsx` — large text ("{Nation}'s Turn") flashed over the board and faded
-  out over 4s via a CSS `@keyframes` animation (fade in → hold → fade out), firing the instant
-  `currentSide` flips (including once on mount, for the Mission's starting side). **First shipped as
-  a persistent banner** (`TurnHeader.tsx`, a colored bar permanently above the board) **— replaced on
-  user request** for this large-fade-over-the-map version instead; `TurnHeader.tsx`/`.board-wrap`/
-  `.turn-header*` CSS were deleted outright, not kept alongside. `position: absolute; inset: 0;`
-  within `.center` (already `position: relative`) so it overlays just the board area, not the
-  sidebars; `pointer-events: none` so it never blocks play while fading. Never a bare Side letter
-  (same convention as `VictoryScreen.tsx`); handles a plural nation name already ending in "s"
-  ("Germans", "Soviets") with a bare apostrophe ("Germans' Turn") rather than a double-s
-  ("Germans's Turn"). Remounts via `key={cs}` on the animated element specifically so two Turn
-  switches in quick succession (e.g. two passes back-to-back) each restart the fade from scratch —
-  a plain visibility boolean toggling true→true across a rapid double-switch wouldn't force React to
-  remount the DOM node, so the CSS animation wouldn't restart. **Verification note:** a live 4-second
-  fade is hard to catch with a single `preview_screenshot` call (tool round-trip latency alone can
-  exceed the window) — verified instead with one atomic `preview_eval` script that clicks and then
-  polls `getComputedStyle(...).opacity` at several timestamps *within the same call*, showing the
-  expected 0 → 1 → 1 → 0 → (unmounted) progression precisely; don't trust a screenshot's absence of
-  the flash as evidence of a bug without confirming via timestamped opacity polling first.
-  **A real bug shipped and caught live on the real deploy, since fixed:** the text didn't fade in
-  place — it appeared somewhere off from the board's own center and stayed until the next Turn
-  switch (only *looked* like "doesn't fade," since the unmount timer was actually firing correctly
-  the whole time; the symptom was purely positional). Root cause: `.turn-flash`'s `position: absolute;
-  inset: 0;` was scoped to `.center`, not to the board itself — `.center` is a flex ROW with
-  `align-items: flex-start` and no explicit height, so it can be (and on a tall viewport, was)
-  noticeably TALLER than `<Board/>`'s own rendered box (the SVG's `max-height` cap leaves empty space
-  below it that `.center` still occupies). Centering the flash text within `.center`'s full height
-  landed it well below the board's own visual center, by an amount that depends on viewport size —
-  invisible on some window sizes, glaringly wrong on others, which is exactly the "why does this only
-  break sometimes" fingerprint of a size-mismatch bug. Fixed with a new `.board-frame` (`position:
-  relative`, no explicit height — shrink-wraps to the SVG's own intrinsic height) wrapping *just*
-  `<Board/>` and `<TurnFlash/>` in `App.tsx`, so `inset: 0` now sizes to the board's own box
-  precisely, verified by comparing `getBoundingClientRect()` of `.board-frame`/`.turn-flash` against
-  `.board` directly (now identical) rather than trusting a screenshot. **Lesson: this bug was
-  completely invisible in the local dev-server preview at the window size already in use for earlier
-  testing, and only surfaced on the actual deployed build at the user's own (different) window size —
-  when a UI bug report doesn't reproduce in the same tool/window session that shipped the feature,
-  actually reproduce it in a fresh production build (`npm run build && npm start`, not the Vite dev
-  server) rather than assuming the report is stale/cached; a `position: absolute` element's sizing
-  bugs are inherently viewport/container-size-dependent and can pass every check at one window size
-  while being obviously wrong at another.** **Follow-up, user preference:** repositioned from
-  vertically centered on the board to pinned at the board's top edge (`align-items: flex-start` +
-  `padding-top`, was `align-items: center`) — doesn't sit on top of units/terrain mid-board this way.
-  **Follow-up, waits out the free facing-correction window:** a normal Move hands the Turn to the
-  other side *before* the mover's §4.5/§15.11 facing-correction pick — `currentSide` is already the
-  next side while the previous side still has that pending choice open. Flashing immediately read as
-  "it's the other side's Turn now" while the mover still had a decision pending, so `TurnFlash` now
-  also tracks `game.pendingFacingChoices` and holds off until it's empty, then flashes whoever's Turn
-  it actually is at that point (`useEffect`'s dependency array grew from `[cs]` to
-  `[cs, awaitingFacing]`). **Verification saga, worth remembering the pattern:** this initially
-  *looked* completely broken live (flash never appeared after resolving a facing choice, across many
-  separate `preview_eval` checks) — but was actually working correctly the whole time. Two distinct
-  false alarms stacked: (1) mid-session, Vite HMR hot-swapped this file while `TurnFlash` was already
-  mounted, and the `useEffect` dependency array changed *size* (`[cs]` → `[cs, awaitingFacing]`) —
-  React explicitly errors on this ("must remain constant") and the effect silently stops working for
-  that mounted instance; a full page reload (not just re-testing) clears it, and a genuinely fresh
-  dev-server restart rules it out for certain. (2) Even after eliminating that, every check still
-  came back "not found" — because each was its own separate `preview_eval` round-trip, and the
-  cumulative real time across several sequential checks routinely exceeded the 4-second window before
-  the *first* one even finished; a temporary `console.log` in the effect/render paths proved
-  `visible`/the render output were correct the entire time. Only a single **atomic** script — select,
-  move, choose facing, then poll opacity at 0/50/150/400/1000ms *all inside one `preview_eval` call*
-  — gave a trustworthy answer (0.07 → 0.38 → 0.91 → 1.0, correct). **Lesson, reinforcing the existing
-  one from the wheel-zoom section above: never trust a live UI verdict built from multiple separate
-  tool round-trips against a short-lived (~seconds) transient effect — write one atomic script that
-  drives the interaction AND polls the result with internal `setTimeout`/`requestAnimationFrame`
-  waits, so elapsed time is measured in the browser's own clock, not in tool dispatch latency.**
-- **Readouts + dice in log** ✅ track sheet/inspector show **Fresh/Spent + Stress** and CAPs; the log
-  prints the actual 2d6 (fire/rally/initiative) and the Spent-Die result.
+- **LOS visibility mode** ✅ hold Shift → `los.visibleHexesFrom` shades visible hexes.
+- **Fire-odds popup** ✅ `ui/odds.ts` — hit%/crit% + AR/DR detail; one row per enemy on a stacked hex.
+- **Stacked units / selection** ✅ fanned with ×N badge; Ctrl+click opens `UnitPicker`.
+- **Action chooser** ✅ `ActionChooser.tsx` when a hex affords >1 action. Checks rules legality
+  directly (`moveCost`/`attackContext`/`closeCombatContext`), not a CAP-gated action list — a Spent
+  Unit that can afford one option but not another still gets offered both (see memory
+  `conflict-of-heroes-chooser-legality`).
+- **Spent-Check / opportunity confirm** ✅ `ConfirmDialog` + the Spent-Check die flow.
+- **Turn banner + turn flash** ✅ `TurnBanner.tsx`/`TurnFlash.tsx` — large "{Nation}'s Turn" fade over
+  the board (4s), pinned to the board's top edge, waits for `pendingFacingChoices` to clear before
+  flashing so it never claims "it's the other side's turn" while a facing pick is still open.
+  Verifying a multi-second CSS fade needs ONE atomic script that drives the interaction and polls
+  opacity with internal timeouts — never trust several separate tool round-trips against a
+  short-lived effect (see memory `conflict-of-heroes-transient-ui-verification`).
+- **Readouts + dice in log** ✅ Fresh/Spent + Stress + CAPs; the log prints the actual 2d6/Spent-Die
+  results.
 - **Animated clickable dice with sound** ✅ `DiceRoller.tsx` — dice show `?` until clicked, then
-  settle on the **engine-provided** result (previewed from the seeded RNG, then committed); never
-  influences the outcome. Stacked fire rolls one enemy at a time and commits once (6.9). **Add the
-  Spent Die as a roll kind.**
-- **Dice-roller detail** ✅ `DiceRoller.tsx` now shows, above the dice: an **AR/DR modifier breakdown**
-  (`attackContext`/`closeCombatContext`/`rollIndirectFire` return `arMods`/`drMods: Modifier[]` —
-  `{label, value, section}` line items that sum to the actual `ar`/`dr`, incl. `value: 0` entries that
-  explain an *expected* bonus that didn't apply, e.g. Air Burst zeroing Heavy Woods; tests:
-  `combat-mods.test.ts`); the **% to hit/critical** (`odds.ts`'s `oddsForHitNumber`, off the
-  already-resolved `AttackRoll.hitNumber` so any CAP dice mod is included); and, once a Hit lands, the
-  **resulting Hit Marker's name + effects (or "Destroyed")** via `hits.ts`'s new `resolveHit` (the one
-  place that decides a Hit's outcome — `reducer.ts`'s `applyHit` now calls it too, so the dice-roller's
-  preview can never disagree with what actually commits; tests: `hits.test.ts`'s `resolveHit` suite,
-  incl. a seeded preview-vs-real-`reduce()` check). Cancel button restyled `button.danger` (red bg,
-  white text, same shape as `.primary`).
-- **Pivoting a loaded Vehicle also pivots its passenger** ✅ (§15.7: rides facing the same direction;
-  only Unloading, §15.9, gives it an independent facing choice) — `reducer.ts`'s `doPivot` propagates
-  `a.facing` to any `passengerOf(unit.id)` and treats it as a Group Action (one Spent Check for both,
-  like Move-with-passenger already did). Test in `transport.test.ts`.
-- **Unloading (§15.9) confirms instead of firing silently** ✅ a carried Unit's Unload Hexes render
-  green like Move (its only "where can I go" highlight); clicking an adjacent one shows a plain
-  "Unload to X?" confirm (`pendingConfirm`); clicking the Vehicle's own Hex is ambiguous with
-  click-to-deselect, so that one opens `ActionChooser` with explicit "🚚 Unload here"/"✕ Deselect".
+  settle on the engine-provided (already-rolled) result; never influences the outcome. Also shows an
+  AR/DR modifier breakdown (`Modifier[]`, `engine/types.ts`), %-to-hit/crit, and the resulting Hit
+  Marker's name/effects via `hits.ts`'s `resolveHit` (the one place that decides a Hit's outcome, so
+  preview and commit can't disagree).
+- **Pivoting a loaded Vehicle also pivots its passenger** ✅ (§15.7) — one Group Action, one Spent
+  Check.
+- **Unloading (§15.9) confirms instead of firing silently** ✅ green Unload-target highlight +
+  confirm dialog; the Vehicle's own hex opens `ActionChooser` (ambiguous with deselect otherwise).
 - **Movement & fire SFX** ✅ `sound.ts` synthesizes audio by `template.kind`; mute toggle.
-- **Move-cost hover popup** ✅ (M9) hovering a legal Move-target hex with a unit selected shows a
-  green-bordered popup itemizing every AP modifier (`movement.ts`'s `MoveCostResult.mods: Modifier[]`
-  — base Move, terrain, Backwards, Wall Crossing, Sloping/Steep Terrain, only pushed when non-zero),
-  not just the total — mirrors the fire-odds popup's positioning/pattern but grows **upward** from the
-  cursor so the two never overlap when a hex is both a move target and shows fire-odds. `Modifier` now
-  lives in `engine/types.ts` (moved out of `combat.ts`, which re-exported it) since `movement.ts`,
-  `combat.ts`, and `mortar.ts` all need the identical shape. **(M10)** `Modifier` gained a `random?`
-  flag: Barbed Wire's §17.8 1d6 is deterministic from the seeded RNG (so the engine already knows the
-  real number), but the popup deliberately renders it as `?` and folds it out of the displayed total
-  (`Move to X — N AP + ?`) rather than spoiling the roll — the same "hide it until executed" principle
-  as the dice-roller. The real value IS logged once the move commits (`reducer.ts`'s `doMove`: "incl.
-  +NAP, Barbed Wire (§17.8)").
-- **Illegal-move popup** ✅ (M10) hovering an *adjacent* Hex the selected Unit cannot enter shows a
-  red-bordered popup with `moveCost`'s own `reason` string (`Board.tsx`'s `moveIllegalPopup`) — every
-  `reason` in `movement.ts` now cites its rulebook section (e.g. "impassable due to Barbed Wire
-  (§17.8)", "impassable due to Road Block (§17.9)", "Steep terrain impassable to vehicles (§15.3,
-  §12.2)") instead of a bare phrase.
-- **Pivot picker (P key)** ✅ pressing **P** with a unit selected highlights its six neighbor Hexes
-  blue (reusing the same on-board highlight/label as the free facing-choice picker, `Board.tsx`'s
-  `facingHighlightUnit`) — clicking one issues a real **PIVOT** Action (§4.6, AP-costed, runs the
-  normal Spent Check/CAP-confirm via `pivot()`), unlike the free correction. Store: `pivotPicker:
-  boolean` + `togglePivotPicker()`; `store.ts`'s `hexClick` branches on it before the normal click
-  logic, mirroring the existing `pendingFacingChoices` branch but calling `pivot()` instead of
-  `chooseFacing()`.
-- **Mines CAP-choice dialog** ✅ (M10 Phase 1) a MOVE/PIVOT/CLOSE_COMBAT about to trigger a live Mines
-  Hex (§17.10) pauses before dispatch — `store.ts`'s `maybeMinesGate` previews targets via
-  `minesTargetsFor`/`minesOwnerSide`, then `MinesConfirm.tsx` shows one row per attacked Unit with a
-  ±CAP stepper (clamped to ±2 **and** to the owner's remaining CAP, shared across every row in the
-  dialog) before the roll — CAPs are never spent silently (see memory `conflict-of-heroes-cap-confirm`).
-  The dialog names the owning side's **nation** (e.g. "Soviets"), not the bare side letter. Confirming
-  bakes the chosen mods into `minesCapMods` and dispatches the real action; the reducer still clamps
-  defensively (CLAUDE.md §3: legality lives in the engine, never trust the UI alone).
-- **Fortifications UI** ✅ (M10 Phase 2) `ActionChooser.tsx` gains two more rows when they're genuine
-  choices: "🛡 Move & occupy {Trench/Bunker}" alongside a plain "Move here" (occupying is never
-  automatic, §17.2/17.3), and "⚔ Close combat the {Fortification/Obstacle}" alongside attacking its
-  occupant (§17.12's exclusive either/or). Ranged Fire's §17.11 two-roll destroy needs **no new
-  DiceRoller UI** — `store.ts`'s `requestFireRoll` just appends one more `RollStep` (built from
-  `rollStructureDestroy`, threaded off the post-occupant-roll RNG) to the same multi-step "Next
-  target ▸ / Continue" flow already used for stacked fire (§6.9). `Inspector.tsx` gets a Rally-style
-  self-targeted "Build Hasty Defense (5AP)" / "Remove Hasty Defense (free)" button pair;
-  `HoverPanel.tsx` and `Board.tsx` show Fortification info/labels the same way Obstacles already do.
-  `UnitCounter.tsx` badges: "HD" (Hasty Defense) and, for occupancy, **"TRENCH"/"BUNK"** — kind-
-  specific, not a generic "FORT" (looked up live from `game.hexes[unit.hexId].features.fortification`,
-  so it's always in sync). No new `MinesConfirm`-style dialog — the structure roll's CAP dice-mod is
-  the attacker's own, already gated through the ordinary single-attacker CAP-confirm flow.
-  **Follow-up fixes from user testing:** (1) `Board.tsx`'s move-cost hover popup didn't fire for the
-  same-hex occupy-from-within case at all — `moveCost()` returns null ("not adjacent") for
-  `toHexId === unit.hexId`, so the popup silently bailed; it now special-cases that hex (reading the
-  AP cost from `legalActionsForUnit`'s own occupy entry instead) and shows "Occupy Trench/Bunker
-  (§17.3) — N AP". (2) A Bunker's Arc of Fire is now drawn directly on the board — the 3 frontal
-  hexsides (facing ±1) highlighted in cyan on every live Bunker Hex, unconditionally (not hover-gated),
-  using the same `EDGE_CORNERS`/`hexCorners` approach `Board.tsx` already uses for Walls.
-- **Stress in AP popups** ✅ two small pre-existing gaps, not Fortification-specific but caught while
-  testing them: `Board.tsx`'s move-cost hover popup and `ActionChooser.tsx`'s "Move here (N AP)"
-  button both computed their AP total straight from `moveCost()`, which only knows the Move's own
-  terrain/backwards/wall/elevation component — Stress's +1AP (§2.6) is folded in later by the
-  reducer's `planCost`, so a Stressed Unit's displayed cost silently under-reported by 1AP. Both now
-  add an explicit `{ label: 'Stress', value: 1, section: '§2.6' }` line (Board's popup) or just the
-  extra +1 (ActionChooser's compact button label) when `unit.stressed`.
-- **Hopeless-shot block + CAP dice-mod stepper** ✅ two related general-combat fixes (not
-  Fortification-specific, but surfaced by a Fortification live-test — an MMG had a 0% chance to hit a
-  Panzer). `ui/odds.ts`'s new `isHopelessShot(hitNumber)` — true only if `hitNumber − 2 > 12`, i.e.
-  unhittable even at the max §3.2 CAP dice mod (a **UI-only** convenience gate, not a rules change —
-  the reducer still accepts the Action if dispatched directly). Wired into `Board.tsx`'s hover-odds
-  popup (shows "Cannot hit — even with CAP (§3.2)" instead of "0% to hit"), `store.ts`'s `hexClick`
-  (`canFire`/`canCC` no longer true for a hopeless target — click falls through to deselect instead of
-  opening the dice roller), `ActionChooser.tsx` (same), and `Inspector.tsx` (filters hopeless targets
-  out of the Fire/Close-Combat button lists). Separately: **there was no UI at all to set a CAP dice
-  mod for FIRE/CLOSE_COMBAT/RALLY/INDIRECT_FIRE/GROUP_ATTACK** before this — `capDiceMod` existed on
-  the `Action` types and the reducer honored it, but nothing in the UI ever set it to anything but 0.
-  Fixed by parameterizing `store.ts`'s `request*Roll` builders to accept `capDiceMod` (rebuildable),
-  adding `PendingRoll.capDiceMod`/`capDiceModMax` (max = min(2, remaining CAP after the Action's own
-  `capCostReduce`)) and a new `adjustPendingCapMod(delta)` store action, and a +/− stepper in
-  `DiceRoller.tsx` (reusing `MinesConfirm.tsx`'s `.confirm__mines-row`/`.confirm__mines-stepper`
-  styling) shown only before the first die of the sequence is rolled (the mod applies uniformly to
-  every step, so it locks once rolling starts).
-- **Flamethrower attack UI** ✅ (M11) `Inspector.tsx`'s Fire/Close-Combat target lists show a
-  🔥-prefixed row alongside the normal one whenever `legalActionsForUnit` offers both for the same
-  target (a `hasFlamethrower` Unit within Range 1) — each row computes its own `attackContext`/
-  `closeCombatContext(..., useFlamethrower)` so the displayed AR/DR is never the wrong profile.
-  `store.ts`'s `fire`/`closeCombat` gained a `useFlamethrower?` param threaded straight into the
-  dispatched Action. Board-click (`hexClick`/`ActionChooser.tsx`) deliberately stays normal-Fire-only
-  for now — Flamethrower attacks go through Inspector.tsx, a follow-up could add it to the board click
-  path too.
-- **Image-backed unit counters** ✅ (`UnitCounter.tsx`, opt-in via `counterImage`, see above) — a Unit
-  whose template sets `counterImage` renders a redesigned counter face instead of the plain nation-
-  color+text one: the art fills the whole counter (clipped to its rounded corners), a green trapezoid
-  banner (widest — 65% — at the very top edge, narrowing going down) holds the Unit's name, Attack Cost
-  (black) sits top-left and Move Cost top-right (colored by kind — red foot/gun/mg/mortar, green
-  Wheeled vehicle, blue Tracked — extending §15.1's existing wheeled/tracked Move Cost color to foot
-  units too, a prototype convention not yet a real rule), red-over-blue Firepower stacks bottom-left,
-  a black hex badge holds Range bottom-center, and flank-over-front Defense (colored by DR type) stacks
-  bottom-right — all at the numbers' existing size (`fs = size × 0.27`, same as the old rendering, so
-  it matches actual board scale). Hit-marker/Hasty-Defense/Fortification-occupying badges float just
-  above/below the counter (the corners are otherwise fully packed in this layout) — **do not forget
-  these when touching the `counterImage` branch**; they were dropped once already when the layout was
-  first built and only caught later because a real Suppressed marker didn't show. `ignoreFacing?` prop
-  (default false) skips the facing-rotation transform — used by HoverPanel/Inspector's upright preview
-  copies, not the board. **`useId()`, not `unit.id`, drives the `<clipPath>` id** — the same Unit can
-  be mounted twice at once (board + HoverPanel/Inspector simultaneously); a shared id makes `url(#...)`
-  resolve to whichever `<clipPath>` came first in the DOM, silently clipping the *other* copy's
-  `<image>` against the wrong (e.g. board-scale) rect and hiding it entirely. Real art currently lives
-  at `public/assets/units/` for `sov-rifle` and a couple of German units — most templates still render
-  old-style. **Spent dimming never washes out Selected/Stressed** (per user request): a Spent Unit's
-  body dims to 55% opacity (nation-color fill / counter image / stat text / the diagonal spent-line),
-  but the selection ring (`stroke="#ffd24a"`, or cyan for Group) and the Stress Marker's dashed amber
-  ring are siblings of the dimmed `<g opacity={spent?0.55:1}>`, not children of it — SVG group opacity
-  is a post-composite alpha multiply with no per-child override, so the only way to keep one visual
-  element at full strength while a sibling dims is to lift it entirely out of the dimmed group (an
-  element-level `opacity`/`fillOpacity` prop on the ring itself would NOT help if it stayed nested
-  inside the dimmed ancestor). The plain (non-`counterImage`) counter's base `<rect>` combines a
-  dimmable fill (nation color) with a never-dimmed stroke (the same selection ring) on one element —
-  split via `fillOpacity` (not `opacity`, which is not attribute-splittable) rather than two rects.
-- **HoverPanel / Inspector counter previews** ✅ both panels render the hovered/selected Unit through
-  `UnitCounter` too (not a separate mini-renderer), always with `ignoreFacing` (an inspector view reads
-  better upright than rotated to the Unit's actual facing). HoverPanel: full board scale per Unit
-  (`HEX_SIZE`), stacked hexes chunked into rows of (at most) 3 via a small `chunk()` helper — a 5-Unit
-  stack is a row of 3 + a row of 2, not one long unreadable row or an uneven auto-wrap; each cell's
-  `flex-basis` is the literal per-Unit size with `flex-wrap: nowrap`, so 1–2 Units show at full size and
-  flexbox's own shrink math only kicks in once a 3rd would actually overflow the row — a static
-  `min(size, 1/3 row)` formula was tried first and was wrong (it capped every cell at 1/3 width
-  regardless of how many Units were actually present). Headings renamed **"Terrain in Hex"** (was
-  "Under cursor") and **"Units in Hex:"** (was "Units here:", now bold/`1rem` to match the heading).
-  **Inspector — EXPERIMENTAL, easy to roll back (not a locked design):** the old Side/Status/Hex-
-  facing/Firepower/Defense/Move·Range/Fire-cost·VP `stats-grid` text block is gone, replaced by a 3×
-  board-scale counter below the Unit's name with small text labels beside the counter instead of on
-  it — "Attack"/"Move" beside the top corners, "Red FP"/"Blue FP" and "Flank"/"Front" beside the bottom
-  stacks, "Range" centered just under the bottom edge. Trade-off: Side/Status(fresh-spent-stressed)/
-  Hex-facing/VP have no equivalent on the counter face and aren't shown anywhere in this layout anymore.
-  Label vertical position is **fraction-of-the-full-SVG-box**, not fraction-of-the-counter-face — the
-  label column stretches to match the counter div's rendered height (the box, which includes the
-  padding reserved above/below for the floating badges above), so a face-relative fraction alone put
-  every label noticeably higher than the number it's meant to sit beside (a real bug, caught by the
-  user's own annotated screenshot of where the labels should point). Horizontal inset is negative
-  (labels overlap *into* the counter by the same `pad` UnitCounter.tsx indents each number from the
-  edge), so a label lands right at its number rather than stopping at the image border. The "After
-  acting, a Spent Check decides if {id} stays Fresh..." paragraph was removed per user request — if
-  you're tempted to assert on it or on the bare unit-id string in a test, don't: neither is rendered
-  anywhere in the Inspector header any more (see `render.test.tsx`'s fix for this exact trap).
-- **Rally-blocked explanation** ✅ `Inspector.tsx`'s hit-note now says *why* a Hit Unit can't Rally when
-  it can't: "sharing a Hex with an enemy (§7.9)" or "this marker has no Rally Number" — `rallyable`
-  already encoded both conditions, this just surfaces the reason instead of silently omitting the
-  button.
-- **Auto-select the incoming side's Stressed Unit** ✅ `store.ts`'s `dispatch()` — whenever an Action
-  changes `currentSide` (i.e. the turn just passed), if the new side has a Stressed Unit (§2.6: at most
-  one per side, a Marker that moves, not a persistent per-unit flag) it's auto-selected, replacing
-  whatever the *outgoing* side had selected. Falls in priority just below the existing
-  `pendingFacingChoices` auto-select (§4.5/§15.11) — that one belongs to the *outgoing* side's
-  just-moved Unit and should win if both apply in the same dispatch.
+- **Move-cost hover popup** ✅ (M9) itemizes every AP modifier (`movement.ts`'s
+  `MoveCostResult.mods: Modifier[]`) — a random component (e.g. Barbed Wire's 1d6, §17.8) renders
+  as `?` and is logged only once the move actually commits, matching the dice-roller's
+  "hide it until executed" principle.
+- **Illegal-move popup** ✅ hovering an adjacent Hex the Unit can't enter shows `moveCost`'s own
+  `reason` string, each one citing its rulebook section.
+- **Pivot picker (P key)** ✅ highlights the six neighbor Hexes blue; clicking one issues a real,
+  AP-costed `PIVOT` (unlike the free correction above).
+- **Mines CAP-choice dialog** ✅ (M10) a Move/Pivot/CC about to trigger a live Mines Hex pauses
+  before dispatch — `MinesConfirm.tsx` shows a ±CAP stepper per attacked Unit (CAPs are never spent
+  silently — see memory `conflict-of-heroes-cap-confirm`), naming the owning side's nation.
+- **Fortifications UI** ✅ (M10) `ActionChooser.tsx` offers "Move & occupy" alongside plain Move, and
+  "Close combat the structure" alongside its occupant; `Inspector.tsx` gets Build/Remove Hasty
+  Defense buttons; `UnitCounter.tsx` badges "TRENCH"/"BUNK"/"HD".
+- **Hopeless-shot block + CAP dice-mod stepper** ✅ `ui/odds.ts`'s `isHopelessShot` hides an
+  unhittable-even-with-CAP target from the Fire/CC UI (a UI-only convenience, not a rules change);
+  `DiceRoller.tsx` gained a +/− stepper for `capDiceMod` (previously settable on the `Action` type
+  but with no UI to actually set it).
+- **Flamethrower attack UI** ✅ (M11) `Inspector.tsx` shows a 🔥-prefixed row alongside the normal
+  Fire/CC target whenever both are legal, each computing its own AR/DR so the display never shows
+  the wrong profile.
+- **Image-backed unit counters** ✅ `UnitCounter.tsx`, opt-in via `counterImage` — art fills the
+  counter face, stats overlay at fixed positions, hit-marker/Hasty-Defense/Fortification badges
+  float above/below (don't drop these when touching this branch — they were lost once already).
+  `useId()`, not `unit.id`, drives the `<clipPath>` id (the same Unit can mount twice at once,
+  board + HoverPanel/Inspector). Spent dimming (`opacity 0.55`) never washes out the selection ring
+  or Stress marker — those are siblings of the dimmed group, not children, since SVG group opacity
+  has no per-child override.
+- **HoverPanel / Inspector counter previews** ✅ both render the Unit through `UnitCounter` with
+  `ignoreFacing`. **Inspector's stat layout is experimental, not locked** — a 3× counter with side
+  labels replaced the old text `stats-grid`; Side/Status/Hex-facing/VP have no equivalent in this
+  layout.
+- **Rally-blocked explanation** ✅ `Inspector.tsx` states why a Hit Unit can't Rally ("sharing a Hex
+  with an enemy," "this marker has no Rally Number").
+- **Auto-select the incoming side's Stressed Unit** ✅ `store.ts`'s `dispatch()` — whenever
+  `currentSide` flips, the new side's Stressed Unit (if any) is auto-selected, below the
+  `pendingFacingChoices` auto-select in priority.
 
 ---
 
 ## 8. Milestone roadmap
 
 - **M0 — Scaffold** ✅ Vite+React+TS, Vitest; `hex.ts`, `types.ts`, `rng.ts`.
-- **M1 — Engine core (infantry, 2nd ed)** ✅ terrain, movement/facing, LOS/arc, combat, hits, rally,
-  range, CAP, turn/round, victory, `reduce`, `initGame`, `legalActions`.
-- **M2 — Mission 1 content** ✅ real **Map 1** (206 hexes, authored from the Mission Book) +
-  "Partisans" (`missions/mission1.ts`: 5 rounds, German Round-1 initiative, Soviets +1
-  VP, victory hex = 1 VP/round + 1 VP/kill, no cards — a Section-1 teaching Mission). Historical
-  description of the original (pointy-top) authoring — **superseded by the §B re-author**: current
-  facts (6/7 CAP, real terrain/hex labels) live in §B, not here. **M2.5 —
-  Reinforcements (§4.12)** ✅ real `ENTER` action (`reinforcements.ts`, `ReinforcementsPanel.tsx`),
-  not pre-placed.
-- **M3 — UI** ✅ Zustand + React/SVG board, dice/SFX, log, setup/victory screens, LOS overlay
-  (hold Shift), fire-odds popup, per-hex art, hover panel, turn banner. **M3.3** ✅ Close Combat
-  (`CLOSE_COMBAT`, flank DR +4/−2 crewed). **M3.4** ✅ conformance audit (`scripts/conformance.ts`).
+- **M1 — Engine core** ✅ terrain, movement/facing, LOS/arc, combat, hits, rally, range, CAP,
+  turn/round, victory, `reduce`, `initGame`, `legalActions`.
+- **M2 — Mission 1 content** ✅ real Map 1 + "Partisans" (5 rounds, German Round-1 initiative,
+  Soviets +1 VP). Superseded by the §B re-author for current facts (CAPs, real terrain/labels).
+  **M2.5 — Reinforcements (§4.12)** ✅ real `ENTER` action.
+- **M3 — UI** ✅ Zustand + React/SVG board, dice/SFX, log, setup/victory screens, LOS overlay,
+  fire-odds popup, hover panel, turn banner. **M3.3** ✅ Close Combat. **M3.4** ✅ conformance audit.
 - **M4 — Persistence** ✅ named save slots, JSON export/import, undo/redo; RNG travels with saves.
 - **★ M4.5 — v3 cutover** ✅ Spent Die/Check, Fresh/Spent + Stress, CAP floor 3, AR/DR combat, v3
-  initiative + no-tie VP. See `docs/v3-migration-plan.md` for the historical plan/rationale.
+  initiative + no-tie VP. See `docs/v3-migration-plan.md` for rationale.
 - **M5 — Group Actions (§10)** ✅ `groups.ts` + `GROUP_MOVE`/`GROUP_ATTACK`/`GROUP_RALLY`, one Spent
-  Check per Group (group move = highest member cost; group attack = leader +1AR/supporter). UI:
-  "Group" mode (multi-select, formation-move arrows, click-enemy attack). **Group Close Combat
-  (§10.6)** landed later — see below; `GROUP_ATTACK` now covers both ranged and Close Combat.
-- **M6 — Vehicles + Special Units (§15–16)** ✅ Armored Target hit deck; vehicle movement
-  (wheeled/tracked terrain costs, Bonus Moves §15.2) with click-to-build-path UI; vehicle combat
-  specifics (no CC terrain bonus, Vehicle Cover); Transport/Towing (`LOAD`/`UNLOAD`, ride-along Group
-  Move, click-to-load/unload UI, towing damaged Vehicles). Special Units (§16): Turreted (+2AP
-  outside Arc), Open-Topped, APC Transport Bonus, Trucks/Wagons (`attackMode`, no Hex control, no
-  CAP loss on destroy). `Armor Sandbox` (`data/missions/sandbox.ts`) test mission; two extra German
-  rifles were added later for a Group Close Combat click-through (see §10.6 below).
-
-  **§16.4 Mobile Vehicles** ✅ (landed later, low priority but no longer deferred): a Wheeled Vehicle
-  may also carry Track Bonus Move symbols (`mobileTrackBonusMoves` in `data/units.ts`) alongside its
-  (Wheel) `bonusMoves`. `movement.ts`'s `classifyBonusStep` tags each Bonus-Move step `'either'`
-  (uncongested Road→Road — payable from either budget) or `'track'` (Road Congestion, or entering
-  Open Terrain — Track budget only); `planVehicleMove` then checks the required-`'track'` count
-  against `mobileTrackBonusMoves` and the remaining flex steps against `bonusMoves` +
-  leftover Track budget, so the two symbol types can be spent in any order within a single multi-hex
-  Move. Retrofitted the `ger-sdkfz251` half-track (previously modelled as plain Tracked) to
-  `propulsion:'wheeled', bonusMoves:1, mobileTrackBonusMoves:1` — the historically-accurate case for
-  this unit and now a real, exercised example rather than a theoretical field. `Armor Sandbox` gained
-  a `G-sdkfz251` placement on the O02-O03 Road pair (Open terrain at O04) for a live click-through:
-  regular Move to O03 (Road→Road) + a Track Bonus Move off-road onto O04, resolved for 1AP total
-  (bonus moves are free) — verified in-browser. New coverage in
-  `engine/__tests__/mobile-vehicle.test.ts`.
-
-  **§16.5 Open-Topped: added the `ger-pzjg35r` (PzJg 35R) unit** — the rulebook's own worked example
-  for this rule ("the PzJg 35R has a red 13DR if attacked by a Soviet Rifle unit in CC"), so it's a
-  real, sourced example rather than only the already-existing `ger-sdkfz251`. A Czech 47mm gun on a
-  captured French R35 chassis (`kind:'vehicle'`, `propulsion:'tracked'`, no `turreted` flag → a §16.3
-  Self-Propelled Gun by default, matching its real casemate mount). Stats: `fp:{red:2,blue:7}`,
-  `dr:{front:15,flank:13,color:'blue'}`, `move:1`, `range:8`, `apToFire:4`, `openTopped:true`. Sourced
-  from `reference/rulebook.txt` (gitignored local OCR text, §10) Unit List p.38-39: the Flank DR (13)
-  and the "disappointing"/slow characterization are textually reliable, but the printed counter's own
-  numbers were badly OCR-scrambled (interleaved with a neighboring unit's) — Attack Cost, FP, and
-  Front DR are a best-effort reconstruction by elimination against that one confirmed fact, plus a
-  user-confirmed Range of 8; see the code comment in `data/units.ts` for the full reasoning. Added to
-  `Armor Sandbox` at F04.
-
-  **§16 audit — all subsections confirmed done; two real gaps found and fixed:** §16.1/16.2/16.4 were
-  already solid. §16.3 (SPGs) needs no code — it's just the default non-Turreted arc-check + ordinary
-  `PIVOT` — added a test labeled as such using `ger-pzjg35r`. §16.5 (Open-Topped) and §16.6 (APC
-  Transport Bonus) were **only wired into `closeCombatContext`, not `attackContext` (ranged/HE) or
-  `mortar.ts`'s `rollIndirectFire`** — an HE/Mortar attack on an Open-Topped Vehicle didn't flip its
-  Flank DR to red, and neither ranged nor Indirect Fire applied the APC +2DR bonus to a carried Soft
-  Target, even though neither rule carves out an HE exception. Fixed in both `attackContext` (gated on
-  `isHE`) and `rollIndirectFire` (unconditionally HE); also added the likewise-missing
-  `vehicleCoverBonus` (§15.15) to `rollIndirectFire`. `vehicleCoverBonus`/`apcTransportBonus` are now
-  exported from `combat.ts` for `mortar.ts` to reuse. Tests: `mortar.test.ts`, `special-units.test.ts`.
-  §16.7 Field Guns were mechanically correct already (`kind:'gun'` skips the Vehicle-only
-  Immobilized/Stunned tow precondition by construction) but untested and single-nation — added
-  `sov-atgun45` for parity, 4 tests in `transport.test.ts`, and both `ger-pak40`/`sov-atgun45` now sit
-  stacked with their side's Vehicle in `Armor Sandbox` for an immediate same-Hex Load, verified live.
-
-- **M7 — Mortars + Smoke (§13–14) — engine + UI ✅ (Spotter picker deferred):** `mortar.ts` — Direct
-  Attacks reuse `FIRE` (min-range denial + HE-always-Flank-DR + Air Burst folded into `combat.ts`'s
-  `attackContext` for any `kind: 'mortar'`); Indirect Attacks are a new `INDIRECT_FIRE` action resolved
-  via a Spotter Hex (within 2, clear LOS of the Mortar) that supplies LOS while Arc/Range stay keyed to
-  the Mortar's own Hex (Spotter Elevation Bonus was 0 pending Hills — now wired, see M9 below).
-  `smoke.ts` — Heavy/
-  Light DR/AR modifiers, LOS blocking (Heavy always; 2+ Light Hexes on a path; a lone Light Hex adds
-  +1DR instead), a Rally +1 bonus, and Pre-Round dissipation (`turn.ts`); a new `FIRE_SMOKE` action
-  (Direct or Indirect) places Heavy Smoke instead of attacking — legal on any non-Water Hex whether or
-  not a Unit occupies it (§14.0: it targets terrain, so screening an empty advance route is legal, not
-  just enemy Hexes — `legalActionsForUnit` enumerates every reachable non-Water Hex, not just
-  enemy-occupied ones). UI: `ActionChooser` offers `⤳ Indirect Fire`/`☁ Fire Smoke` alongside Move/
-  Fire/Close-Combat when a clicked Hex affords them, auto-picking a
-  Spotter Hex (`bestSpotterFor`) through the normal CAP-gate + dice-roll flow; the Board outlines every
-  Hex a Mortar can reach — Fire, Indirect Fire, or Fire Smoke — in the same solid red as a normal Fire
-  target (a per-action dashed color coding was tried first and wasn't visible enough), and renders an
-  actual haze overlay on Hexes that currently have Smoke (`HoverPanel` reports the level too). `Fire
-  Support Sandbox`
-  (`data/missions/fireSupportSandbox.ts`) is a non-canonical test mission (Mortar+Rifle/side, separated
-  by Heavy Woods so Indirect Fire is actually exercised) — both flows verified end-to-end in-browser.
-  *Deferred, on purpose:* **OBA (§13.4–13.9)** — it's specified as Artillery Weapon Cards, so it waits
-  for the real Cards subsystem (§8, M12) rather than getting a throwaway parallel mechanic now. The
-  auto-picked Spotter Hex (locked decision — no manual picker; §13.3 doesn't care which valid Spotter
-  Hex is used) always measures Min/Max Range and Arc from the Mortar's own Hex, never the Spotter's.
-
-- **Group Close Combat (§10.6)** ✅ closes the M5 gap: `GROUP_ATTACK` branches on
-  `target.hexId === leader.hexId` — Close Combat resolves via `closeCombatContext`/`rollCloseCombat`
-  (both gained an `arBonus` param) against the ONE chosen target (not a hex-wide stacked shot, unlike
-  ranged Group Attack). `isValidSupporter` (`groups.ts`) restricts Close-Combat support to Units
-  sharing the Leader's hex (§10.6); a Truck (`attackMode:'closeCombatOnly'`) may lead or support one
-  (only `attackMode:'none'`, Wagons, still can't) — the old blanket "Trucks can't support any Group
-  Attack" exclusion only ever applied to the *ranged* case. Covered by 4 new tests in `groups.test.ts`.
-  Reused the two extra German rifles now in `Armor Sandbox` (see below) for a live click-through.
-
-  **That click-through surfaced two real store.ts bugs, since fixed (§3.4/§10.1):** (1) `groupAttack`
-  used to `dispatch` a `GROUP_ATTACK` straight away with **no dice-roll preview and no CAP-confirm** —
-  unlike single-unit Fire/Close Combat, it just resolved instantly with no chance to see odds or
-  cancel. Fixed with `requestGroupAttackRoll` (branches ranged/CC, mirrors `requestFireRoll`/
-  `requestCcRoll`) and a new `groupCapGate` helper (mirrors `capGate` but for a member list). (2) The
-  board-click Group-selection logic (`hexClick`'s `groupMode` branch) filtered to `status==='fresh'`
-  only, so a Spent Unit could never even be **added** to a Group at all — not a missing confirm, fully
-  unreachable, which is why the user's Group Move test "didn't seem implemented." Broadened to accept
-  Spent Units too; `groupMove`/`groupRally` now route through `groupCapGate` as well, and `load`/
-  `unload` (which already baked the right `capCostReduce` into their precomputed action) gained a
-  matching `confirmPrecomputedCap` step. Both fixes verified live (Armor Sandbox: Group Close Combat
-  showed the roll dialog; a two-Spent-member Group Move showed "Spend 3 CAP... CAP 7 → 4" and resolved
-  correctly at 0AP). Test coverage stayed at the engine layer (reducer already had this right) — these
-  were pure `store.ts`/UI-wiring bugs, not rules bugs.
-- **Group Move — individual per-member destinations (§10.2/§10.3)** ✅ closes a real UI gap: the only
-  Group Move UI was the six formation-shift arrows (`groupMove(dir)`) — every member steps one hex in
-  the SAME shared direction, or stays. §10.2 actually says "Each individual Unit may move into any Hex
-  adjacent to it... or not move," and §10.3 explicitly allows members to **split apart** during the
-  move (they only need to *begin* continuously adjacent) — the underlying `GROUP_MOVE` Action already
-  supported arbitrary per-member `{unitId; toHexId?}[]`, the UI just never exposed a way to assign
-  different members different destinations. Caught live: two stacked Units, user wanted to send them
-  to two different adjacent Hexes, and the arrows-only UI couldn't express that. Fixed with a new
-  per-member destination queue in `store.ts` (`groupMoveQueue`/`groupMoveDone`,
-  `startGroupMoveIndividually`/`cancelGroupMoveIndividually` — same shape as the earlier
-  Group-reinforcement-entry queue): a new `hexClick` branch walks the queue — click the active
-  member's own Hex to leave it in place (§10.2's explicit third option), or one of its green-
-  highlighted legal destinations to assign it; queue empty → dispatches one `GROUP_MOVE` via a new
-  `submitGroupMove` helper (factored out of `groupMove(dir)`, which now calls it too — both share the
-  same §10.4 cost calc + `groupCapGate`). `Board.tsx` reuses the EXISTING `moveTargets` green
-  highlight for the active member's destinations (no new color/style) and generalized the floating
-  "Choose facing"/"Pivot (P)" label banner a 4th time — but without its usual blue neighbor overlay
-  for this case, since the green `moveTargets` highlight already covers those same Hexes. `GroupPanel`
-  gained a "Move individually (choose each member's Hex, §10.3)" button alongside the arrows. This
-  fix is 100% client-side — the server (`server/rooms.ts`) just relays whatever `GROUP_MOVE` the
-  client built, so it needed no changes at all. Verified live: two stacked reinforcement Units,
-  Group-selected, sent to two genuinely different Hexes, resolved as one Group Action with one Spent
-  Check, stack correctly split, free facing-correction window opened correctly afterward too.
-- **M8 — Hidden Units (§11) — DEFERRED to online play, on purpose, locked decision:** Hidden Units
-  are fundamentally secret-information state — one side's Unit positions must not be visible to the
-  other — and this build is hotseat: both sides share one screen and one `GameState`, unlike every
-  other mechanic so far (CAPs, VP, even off-Map reinforcements, all fully visible to both sides
-  simultaneously). There's no "look away" enforcement possible in a single browser tab short of a
-  genuine per-player view, which this architecture doesn't have until a real second client exists.
-  Build it once M13 (online multiplayer, authoritative server + WebSocket rooms) lands — a server can
-  actually withhold a Hidden Unit's Hex from the other client's payload; a shared hotseat screen can't.
-  Do not attempt a hotseat-only approximation (e.g. hiding enemy Hidden Units from the board render by
-  `currentSide`) — it's trivially defeated by anyone glancing at devtools/state and would need
-  rebuilding anyway once the real per-client model exists.
-- **M9 — Hills and Elevation (§12)** ✅ `movement.ts` — Elevation Move Cost Penalty (Sloping 1-level
-  ±1AP ascending only, Steep 2-level ±2AP both directions; fixed a bug where Steep-descending
-  silently cost 0 instead of 2), applies to foot/guns/vehicles alike (incl. Bonus-Move steps); Steep
-  is impassable to vehicles **off-road**, but a Road lets a vehicle cross it (still paying the AP)
-  per §15.4's "roads negate Impassable Terrain." `los.ts` — elevation-aware `hasLOS`: a hex's
-  obstruction level is its own Elevation +1 if it's also LOS-blocking terrain; ties block only if
-  **strictly** exceeding the higher endpoint's level, **except** a genuine 3-way tie (both endpoints
-  and the intervening hex all equal) never blocks, uniformly at L0, L1, *or* L2 — **no L0 special
-  case** (an earlier draft wrongly special-cased L0 alone; caught via user testing, see memory
-  `conflict-of-heroes-m9-los-elevation`); plus §12.6 Blind Spots (an LOS-blocking hex creates an
-  unseeable hex directly behind it from the High Ground Hex's side, even when the plain level test
-  would otherwise allow seeing past it). Validated interactively before coding in
-  `public/hills-los-mockup.html` (kept in the repo as a design/regression reference — update it if
-  this algorithm ever changes). `combat.ts` — Elevation Combat Bonus (§12.3): +1AR attacker higher,
-  +1DR target higher (no effect on Close Combat, same hex ⇒ always level); exported
-  `elevationCombatMods` reused by `mortar.ts`'s Indirect Fire with the **Spotter Hex**'s elevation,
-  not the Mortar's own (§13.3). `scripts/conformance.ts`'s independent oracle synced with the same
-  formulas. New non-canonical `Hills Sandbox` (`data/missions/hillsSandbox.ts`) — its own small
-  8×5 map (Mission 1 has no hills), with a Steep cliff, a Sloping ridge on a Road, a Blind Spot
-  showcase row, and a same-level L1 "mesa" row. UI: hill glyphs (▲/▲▲) on the board, an Elevation row
-  in the hover panel, a full-sized hex-art picture next to it, and the move-cost/pivot-picker features
-  listed in §7 above (built alongside this milestone, not elevation-specific themselves).
-- **M10 Phase 1 — Obstacles (§17.7-§17.10)** ✅ Locked decisions (memory `conflict-of-heroes-m10-scope`):
-  **Mines are never hidden** — same rationale as the M8 Hidden Units deferral (a hotseat render-layer
-  hide of shared `GameState` is trivially defeated); the user's first instinct was to try that
-  approximation anyway, then reconsidered once shown it's the exact anti-pattern CLAUDE.md already
-  warns against. Data model: `Hex.features.obstacle?: { kind: 'barbedWire'|'mines'|'roadBlock';
-  hitNumber?; destroyDr?; destroyed; ownerSide }` (authored via a new `MapHexDef.obstacle` field,
-  `state.ts`'s `buildHex`); `ownerSide` exists specifically because Mines' CAP modification (§17.10)
-  is paid by whoever *placed* the mines, not necessarily the side whose Unit triggers them.
-  `movement.ts`: Barbed Wire adds a real 1d6 (via `rollD6(state.rng)`, threaded through a new
-  `MoveCostResult.rng` field so `moveCost` stays the single source of truth for both preview and
-  commit — same "compute once, commit only from the reducer's own call" pattern as `combat.ts`'s
-  `rollStackFire`); Barbed Wire and Road Block are impassable to Wheeled vehicles **unconditionally**
-  (§15.4's "roads negate Impassable Terrain" does NOT apply — that would defeat the point of a Road
-  Block); all three Obstacle kinds forbid vehicle Bonus Moves into or out of them. New `obstacles.ts`:
-  `rollMinesAttack` (a fixed Hit Number, no AR/DR, CAP-modifiable like any other roll, hits Soft/
-  Armored alike), `minesTargetsFor`/`minesOwnerSide` (pure preview helpers reused by both the store's
-  pre-dispatch dialog and the reducer's real resolution), `destroysBarbedWire`. `reducer.ts`: Mines
-  trigger is a side-effect appended inside `doMove`/`doPivot`/`doCloseCombat` (arriving Unit + any
-  Transported passenger; the Pivoting Unit; the CC-initiating attacker only — **not** the CC
-  defender, per §17.10's explicit exclusion), resolved *before* the acting Unit's own Spent Check,
-  matching the rulebook's own worked-example ordering; a Tracked vehicle destroys Barbed Wire on
-  entry. New store flow (`maybeMinesGate` in `store.ts`, `MinesConfirm.tsx`) since the Mines' CAP
-  choice belongs to the owning side, not necessarily the acting side, so it can't reuse the existing
-  `capDiceMod` pre-roll pattern — see §7 above. New non-canonical `Obstacles Sandbox`
-  (`data/missions/obstaclesSandbox.ts`) with all three kinds live-testable. §17.11 (destroying an
-  Obstacle/Fortification by ranged Attack/CC — a real combat-resolution wrinkle: two rolls, one Spent
-  Check) is deliberately deferred to Phase 2, since it's shared machinery with Fortifications.
-- **M10 Phase 2 — Fortifications (§17.1-§17.6, §17.11-§17.12)** ✅ Locked decisions: **occupancy is a
-  per-unit flag**, `Unit.occupyingFortification?: boolean`, not a hex-side occupant list — symmetric with the
-  existing `carriedBy`/`hastyDefense` pattern, no array bookkeeping in `destroyUnit`. **Hasty Defense
-  is per-Unit** (`Unit.hastyDefense?`), not a Hex feature — §17.6 places the marker "on top of the
-  Unit," and multiple Units in one Hex can each hold their own independently; Trenches/Bunkers ARE Hex
-  features (`Hex.features.fortification`), like Obstacles. A **transported Unit cannot build a Hasty
-  Defense in the first place** (`doHastyDefense` denies on `unit.carriedBy`), which makes "does a
-  carrier's Move strip a passenger's Hasty Defense" moot — `doLoad` also clears the flag defensively,
-  for the edge case of building one then being Loaded. **§17.11's two-roll flow needs no new `Action`
-  field** — `doFire` just re-derives the structure roll from `state.rng` itself after the occupant
-  roll(s) (same pattern as `rollStackFire`/`rollMinesAttack`), keeping "the reducer is the sole RNG
-  authority" (§3) intact rather than trusting a client-supplied roll result. **While occupying a
-  Bunker, PIVOT is not offered as a legal action at all** (locked facing, confirmed interpretation —
-  no no-op-pivot allowed); occupying a Bunker also **forces the occupant's facing to the Bunker's**
-  (missed on the first pass, caught by a live click-through test — an occupant's DR/arc math all reads
-  `unit.facing` directly, so without this the Bunker's whole facing-lock premise would silently not
-  hold). New `fortifications.ts`: `canOccupy` (Trench: Foot only, §17.4; Bunker: Foot + Field Gun,
-  §17.5 — never a Vehicle), `fortificationDrBonus` (Trench flat +2 any direction; Bunker +5 if the
-  attacker is in the occupant's own front arc — reuses the existing `attackerInTargetFront` concept,
-  no new arc math — else +3 Flank), `hastyDefenseDrBonus` (+1 any direction), `withinBunkerArc`/
-  `deniedByBunkerMortarRule`, `destructibleFeatureAt`/`destroyFeatureAt` (checks *either*
-  `features.fortification` or `features.obstacle` for a live `destroyDr` — only one can be on a Hex,
-  §17.0 — reused by both this Phase and a future destructible Obstacle), `rollStructureDestroy` (flat
-  `destroyDr − ar`, no terrain/smoke DR, no critical tier, no hit-marker pile — mirrors
-  `rollMinesAttack`'s "owns its own roll" shape), `closeCombatStructureAr` (§17.12: the AR half of
-  `closeCombatContext` with none of its DR half — a structure gets no Terrain modifiers in CC).
-  `movement.ts`: Trench is impassable to Wheeled + blocks Tracked Bonus Move in/out, same as Barbed
-  Wire; **Bunker gets neither restriction** (§17.5 explicitly lets wheeled Field Guns occupy one).
-  `combat.ts`/`mortar.ts`: Fortification/Hasty-Defense DR bonuses folded into `attackContext`,
-  `closeCombatContext`, and `rollIndirectFire`'s `drMods`; a Bunker occupant's Arc-of-Fire override
-  denies firing outside it **unconditionally** (placed before the Turreted-exception check, so a
-  Bunker's lock overrides Turreted too); Mortars are denied firing (Direct or Indirect) from within a
-  Bunker in `attackContext`/`directFireZone`/`indirectFireZone` alike. `reducer.ts`: `doMove` gained a
-  same-Hex branch (`toHexId === unit.hexId`) for occupying a Fortification "from within" per §17.3's
-  2nd paragraph (a real Move Action, base `eff.move` AP, no terrain — there's no hex transition);
-  `doCloseCombat` gained `targetKind: 'structure'` (an alternate, mutually-exclusive CC target,
-  §17.12); new `doHastyDefense`/`doRemoveHastyDefense` handlers. UI (`store.ts`/`ActionChooser.tsx`/
-  `Board.tsx`/`HoverPanel.tsx`/`Inspector.tsx`/`UnitCounter.tsx`) — see §7 above for the full detail.
-  New non-canonical `Fortifications Sandbox` (`data/missions/fortificationsSandbox.ts`) — a Trench, a
-  fixed-facing destructible Bunker (`destroyDr: 16`, matching the rulebook's own worked example), and
-  open ground for the Hasty Defense demo; every mechanic above was click-through-verified live in this
-  mission (occupy-from-within, Bunker facing-lock + no-Pivot + arc-restricted DR, the §17.11 two-roll
-  Fire sequence under one Spent Check) with zero console errors.
-- **M11 — Flamethrowers + Pioneers (§18.0-§18.1)** ✅ `UnitTemplate` gained `hasFlamethrower?` (Foot or
-  Vehicle Unit with a Flamethrower symbol; may choose it on an Attack instead of normal Firepower) and
-  `pioneer?` (a Foot Unit's extra §18.1 exceptions — distinct fields, since a Flame Tank has the
-  former without the latter). `FIRE`/`CLOSE_COMBAT` gained `useFlamethrower?: boolean` — a per-Action
-  choice, not a per-Unit mode, since the same Unit can still Fire normally too. `combat.ts`'s
-  `attackContext`/`closeCombatContext` (+ `rollAttack`/`rollCloseCombat`/`rollStackFire`) branch on it:
-  flat 3 red/3 blue FP (superseding the Unit's own FP and any white-box CC penalty), Max Range a fixed
-  1 Hex overriding the Unit's own Range stat entirely, always vs Flank DR (reusing the same
-  `!isHE`-style trick that already forces Mortars to flank), and — the one genuinely new piece of
-  math — **every DR modifier except Smoke is zeroed** (Terrain, Wall, Vehicle Cover, APC Transport,
-  Elevation, Fortification, Hasty Defense all skipped; the AR-side bonuses — range, Group Support,
-  Elevation, smoke-attack-penalty — are unaffected, since the rule's "ignore ALL DR Modifiers" is
-  about the DEFENSE side only). The existing `openTopped` field's doc comment had already anticipated
-  this ("vs HE/**Flamethrower**/red-FP CC") — the Open-Topped flip condition just needed extending
-  from `isHE` to `isHE || useFlamethrower`, already half-designed before this milestone existed.
-  `actions.ts` enumerates the Flamethrower FIRE/CLOSE_COMBAT variant as a genuinely separate legal
-  action alongside the normal one (its own `attackContext`/`closeCombatContext(..., true)` legality
-  check — max Range 1 makes it illegal far more often than the Unit's normal Attack). §18.1 Pioneer
-  exceptions: `reducer.ts`'s `resolveMines` now excludes Pioneer Units from the target list entirely
-  (not just favorable odds — no Attack at all, since Pioneers "may enter a Mines Hex without
-  triggering a Mines Attack"); `mortar.ts`'s `directFireZone` gained an optional `maxRange` param so
-  `actions.ts`/`doFireSmoke` can cap a Pioneer's own Fire Smoke to Range 1 without touching its normal
-  (longer) Fire range. UI: `Inspector.tsx`'s Fire/CC target lists show a distinct 🔥-prefixed row per
-  target when `legalActionsForUnit` offers both variants (own React key needed —
-  `${targetId}-${useFlamethrower ? 'ft' : 'n'}` — since the same target can now appear twice).
-  **Bug caught by live testing, now fixed:** `store.ts`'s `requestFireRoll`/`requestCcRoll` (the
-  dice-roller preview builders) initially ignored `action.useFlamethrower` entirely — a live
-  click-through showed the dice roller displaying the UNIT's normal AR/DR instead of the Flamethrower's,
-  even though the reducer's own `doFire`/`doCloseCombat` had it right — the preview and the commit had
-  silently diverged. Both now read `action.useFlamethrower` and thread it into `attackContext`/
-  `rollStackFire`/`closeCombatContext`/`rollCloseCombat`, matching the reducer exactly. New
-  `flamethrower.test.ts` reproduces the rulebook's own worked example (German Pioneers' Flamethrower
-  vs a Soviet Infantry Gun in a Stone Building: 6AR, 10DR flank — Stone Building's Terrain DM
-  correctly ignored — Hit Number 4). `Fortifications Sandbox` gained a German `ger-pioneer` and a
-  Soviet `sov-t34a` (both pre-existing templates, stats unchanged) as a live Flamethrower-vs-Armor
-  test bed.
-
-- **M13 — Online Multiplayer, steps 1-3 done (roadmap deliberately reordered ahead of M12/Cards —
-  see §0/the plan at `.claude/plans/piped-strolling-finch.md` for the full reasoning): a real Node
-  server relays Actions between two browsers over WebSocket; hotseat is completely untouched.**
-  Locked decisions: Render hosting (one service serves both the static client and the WS endpoint);
-  optimistic apply on the acting player's own client, server-authoritative broadcast to both;
-  Undo/Redo disabled entirely online (opponent-approved undo is an explicit fast-follow, not built);
-  shareable room code/link, no accounts (`sessionId` is opaque, forward-compatible with a real auth
-  layer later). **Why this needed zero engine changes:** `engine/`'s golden rules (CLAUDE.md §3) —
-  pure `reduce(state, action)`, `GameState` 100% JSON-serializable, all randomness seeded *inside*
-  `GameState.rng` — meant the server could `import { reduce, initGame } from '../src/engine'`
-  verbatim, no adaptation; the existing dice-roller preview pattern (`store.ts`'s `request*Roll`,
-  which previews a roll from `state.rng` without committing it) is already exactly the "preview
-  locally, commit authoritatively, they must match since it's the same pure function" shape online
-  play needs.
-
-  **Server** (`server/`, new top-level directory, wired into the existing `tsconfig.json`/
-  `vite.config.ts` `include`/`test.include` so `npm run typecheck`/`npm test` cover it too):
-  `rooms.ts`'s `RoomManager` is pure (no WebSocket objects — a `Room` just wraps a `GameState` plus
-  which `sessionId` holds each `SideId` and whether that Side's socket is currently connected),
-  unit-tested in `__tests__/rooms.test.ts` with injected `genCode`/`genSeed` for determinism.
-  **Server picks a fresh random RNG seed per room** — reusing a Mission's hardcoded test seed (e.g.
-  Mission 1's `20261017`) would replay identical dice every real game. `index.ts` is the thin
-  transport layer: plain Node `http` (no Express — one dependency-minimal static file server for
-  `dist/`, matching the project's minimal-deps philosophy) + `ws`'s `WebSocketServer` on the same
-  HTTP server (so Render only needs one service/port). On a client's `ACTION` message it re-verifies
-  `sessionId`'s Side matches `state.currentSide` server-side (defense in depth — the client already
-  gates this too) before calling `reduce()`, then **always re-broadcasts the room's canonical state
-  regardless of whether the Action was accepted** — an internally-"illegal" Action just re-broadcasts
-  unchanged state, which is self-healing for any client whose local optimistic guess ever drifts, with
-  no special-case code. Reconnect: a disconnected socket doesn't touch the Room's `GameState` at all;
-  the same `sessionId` rejoining (`JOIN`, not `CREATE`) resumes the same Side seat, verified live
-  (join → disconnect → reconnect via a fresh WebSocket → same Side, `GameState` untouched throughout).
-  `data/missions/catalog.ts` (id → `MissionDef`) exists specifically so the server has its own
-  trusted mission lookup — a `CREATE` message carries a `missionId` string, never a client-supplied
-  `MissionDef` object.
-
-  **Protocol** (`src/net/protocol.ts`, one file imported by both `src/` and `server/` — literally the
-  same TS source, so client/server can't silently drift on message shape): `ClientMsg` = `CREATE` /
-  `JOIN` / `ACTION`; `ServerMsg` = `JOINED` (carries `peerConnected` too, so a joining client
-  immediately knows the other Side's live connection state without a second message) / `STATE` /
-  `PEER_STATUS` / `ERROR`. **`GameState` is the only game data that ever crosses the wire** — no
-  separate diff/patch protocol, a client just overwrites its local `game` with whatever `STATE`
-  delivers.
-
-  **Client** (`src/net/client.ts`'s `NetClient` — pure transport, reconnect-with-backoff, zero game
-  logic; `src/net/session.ts`'s `getSessionId()` — a `crypto.randomUUID()` cached in `localStorage`).
-  `store.ts`'s `dispatch()` forks on a new `mode: 'hotseat' | 'online'` field **at its very first
-  line** — the hotseat branch is byte-for-byte the original code, so hotseat correctness/tests were
-  never at risk. The online branch: cheap client-side turn gate (`mySide !== game.currentSide` →
-  silently no-op, no network round trip for something that can't be legal), then the SAME
-  `reduce()` call hotseat uses, applied optimistically via a newly-extracted `applyReduceResult`
-  helper (factored out of `dispatch`'s old body specifically so the online path's optimistic apply
-  and the hotseat path's real commit share one implementation — SFX, the §4.5/§15.11 free-facing and
-  §2.6 Stressed-unit auto-select, and the round-advance turn banner all Just Work for online too,
-  `persist`/`trackHistory` flags gate the localStorage-autosave/Undo-stack side effects hotseat-only).
-  Incoming `STATE` broadcasts go through a separate, deliberately lighter `handleServerMsg` reconciler
-  (plain overwrite of `game`, no diffing needed since `GameState` is already the single source of
-  truth `dispatch` itself works off) — **known v1 gap, on purpose:** it does NOT replay SFX (would
-  double up the acting client's own already-played cue) or re-derive the full auto-select logic from
-  `events` (the `STATE` message doesn't carry the originating `Action`/events, only the resulting
-  `state`) — so the opponent doesn't hear a sound cue for the other player's move yet. Documented as
-  an acceptable functional-minimum gap, not silently dropped; a real fix would thread the action/events
-  through the `STATE` broadcast too. `newGame`/`resume`/`quitToMenu` all close any live `netClient`
-  and force `mode: 'hotseat'` — a stale online socket can never survive a menu transition.
-
-  **UI — explicitly functional-minimum placeholder** (user may hand off a real visual design later,
-  e.g. via Claude Design — treat this pass's layout/copy as scaffolding to replace, not a locked
-  spec): `SetupScreen.tsx` gained a "Play Online" card (create-room + join-by-code) alongside the
-  untouched hotseat buttons; `OnlineLobby.tsx` is the pre-game "connecting…"/error screen (shown only
-  while `mode === 'online' && !game`); `App.tsx` shows a slim online-status line inside the existing
-  `.topbar` flex row (**not** a new grid-level sibling of `.layout` — that would've broken its
-  2-row `grid-template-rows`, caught before it shipped) and hides Undo/Redo when `mode === 'online'`.
-  **Side letters are never shown to the player** — every online-mode string resolves `SideId` through
-  `NATIONS`/`game.players[side].nations` first (matching the topbar's pre-existing convention), so
-  the lobby says "You are the Germans" / "waiting for the Soviets to join," never "Side A."
-
-  **Verified live** (`.env.local`'s `VITE_WS_URL=ws://localhost:8787` points the Vite dev client at a
-  separately-run `tsx server/index.ts`, since dev-mode client (5173) and server (8787) are different
-  origins — production serves both from one origin, same-origin default in `client.ts`): create-room
-  → real browser shows "waiting for the Soviets to join — room code X"; an independent second
-  WebSocket connection joining that exact room → real browser's status flips to "opponent connected"
-  live; a real click of Pass in the browser → the independent second connection receives the
-  resulting `STATE` broadcast with the flipped `currentSide`, **and** the real browser's own UI
-  updates correctly (turn banner, log) — proving the full loop end-to-end, not just the optimistic
-  echo of one's own action; a same-side click attempted out-of-turn was silently blocked client-side
-  (no message sent at all, verified via the second connection's log staying unchanged); disconnect +
-  reconnect with the same `sessionId` resumed the same Side seat cleanly. `npm test` (405/405, +10 new
-  for `rooms.ts`), typecheck, `npm run build`, and conformance (0 violations) all pass — hotseat
-  untouched throughout.
-
-  **A real bug caught by the user live-testing with a friend, since fixed:** after a Move online, the
-  free facing-correction picker (§4.5/§15.11 `CHOOSE_FACING`) silently refused to dispatch. Root
-  cause: both `store.ts`'s online `dispatch` and `rooms.ts`'s `applyAction` added a blanket "is it
-  your Turn" gate that neither hotseat nor the engine itself has — `reduce()`'s own `doChooseFacing`
-  deliberately has **no** `currentSide` check, because a normal Action always hands the Turn to the
-  other side *before* the correction window opens (that's the whole point of the rule). The blanket
-  gate treated it like every other Action and blocked it outright. First-instinct fix (delete the
-  gate entirely) was itself wrong and caught before shipping: `PASS` has no `unitId`/side field at
-  all (`{ type: 'PASS' }`), so `reduce()` has no caller identity to self-defend it with — removing the
-  gate wholesale would let either side trigger the *other* side's Pass. **Correct fix: exempt
-  `CHOOSE_FACING` specifically** from the Turn gate (both sides of the fix — client and server), and
-  give it its own narrower check instead: does the target Unit's `side` match the caller's (since
-  `doChooseFacing` itself never checks that either — harmless on one shared hotseat screen, a real gap
-  online where a client could otherwise reface the *opponent's* still-open window). New regression
-  test in `server/__tests__/rooms.test.ts`. Verified against the real running server with the exact
-  reported scenario. **Lesson: when adding a network-layer authorization check on top of an engine
-  that already has its own per-Action legality rules, don't assume "whose Turn is it" is a universal
-  precondition — grep for the Action's handler and read its own comment for documented exceptions
-  first.**
-
-  **Render deployment — prepped, not yet actually deployed (step 4):** `render.yaml` (one Node web
-  service; `plan: free` to start, switchable to `starter` for an always-on instance later —
-  `server/index.ts` already reads `process.env.PORT`, no code change needed there). Two real gaps
-  found and fixed while prepping this, both worth remembering:
-  1. **`tsx` was a devDependency, but `npm start` (`tsx server/index.ts`) needs it at runtime.** A
-     platform that runs `npm install` with `NODE_ENV=production` (common for PaaS) skips
-     devDependencies, which would make the start command fail on a clean deploy despite working
-     fine locally (where `node_modules` already has everything from ad-hoc `npm install`s during
-     dev). Moved `tsx` to `dependencies`; `@types/node` correctly stays a devDependency (compile-time
-     only, never imported at runtime).
-  2. **`serveStatic`'s catch-all fallback served `index.html` (200, `text/html`) for ANY missing
-     path, including missing assets with a real extension** (`/assets/index-OLDHASH.js`) — not just
-     genuine SPA routes. The realistic trigger: a browser with a stale cached `index.html` from
-     before the last deploy, still referencing an old hashed bundle filename that no longer exists
-     post-redeploy. Serving HTML in place of the missing JS makes the browser try to execute/parse
-     it and fail confusingly, instead of a clean 404 it can react to (reload → picks up the new
-     `index.html`). Fixed: only extensionless paths get the `index.html` fallback now; a missing
-     path *with* an extension 404s for real. Caught by manually running the actual production
-     startup (`npm run build && npm start`, not the dev-mode split-port setup) and curling it —
-     verified both the static-serve fix and that one process really does serve the built client +
-     accept a real WebSocket `CREATE`/`JOINED` round-trip on the same port, the exact model Render
-     needs. Extracted `serveStatic` into its own `server/staticServe.ts` (takes `distDir` as a
-     parameter instead of a module-level constant) specifically so this could get real Vitest
-     coverage (a temp-directory fixture, no real HTTP server needed) rather than staying
-     manual-verification-only. **Step 4 — done: the user deployed it** (Render Blueprint import,
-     `v3-migration` branch). Several real bugs surfaced and were fixed on the LIVE deployment
-     afterward (see the CHOOSE_FACING Turn-gate fix above, the S06 half-hex entry fix, and every
-     `TurnFlash`/reinforcement-preview-counter item below) — each one required `git push` →
-     Render auto-redeploy → the user re-testing on the actual live URL, which has by now repeatedly
-     proven the whole build→deploy→redeploy loop works end-to-end. **Still open:** a real
-     over-the-internet test with a genuinely separate second person (the user has been testing
-     solo/with themselves so far, as far as this file's own record goes) — not yet confirmed either
-     way; ask before assuming it has or hasn't happened.
-  **Not yet built (step 5):** opponent-approved Undo request (the "fast-follow" decision — rides on
-  this pass's message-passing pipeline, est. 1-2 extra days); the real visual design for the
-  lobby/status UI, if the user provides one.
-
-  → M12 cards (§8, incl. OBA) → the rest of M13 (real visual design, opponent-approved undo)
-  → **M8 Hidden Units** (§11, now genuinely buildable — a real per-client server exists to filter
-  state on, not just a single shared hotseat screen).
+  Check per Group. **Group Close Combat (§10.6)** landed later: `GROUP_ATTACK` branches on
+  same-hex target, `isValidSupporter` restricts CC support to Units sharing the Leader's hex.
+  **Group Move — individual per-member destinations (§10.2/§10.3)** also landed later: a per-member
+  destination queue (`groupMoveQueue`/`groupMoveDone`) lets members split to different Hexes, not
+  just shift as one formation.
+- **M6 — Vehicles + Special Units (§15-16)** ✅ Armored Target hit deck; vehicle movement
+  (wheeled/tracked costs, Bonus Moves) with click-to-build-path UI; Transport/Towing; Special Units
+  (Turreted, Open-Topped, APC Transport Bonus, Trucks/Wagons). `Armor Sandbox` test mission.
+  **§16.4 Mobile Vehicles** (a Wheeled vehicle that also carries Track Bonus Move symbols) added
+  later — `movement.ts`'s `classifyBonusStep` tags each Bonus-Move step `'either'` or `'track'` so
+  the two symbol types spend in any order. **§16 audit** found two real gaps since fixed:
+  Open-Topped/APC Transport Bonus were wired into `closeCombatContext` but not ranged
+  `attackContext`/`mortar.ts`'s `rollIndirectFire` (neither rule carves out an HE exception).
+- **M7 — Mortars + Smoke (§13-14)** ✅ (Spotter picker deferred — always auto-picks a valid Spotter
+  Hex, per §13.3). Direct Attacks reuse `FIRE`; Indirect Attacks are `INDIRECT_FIRE`, resolved via a
+  Spotter Hex that supplies LOS while Arc/Range stay keyed to the Mortar's own Hex. `smoke.ts` —
+  Heavy/Light DR/AR, LOS blocking, Rally bonus, dissipation; `FIRE_SMOKE` places Heavy Smoke on any
+  non-Water Hex whether or not occupied. *Deferred on purpose:* **OBA (§13.4-13.9)** waits for the
+  real Cards subsystem (M12), since it's specified as Artillery Weapon Cards.
+- **M8 — Hidden Units (§11) — DEFERRED to online play, locked decision.** Hidden Units are
+  fundamentally secret-information state, and hotseat shares one screen/one `GameState` — there's no
+  "look away" enforcement possible short of a genuine per-player view. Build it once M13's
+  authoritative server exists to filter state on. **Do not attempt a hotseat-only approximation**
+  (hiding enemy Units from the board render by `currentSide`) — trivially defeated via devtools, and
+  would need rebuilding anyway.
+- **M9 — Hills and Elevation (§12)** ✅ Elevation Move Cost Penalty (Sloping ±1AP ascending-only,
+  Steep ±2AP both directions, impassable to vehicles off-road unless on a Road); elevation-aware
+  `hasLOS` (ties block only if strictly exceeding the higher endpoint's level, except a genuine
+  3-way tie never blocks — no L0 special case, see memory `conflict-of-heroes-m9-los-elevation`)
+  plus §12.6 Blind Spots; Elevation Combat Bonus (+1AR attacker higher, +1DR target higher).
+  Validated interactively in `public/hills-los-mockup.html` before coding (kept as a regression
+  reference). `Hills Sandbox` test mission.
+- **M10 Phase 1 — Obstacles (§17.7-§17.10)** ✅ Locked decisions (memory
+  `conflict-of-heroes-m10-scope`): **Mines are never hidden** (same anti-hide rationale as M8).
+  `Hex.features.obstacle` carries `ownerSide` since Mines' CAP modification is paid by whoever
+  placed them, not necessarily who triggers them. Barbed Wire adds a real 1d6 via the seeded RNG;
+  Barbed Wire/Road Block are impassable to Wheeled **unconditionally** (a Road does NOT negate this
+  — that would defeat the point of a Road Block). New store flow (`maybeMinesGate`,
+  `MinesConfirm.tsx`) since the Mines' CAP choice belongs to the owning side, not the acting side.
+- **M10 Phase 2 — Fortifications (§17.1-17.6, 17.11-17.12)** ✅ Locked decisions: occupancy is a
+  per-unit flag (`Unit.occupyingFortification?`), not a hex-side occupant list; Hasty Defense is
+  per-Unit (`Unit.hastyDefense?`), not a Hex feature (multiple Units in one Hex can each hold their
+  own). §17.11's two-roll destroy needs no new `Action` field — `doFire` re-derives the structure
+  roll from `state.rng` after the occupant roll(s), keeping the reducer the sole RNG authority.
+  While occupying a Bunker, PIVOT isn't offered at all (locked facing — occupying also forces the
+  occupant's facing to the Bunker's, needed since DR/arc math reads `unit.facing` directly).
+  `fortifications.ts`: `canOccupy`, `fortificationDrBonus`, `hastyDefenseDrBonus`,
+  `rollStructureDestroy`, `closeCombatStructureAr`. `Fortifications Sandbox` test mission.
+- **M11 — Flamethrowers + Pioneers (§18)** ✅ `hasFlamethrower?`/`pioneer?` template flags; FIRE/
+  CLOSE_COMBAT gained `useFlamethrower?: boolean` (a per-Action choice, not a per-Unit mode). Flat
+  3/3 FP, max Range 1, always Flank DR, and — the genuinely new piece of math — every DR modifier
+  except Smoke is zeroed (AR-side bonuses are unaffected, since the rule only touches the DEFENSE
+  side). `reducer.ts`'s `resolveMines` excludes Pioneers from Mines targeting entirely. New
+  `flamethrower.test.ts` reproduces the rulebook's own worked example.
+- **M13 — Online Multiplayer** ✅ steps 1-4 done (roadmap deliberately reordered ahead of M12/Cards,
+  since Cards need real per-client secret info that only online play can provide). A real Node
+  server (`server/`) relays Actions between two browsers over WebSocket; hotseat is completely
+  untouched. **Why this needed zero engine changes:** the engine's own golden rules (§3) — pure
+  `reduce`, JSON-serializable `GameState`, RNG seeded inside state — meant the server could import
+  `reduce`/`initGame` verbatim; the existing dice-roller preview pattern (preview from `state.rng`
+  without committing) is already the exact "preview locally, commit authoritatively" shape online
+  play needs. Locked decisions: one Render service serves both static client and WS endpoint;
+  optimistic client-side apply, server-authoritative broadcast to both; Undo/Redo disabled entirely
+  online (opponent-approved undo is a planned fast-follow); shareable room code, no accounts.
+  `server/rooms.ts`'s `RoomManager` is pure (no socket objects, unit-tested); the server picks a
+  fresh random RNG seed per room (never a Mission's hardcoded test seed). `src/net/protocol.ts` is
+  one TS source imported by both client and server so they can't drift on message shape;
+  `GameState` is the only game data that crosses the wire (a client just overwrites its local `game`
+  with whatever `STATE` delivers — no diff/patch protocol). `store.ts`'s `dispatch()` forks on
+  `mode: 'hotseat'|'online'` at its very first line, so the hotseat branch is untouched.
+  **Known v1 gap, on purpose:** incoming `STATE` broadcasts don't replay SFX or re-derive
+  auto-select logic (the message doesn't carry the originating Action/events) — the opponent
+  doesn't hear a sound cue for the other player's move yet.
+  **A real bug worth the lesson:** a blanket "is it your Turn" gate (added at the network layer)
+  blocked the free `CHOOSE_FACING` correction, since that Action deliberately has no `currentSide`
+  check (a normal Action already hands the Turn to the other side before the correction window
+  opens). Deleting the gate wholesale would have been wrong too (`PASS` has no `unitId`/side field
+  to defend itself with) — the fix exempts `CHOOSE_FACING` specifically and gives it its own
+  narrower check (does the target Unit's side match the caller's). **Lesson: don't assume "whose
+  Turn is it" is a universal precondition when adding a network-layer check on top of an engine that
+  already has its own per-Action legality rules** — read the Action handler's own comments for
+  documented exceptions first.
+  **Render deployment is done** (`render.yaml`, one Node web service; `tsx` had to move from
+  devDependencies to dependencies since some PaaS `npm install` runs skip devDependencies in
+  production; `serveStatic`'s SPA fallback was fixed to only apply to extensionless paths, so a
+  stale cached `index.html` referencing an old hashed bundle 404s cleanly instead of serving HTML in
+  place of missing JS). **Still open:** a real over-the-internet test with a genuinely separate
+  second person hasn't been confirmed either way — ask before assuming.
+  **Not yet built:** opponent-approved Undo request; the real visual design for the lobby/status UI.
+  → M12 Cards (incl. OBA) → the rest of M13 (visual design, opponent-approved undo) → M8 Hidden
+  Units (now genuinely buildable).
 
 ---
 
@@ -1549,5 +942,4 @@ Spent-Check die instead of a remaining-AP pool)*
 ## 10. Content & legal note
 
 Author all stats/terrain/scenario data ourselves and render with original simple graphics. Game
-**rules and stats** are facts/ideas (fine to implement); **do not copy** Academy Games' artwork, map
-images, or counter art. Personal-use project.
+**rules and stats** are facts/ideas (fine to implement);

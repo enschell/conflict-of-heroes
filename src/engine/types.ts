@@ -229,6 +229,29 @@ export interface ReinforcementUnit {
 }
 
 // ---------------------------------------------------------------------------
+// Pre-Mission Setup phase (Mission-configurable — not a `rules/` chapter of its
+// own; a Mission may specify that, before Round 1, one side places a pool of
+// starting Units onto any empty Hex, then the other side does the same, THEN
+// the real Round 1/initiative sequence begins). Every existing Mission (no
+// `setupForces`) skips this entirely and behaves exactly as before.
+// ---------------------------------------------------------------------------
+
+/**
+ * A not-yet-placed Unit waiting for its side's turn to set up. Same identity
+ * as `ReinforcementUnit` minus the Round/entry-Hex fields, which don't apply —
+ * setup has no Round yet and no restricted entry Hexes (any empty Hex is legal).
+ */
+export interface SetupPoolUnit {
+  id: UnitId;
+  side: SideId;
+  nation: NationId;
+  templateId: string;
+  /** The Mission's suggested facing; a SETUP_PLACE may override it, and the
+   *  placed Unit also gets a free `pendingFacingChoices` correction window. */
+  facing: Facing;
+}
+
+// ---------------------------------------------------------------------------
 // Hit markers
 // ---------------------------------------------------------------------------
 
@@ -367,6 +390,15 @@ export interface Hex {
    */
   edgeCut?: { w?: true; e?: true; n?: true; s?: true };
   terrain: TerrainId;
+  /**
+   * Optional decorative art-variant key (e.g. "wheat", "corn", "lake") from
+   * `data/terrainArtVariants.ts` — purely visual flavor for a hex whose
+   * mechanical `terrain` is unchanged (CLAUDE.md: the v3 rulebook has exactly
+   * 8 real terrain types; "more terrain types" means art variety, not a new
+   * mechanic — see that file's header comment for the full mapping/caveats).
+   * `hexArt.ts`'s `artForHex` prefers this over the plain `TERRAIN_ART` default.
+   */
+  art?: string;
   elevation: number;
   /** Wall on edge in direction i (0..5). Length 6. */
   walls: boolean[];
@@ -431,10 +463,18 @@ export interface VictoryHexDef {
   roundOverrides?: { round: number; vp: number }[];
   /**
    * When this hex's control VP is awarded: every Round it's held ('endOfRound',
-   * the default — today's only behavior), or once, only at the Mission's final
-   * Round-end ('endOfMission'). Never both.
+   * the default), once at the Mission's final Round-end ('endOfMission'), or
+   * only on an explicit list of Rounds ('specificRounds', see `awardRounds`
+   * below) — e.g. "1 VP for controlling K09 in Rounds 3, 4, and 5 only."
    */
-  awardTiming?: 'endOfRound' | 'endOfMission';
+  awardTiming?: 'endOfRound' | 'endOfMission' | 'specificRounds';
+  /**
+   * The exact Rounds this hex's control VP is awarded on, when
+   * `awardTiming === 'specificRounds'` — ignored otherwise. Each listed Round
+   * still uses `vpForRound` (so an individual Round in the list can use
+   * `roundOverrides` for a different amount than the others).
+   */
+  awardRounds?: number[];
 }
 
 export interface VictoryConfig {
@@ -593,6 +633,13 @@ export type Action =
   // own move stat as AP, a real Spent Check like a Move. VP goes to the
   // EXITING Unit's own side, not the opponent.
   | { type: 'EXIT'; unitId: UnitId; capCostReduce?: number }
+  // Pre-Mission Setup phase (Mission-configurable, `GameState.phase === 'setup'`
+  // only): place one of `GameState.setupPool`'s own Units onto an empty Hex.
+  // Free — no AP, no Spent Check, no Stress — since this precedes Round 1
+  // entirely. Only legal for the side named by `GameState.setupSide`; once
+  // that side's pool is empty, `setupSide` flips to the other side (if it
+  // still has pool Units) or the Mission proceeds into the real Round 1.
+  | { type: 'SETUP_PLACE'; unitId: UnitId; hexId: HexId; facing?: Facing }
   | { type: 'PASS' };
 
 export type ActionType = Action['type'];
@@ -647,6 +694,41 @@ export interface GameState {
    * until the next Action, by either side.
    */
   pendingFacingChoices?: UnitId[];
+  /**
+   * Real gameplay art overrides (Map Editor "Overlay mode", CLAUDE.md §D):
+   * keyed by `Hex.mapNumber`, a single hand-painted/traced image stretched
+   * across that board and clipped to its hex silhouette, REPLACING per-hex
+   * terrain tiles for every hex belonging to that board. Terrain TYPE/
+   * mechanics are unaffected — this is art only, resolved by `ui/Board.tsx`.
+   */
+  mapOverlays?: Record<number, string>;
+  /**
+   * Display-only 90°/-90° board rotation (Mission/Map Editor, CLAUDE.md §B/§C)
+   * — see `MissionDef.mapRotations`'s own comment for the full rationale.
+   * Carried through unchanged by `initGame`; resolved by `ui/Board.tsx` (and
+   * `ui/hexgeo.ts`'s `computeDisplayRotationCluster`) purely for rendering —
+   * never read by `reduce`/movement/LOS/combat, which are already
+   * orientation-invariant (§B: only pixel rendering ever needed this).
+   */
+  mapRotations?: Record<number, 90 | -90>;
+  /**
+   * Pre-Mission Setup phase (Mission-configurable): Units still waiting for
+   * their side's turn to be placed via `SETUP_PLACE`. Only relevant while
+   * `phase === 'setup'` — empty (and `setupSide` unset) for every Mission
+   * that doesn't use this feature, which then skips straight to `'playing'`
+   * exactly as before this feature existed.
+   */
+  setupPool?: SetupPoolUnit[];
+  /** Whose turn it currently is to place `setupPool` Units — unset once setup is complete. */
+  setupSide?: SideId;
+  /**
+   * See `MissionDef.setupInstructions` — authored free-text guidance for the
+   * Setup phase, carried through by `initGame` so `SetupPanel.tsx` can show
+   * it to the players while they place (there's no engine-enforced setup
+   * zone, so this text is the players' only placement guidance). Display-only,
+   * never read by `reduce`.
+   */
+  setupInstructions?: string;
 }
 
 /** Result of reducing an action: the next state plus emitted events. */
@@ -662,6 +744,8 @@ export interface ReduceResult {
 export interface MapHexDef {
   id: HexId;
   terrain: TerrainId;
+  /** See Hex.art — optional decorative art-variant key, mechanically inert. */
+  art?: string;
   elevation?: number;
   /** Edge indices (0..5) that have a wall. */
   walls?: number[];
@@ -740,10 +824,41 @@ export interface MissionDef {
   units: UnitPlacement[];
   /** Units that begin off-Map and enter later (§4.12). */
   reinforcements?: ReinforcementWaveDef[];
+  /**
+   * Pre-Mission Setup phase (Mission-configurable, not a `rules/` chapter):
+   * a pool of starting Units each side places onto any empty Hex (no fixed
+   * `hexId`, unlike `units` above) before Round 1 begins — one side places
+   * its entire pool first, then the other. Omit (or leave empty) for a
+   * normal Mission with no pre-round setup phase; `phase` then goes straight
+   * to `'playing'` exactly as before this feature existed.
+   */
+  setupForces?: { id: UnitId; side: SideId; templateId: string; facing: Facing }[];
+  /** Which side places its `setupForces` pool first. Defaults to 'A' if omitted. */
+  setupFirstSide?: SideId;
+  /** Free-text guidance for how the setup phase should proceed (display-only, not read by the engine). */
+  setupInstructions?: string;
   /** Zones a side's own Units may EXIT the Map through, for VP (§4.0). */
   exitZones?: ExitZoneDef[];
   templates: UnitTemplate[];
   victoryHexes: VictoryHexDef[];
+  /** See GameState.mapOverlays — carried through unchanged by `initGame`. */
+  mapOverlays?: Record<number, string>;
+  /**
+   * Which boards were authored with a 90°/-90° display rotation in the
+   * Mission/Map Editor, keyed by that board's own `mapNumber` (stamped on
+   * every one of its hexes, same key as `mapOverlays`). A 0°/180° choice
+   * needs no entry here — both are real axial-coordinate transforms already
+   * baked into `hexes` above (§B), so the merged coordinates alone fully
+   * describe the result. 90°/-90° is the one case with NO axial equivalent
+   * (a hexagon has 6-fold, not 4-fold, rotational symmetry — `boardAssembly.ts`)
+   * — it's a display-only pixel spin the renderer applies on top, otherwise
+   * completely unrepresented in `hexes`, so it would silently reset to 0° on
+   * every reload without this field. Not read by `initGame`/`reduce` (no
+   * live-game consequence yet — `Board.tsx` doesn't render rotated clusters
+   * at all, a separate pre-existing gap, §B); consumed only by the Mission
+   * Editor's "Load Existing Mission" to restore the Rotation dropdown.
+   */
+  mapRotations?: Record<number, 90 | -90>;
   /** General mission situation/flavor text (Mission Editor authoring; display-only, not read by the engine). */
   situation?: string;
   /** Short per-side "orders" text (Mission Editor authoring; display-only, not read by the engine). */

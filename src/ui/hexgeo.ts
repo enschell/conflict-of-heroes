@@ -152,6 +152,148 @@ export interface Bounds {
   maxY: number;
 }
 
+/**
+ * The TRUE tight bounding box of the union of every hex's own (edge-clipped) polygon — unlike
+ * `playableBounds` below (which uses each hex's full UNCLIPPED ±size box, deliberately generous so
+ * a half/quarter-hex silhouette is never cut off by too-tight an SVG viewBox), this is the exact
+ * rectangle the real rendered board occupies. A board-edge hex is only ever half/quarter of its
+ * full box (`edgeCut`), so `playableBounds`' box is measurably BIGGER than the real silhouette on
+ * every clipped side — the wrong basis for stretching a full-board overlay image: an image sized to
+ * `playableBounds` gets stretched across that bigger box, then clipped down to the real (smaller)
+ * silhouette, silently losing a real margin of the source image forever. Use this for anything that
+ * must exactly match the visible board (overlay image sizing); keep `playableBounds` for viewport/
+ * viewBox fitting, where the extra margin is intentional.
+ */
+export function tightHexBounds(hexes: Iterable<Pick<Hex, 'id' | 'edgeCut'>>, size = HEX_SIZE): Bounds {
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  for (const hex of hexes) {
+    const center = hexCenter(hex.id, size);
+    const corners = clipHexPolygon(hexCorners(center, size), center, hex.edgeCut);
+    for (const p of corners) {
+      minX = Math.min(minX, p.x);
+      maxX = Math.max(maxX, p.x);
+      minY = Math.min(minY, p.y);
+      maxY = Math.max(maxY, p.y);
+    }
+  }
+  if (!Number.isFinite(minX)) return { minX: 0, minY: 0, maxX: 0, maxY: 0 };
+  return { minX, minY, maxX, maxY };
+}
+
+/**
+ * "Overlay mode" real gameplay art (Map Editor, CLAUDE.md §D): one entry per
+ * distinct `mapNumber` that has a saved overlay image — the sub-bounds and
+ * union-of-clipped-hex-polygons needed to stretch+clip that ONE image behind
+ * just that board's own hexes (not the whole multi-board assembly, so a
+ * Mission with only some boards overlaid doesn't smear one board's art
+ * across another's). Shared by `Board.tsx` (the live game) and
+ * `EditorBoard.tsx` (Mission Editor previews) so the algorithm can't drift
+ * between the two call sites.
+ */
+export interface MapOverlayGroup {
+  mapNumber: number;
+  url: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  hexIds: HexId[];
+  clipPolygons: string[];
+}
+
+export function computeMapOverlayGroups(
+  hexesById: Record<HexId, Pick<Hex, 'id' | 'mapNumber' | 'edgeCut'>>,
+  mapOverlays: Record<number, string> | undefined,
+  size = HEX_SIZE,
+): MapOverlayGroup[] {
+  if (!mapOverlays || !Object.keys(mapOverlays).length) return [];
+  const idsByNumber = new Map<number, HexId[]>();
+  for (const hex of Object.values(hexesById)) {
+    if (hex.mapNumber != null && mapOverlays[hex.mapNumber]) {
+      const arr = idsByNumber.get(hex.mapNumber) ?? [];
+      arr.push(hex.id);
+      idsByNumber.set(hex.mapNumber, arr);
+    }
+  }
+  const groups: MapOverlayGroup[] = [];
+  for (const [mapNumber, hexIds] of idsByNumber) {
+    let minX = Infinity;
+    let minY = Infinity;
+    let maxX = -Infinity;
+    let maxY = -Infinity;
+    const clipPolygons: string[] = [];
+    for (const id of hexIds) {
+      const hex = hexesById[id]!;
+      const c = hexCenter(id, size);
+      const corners = hexCorners(c, size);
+      const clipped = hex.edgeCut ? clipHexPolygon(corners, c, hex.edgeCut) : corners;
+      // Bound by the CLIPPED corners actually shown, not the full unclipped hex box — a
+      // board-edge hex's real footprint is only half/quarter of that box (see `tightHexBounds`'s
+      // own doc comment above). Using the bigger unclipped box here stretches the image across
+      // more area than the clip-path ever reveals, silently losing a real margin of the image.
+      for (const p of clipped) {
+        minX = Math.min(minX, p.x);
+        maxX = Math.max(maxX, p.x);
+        minY = Math.min(minY, p.y);
+        maxY = Math.max(maxY, p.y);
+      }
+      clipPolygons.push(pointsAttr(clipped));
+    }
+    groups.push({ mapNumber, url: mapOverlays[mapNumber]!, x: minX, y: minY, width: maxX - minX, height: maxY - minY, hexIds, clipPolygons });
+  }
+  return groups;
+}
+
+export interface DisplayRotationCluster {
+  hexIds: Set<HexId>;
+  rotation: 90 | -90;
+  pivot: Pt;
+}
+
+/**
+ * Reconstructs a {90°,-90°} display-rotation cluster from a flattened, live
+ * `GameState`/`MissionDef` — the counterpart to `engine/boardAssembly.ts`'s
+ * `rotationClusters()`, which needs the ORIGINAL per-board entry list
+ * (hexes/rotation/attachTo) that only the Mission Editor still has. Once
+ * exported, only `mapRotations: Record<mapNumber, 90|-90>` survives (see that
+ * field's own comment in `engine/types.ts`) — but that's enough, because
+ * `boardAssembly.ts` proves every board in one Mission assembly is always the
+ * SAME rotation family (a quarter-family board can only ever attach to
+ * another quarter-family board, and the whole assembly is one connected
+ * tree) — so "any entry in `mapRotations` at all" already implies EVERY hex
+ * in the Mission belongs to the one cluster, with no per-mapNumber filtering
+ * needed. The one piece of real information lost by flattening is WHICH
+ * board was the anchor (whose own rotation value the real `rotationClusters`
+ * uses when boards are mixed 90°/-90° within one tree) — this picks the
+ * smallest `mapNumber`'s value instead, which is exactly correct whenever
+ * every board was tagged the same way (the documented, recommended
+ * authoring practice) and only an approximation in the rare mixed-tag case.
+ */
+export function computeDisplayRotationCluster(
+  hexesById: Record<HexId, Pick<Hex, 'id' | 'mapNumber'>>,
+  mapRotations: Record<number, 90 | -90> | undefined,
+  size = HEX_SIZE,
+): DisplayRotationCluster | null {
+  if (!mapRotations || !Object.keys(mapRotations).length) return null;
+  const rotation = mapRotations[Math.min(...Object.keys(mapRotations).map(Number))]!;
+  const hexIds = new Set<HexId>();
+  let sx = 0;
+  let sy = 0;
+  let n = 0;
+  for (const hex of Object.values(hexesById)) {
+    hexIds.add(hex.id);
+    const c = hexCenter(hex.id, size);
+    sx += c.x;
+    sy += c.y;
+    n++;
+  }
+  if (n === 0) return null;
+  return { hexIds, rotation, pivot: { x: sx / n, y: sy / n } };
+}
+
 /** Bounding box (hex-corner inclusive) of just the PLAYABLE hexes — the clip edge. */
 export function playableBounds(state: Pick<GameState, 'hexes'>, size = HEX_SIZE): Bounds {
   let minX = Infinity;
