@@ -63,12 +63,15 @@ export function Board() {
   const hexClick = useGame((s) => s.hexClick);
   const closePicker = useGame((s) => s.closePicker);
 
-  // Mouse-wheel zoom, centered on the cursor. `zoom`/`pan` directly drive the
-  // <svg>'s own `viewBox` below (zoom=1, pan={0,0} is exactly today's fixed
-  // viewBox — a no-op for anyone who never scrolls). A plain `onWheel` JSX
-  // prop can't reliably `preventDefault()` (React attaches wheel listeners
-  // as passive by default), so this attaches a real, non-passive native
-  // listener once via a ref instead. `viewRef`/`layoutRef` carry the latest
+  // Ctrl+wheel zooms (centered on the cursor); plain wheel pans the map
+  // vertically instead. `zoom`/`pan` directly drive the <svg>'s own
+  // `viewBox` below (zoom=1, pan={0,0} is exactly today's fixed viewBox — a
+  // no-op for anyone who never scrolls). A plain `onWheel` JSX prop can't
+  // reliably `preventDefault()` (React attaches wheel listeners as passive
+  // by default), so this attaches a real, non-passive native listener once
+  // via a ref instead — `preventDefault()` on every wheel event, before the
+  // Ctrl branch, also suppresses the browser's own native Ctrl+wheel
+  // page-zoom, not just page scroll. `viewRef`/`layoutRef` carry the latest
   // zoom/pan/layout-size into that stable listener without needing to
   // reattach it every render (and without calling `setPan` *from inside*
   // `setZoom`'s updater function, which — with `<StrictMode>`, main.tsx —
@@ -89,6 +92,16 @@ export function Board() {
     if (!svg) return;
     const onWheel = (e: WheelEvent) => {
       e.preventDefault();
+      const { zoom: prevZoom, pan: prevPan } = viewRef.current;
+
+      if (!e.ctrlKey) {
+        // Plain wheel: pan vertically only. Divide by zoom so the same
+        // physical scroll notch moves a consistent on-screen distance
+        // regardless of how zoomed in the view currently is.
+        setPan({ x: prevPan.x, y: prevPan.y + e.deltaY / prevZoom });
+        return;
+      }
+
       const pt = svg.createSVGPoint();
       pt.x = e.clientX;
       pt.y = e.clientY;
@@ -97,7 +110,6 @@ export function Board() {
       // Cursor position in the CURRENT viewBox's user-space coordinates —
       // this is the point that must stay fixed under the cursor.
       const cursor = pt.matrixTransform(ctm.inverse());
-      const { zoom: prevZoom, pan: prevPan } = viewRef.current;
       const factor = e.deltaY < 0 ? 1.15 : 1 / 1.15; // scroll up = zoom in
       const nextZoom = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, prevZoom * factor));
       if (nextZoom === prevZoom) return;
@@ -139,6 +151,11 @@ export function Board() {
   // Load (§15.7) / Unload (§15.9) hexes — highlighted alongside Move so a
   // player can see where clicking will load onto or unload from a Vehicle.
   const transportTargets = new Set<string>();
+  // Hidden Move (§11.3-11.6) destinations, and Recon by Fire (§11.7) target
+  // Hexes — both hex-targeted like Move/Fire Smoke, so they get the same
+  // highlight-set treatment rather than an Inspector button list.
+  const hiddenMoveTargets = new Set<string>();
+  const reconByFireTargets = new Set<string>();
   if (!losActive && selectedUnitId && game.units[selectedUnitId]) {
     for (const a of legalActionsForUnit(game, selectedUnitId)) {
       if (a.type === 'MOVE') moveTargets.add(a.toHexId);
@@ -148,6 +165,8 @@ export function Board() {
       }
       if (a.type === 'INDIRECT_FIRE') indirectFireTargets.add(a.targetHexId);
       if (a.type === 'FIRE_SMOKE') smokeTargets.add(a.targetHexId);
+      if (a.type === 'HIDDEN_MOVE') hiddenMoveTargets.add(a.toHexId);
+      if (a.type === 'RECON_BY_FIRE') reconByFireTargets.add(a.targetHexId);
       if (a.type === 'LOAD') {
         const v = game.units[a.vehicleId];
         if (v) transportTargets.add(v.hexId);
@@ -216,7 +235,8 @@ export function Board() {
   // reuses the same purple highlight as reinforcement entry, since visually
   // it's the identical "click here to place a Unit" affordance.
   if (game.phase === 'setup' && armedSetupUnitId) {
-    for (const h of legalSetupHexes(game)) entryTargets.add(h);
+    const armedEntry = game.setupPool?.find((u) => u.id === armedSetupUnitId);
+    for (const h of legalSetupHexes(game, !!armedEntry?.mine)) entryTargets.add(h);
   }
   // While a just-placed reinforcement Unit awaits its facing choice, keep its
   // chosen Hex highlighted the same purple — clicking it again keeps the
@@ -292,8 +312,17 @@ export function Board() {
   const hexCounterRotation = (id: string, center: { x: number; y: number }): string | undefined =>
     rotationCluster?.hexIds.has(id) ? `rotate(${-rotationCluster.rotation} ${center.x} ${center.y})` : undefined;
 
+  // §11 Hidden Units, hotseat concealment: on this one shared screen, "whose
+  // view is this" is whichever side is currently meant to be looking — the
+  // active Turn side while playing, or the side currently setting up during
+  // the Pre-Mission phase. A Hidden Unit renders for its own side always,
+  // and never for the other side while still Hidden — this is a render-
+  // layer-only mechanism (no per-client server), deliberately accepted for
+  // hotseat play (see Unit.hidden's doc comment in engine/types.ts).
+  const activeSide = game.phase === 'setup' ? game.setupSide : game.currentSide;
   const unitsByHex = new Map<string, Unit[]>();
   for (const u of Object.values(game.units)) {
+    if (u.hidden && u.side !== activeSide) continue;
     const arr = unitsByHex.get(u.hexId) ?? [];
     arr.push(u);
     unitsByHex.set(u.hexId, arr);
@@ -598,6 +627,10 @@ export function Board() {
                 {transportTargets.has(id) && <polygon points={pts} fill="none" stroke="#e0a83a" strokeWidth={3} strokeDasharray="2 3" />}
                 {facingTargets.has(id) && <polygon points={pts} fill="#3a8ee0" opacity={0.32} stroke="#3a8ee0" strokeWidth={2} />}
                 {entryTargets.has(id) && <polygon points={pts} fill="#c77dff" opacity={0.3} stroke="#c77dff" strokeWidth={2} strokeDasharray="4 3" />}
+                {/* §11.3-11.6 Hidden Move destinations — violet, matching UnitCounter's own "HIDDEN" badge color. */}
+                {hiddenMoveTargets.has(id) && <polygon points={pts} fill="#8b5cf6" opacity={0.28} stroke="#8b5cf6" strokeWidth={2} strokeDasharray="6 2" />}
+                {/* §11.7 Recon by Fire target Hexes — a distinct dotted burnt-orange, attack-shaped but visually separate from fireTargets' solid red (a suspected Hex, not a confirmed one) and transportTargets' amber. */}
+                {reconByFireTargets.has(id) && <polygon points={pts} fill="none" stroke="#c2410c" strokeWidth={3} strokeDasharray="2 4" />}
                 {pathSet.has(id) && (
                   <>
                     <polygon points={pts} fill="#4aa3ff" opacity={0.32} stroke="#4aa3ff" strokeWidth={2} />

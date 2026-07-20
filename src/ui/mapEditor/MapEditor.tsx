@@ -175,10 +175,7 @@ export function MapEditor({ onExit }: { onExit: () => void }) {
           <em className="editor__caption">
             Stretched to fill the whole board and clipped to its hex silhouette, so any resolution
             works — but match the board's real playable aspect ratio, ~1.30:1 (e.g. ~1600×1232px
-            or ~1300×1000px), to avoid losing any edge of your image. This image REPLACES per-hex
-            terrain tiles during real play once exported; the terrain you paint below still
-            determines real mechanics (movement/LOS/DR) — only the art changes. Toggle it off below
-            to check your terrain painting against the plain tiles. Export Map downloads this as a
+            or ~1300×1000px), to avoid losing any edge of your image. Export Map downloads this as a
             real, separate image file alongside the .ts source (not embedded) — see the exported
             file's header comment for where to save it.
           </em>

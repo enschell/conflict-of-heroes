@@ -90,4 +90,31 @@ describe('buildEditorStateFromMission (Load Existing Mission)', () => {
     const match = src.match(/export const \w+: MissionDef = ([\s\S]*);\s*$/);
     expect(match).not.toBeNull();
   });
+
+  it('round-trips cardConfig and missionCardText (§8/§13.4-13.9)', () => {
+    const withCards: typeof MISSION_1 = {
+      ...MISSION_1,
+      cardConfig: {
+        battleCardIds: ['01', '02', '18'],
+        drawPerRound: { A: { round1: 2, eachRoundAfter: 1 }, B: { round1: 1, eachRoundAfter: 1 } },
+        initialHand: { A: ['W01'], B: [] },
+        obaAllowedRounds: [3, 4],
+      },
+      missionCardText: { '18': 'Both sides score 2VP for holding K09.' },
+    };
+    const st = buildEditorStateFromMission(withCards);
+    expect(st.cards.battleCardIds).toEqual(['01', '02', '18']);
+    expect(st.cards.drawPerRound.A).toEqual({ round1: 2, eachRoundAfter: 1 });
+    expect(st.cards.initialHand.A).toEqual(['W01']);
+    expect(st.cards.obaAllowedRounds).toEqual([3, 4]);
+    expect(st.cards.missionCardText['18']).toBe('Both sides score 2VP for holding K09.');
+
+    const src = emitMissionSource(st);
+    expect(src).toContain('cardConfig:');
+    expect(src).toContain('battleCardIds:');
+    expect(src).toContain("'01'");
+    expect(src).toContain("'18'");
+    expect(src).toContain('missionCardText:');
+    expect(src).toContain('Both sides score 2VP for holding K09.');
+  });
 });

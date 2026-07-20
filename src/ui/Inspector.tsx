@@ -97,6 +97,8 @@ export function Inspector() {
 
   const canPivot = acts.some((a) => a.type === 'PIVOT');
   const hasMove = acts.some((a) => a.type === 'MOVE');
+  const hasHiddenMove = acts.some((a) => a.type === 'HIDDEN_MOVE');
+  const hasReconByFire = acts.some((a) => a.type === 'RECON_BY_FIRE');
   const isVehicle = tmpl.kind === 'vehicle';
 
   // Rally eligibility (§7.6–7.10). A Hit Unit may Rally unless its marker is
@@ -257,6 +259,14 @@ export function Inspector() {
             </button>
           )}
           {hasMove && !isVehicle && <p className="dim">Move: click a highlighted green hex.</p>}
+          {hasHiddenMove && (
+            <p className="dim">
+              {unit.hidden ? 'Move while Hidden' : 'Hidden Move'}: click a highlighted violet hex (5AP, §11.3).
+            </p>
+          )}
+          {hasReconByFire && (
+            <p className="dim">Recon by Fire: click a highlighted orange hex to attack a suspected Hidden Unit (§11.7).</p>
+          )}
           {hasMove && isVehicle && movePath.length === 0 && (
             <p className="dim">
               Move: click hexes to build a path (1 Move + {(tmpl.bonusMoves ?? 0) + (tmpl.mobileTrackBonusMoves ?? 0)}{' '}
@@ -280,7 +290,7 @@ export function Inspector() {
 
           {canPivot && (
             <div className="pivot-row">
-              <span className="dim">Pivot (or press P):</span>
+              <span className="dim">Pivot (P):</span>
               {ARROWS.map((arrow, f) => (
                 <button key={f} className="icon-btn" disabled={f === unit.facing} onClick={() => pivot(unit.id, f as Facing)}>
                   {arrow}

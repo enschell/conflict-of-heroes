@@ -10,8 +10,10 @@ import {
   closeCombatContext,
   closeCombatStructureAr,
   destructibleFeatureAt,
+  directFireZone,
   directionTo,
   effectiveStats,
+  facingToward,
   groupStress,
   idOf,
   type Modifier,
@@ -30,9 +32,11 @@ import {
   RALLY_AP_COST,
   reduce,
   resolveHit,
+  rollAttack,
   rollCloseCombat,
   rollIndirectFire,
   rollRally,
+  rollReveal,
   rollStackFire,
   rollStructureDestroy,
   serialize,
@@ -42,6 +46,7 @@ import {
 } from '../engine';
 import type {
   Action,
+  CardId,
   Facing,
   GameEvent,
   GameState,
@@ -53,6 +58,7 @@ import type {
   Unit,
   UnitId,
 } from '../engine/types';
+import { CARD_CATALOG } from '../data/cards/catalog';
 import { MISSION_1 } from '../data/missions/mission1';
 import { isHopelessShot, MAX_CAP_DICE_MOD, oddsForHitNumber, pct } from '../ui/odds';
 import { playFire, playMove } from '../ui/sound';
@@ -96,7 +102,7 @@ export interface RollStep {
 export interface PendingRoll {
   /** The single engine action committed after every step is rolled. */
   action: Action;
-  kind: 'fire' | 'rally';
+  kind: 'fire' | 'rally' | 'recon';
   steps: RollStep[];
   /** §3.2: the CAP dice-mod baked into `steps`' dice/results (0 by default).
    *  Adjustable via the DiceRoller's stepper before the FIRST die of the
@@ -104,8 +110,18 @@ export interface PendingRoll {
    *  action with the new mod, so the preview always matches what a Roll
    *  would actually commit. Undefined (treated as 0/0) for roll kinds that
    *  don't yet build this (e.g. a bare `{action:{type:'PASS'},...}` test
-   *  fixture) — every real request*Roll builder always supplies both. */
+   *  fixture) — every real request*Roll builder always supplies both.
+   *  For `kind: 'recon'` specifically, this means the Hit Number mod
+   *  (§11.7's follow-up Attack roll) — see `capRevealDiceMod` below for the
+   *  Reveal Number's OWN, deliberately independent mod. */
   capDiceMod?: number;
+  /**
+   * §11.7 Recon by Fire ONLY: the Reveal Number's own CAP mod, independent
+   * of `capDiceMod` (the rulebook is explicit these don't carry over to each
+   * other). Undefined for every other `kind`.
+   */
+  capRevealDiceMod?: number;
+  capRevealDiceModMax?: number;
   /** Max |capDiceMod| available right now: clamped to ±2 (§3.2) and to the
    *  acting side's remaining CAP after whatever this Action's own
    *  `capCostReduce` already reserves. */
@@ -183,6 +199,9 @@ interface Store {
   /** Pre-Mission Setup phase (`game.phase === 'setup'`): the Setup Pool Unit
    *  currently armed for placement — clicking a legal (empty) Hex places it. */
   armedSetupUnitId: UnitId | null;
+  /** §13.5: an Artillery Card armed from the Hand panel — clicking any Hex on
+   *  the Map plans an OBA Strike there (no LOS/Spotter restriction, §13.5). */
+  armedObaCard: { side: SideId; cardId: CardId } | null;
   losMode: boolean;
   losSource: HexId | null;
   shiftHeld: boolean;
@@ -266,6 +285,20 @@ interface Store {
   removeHastyDefense: (unitId: UnitId) => void;
   /** Exit the Map via a Mission-authored exit zone (§4.0) — costs this Unit's own move stat, CAP-gated like Hasty Defense. */
   exit: (unitId: UnitId) => void;
+  /** Hidden Move (§11.3-11.6): become Hidden, or move while already Hidden. */
+  hiddenMove: (unitId: UnitId, toHexId: HexId) => void;
+  /** Recon by Fire (§11.7): attack a suspected Hex — routes through `requestReconRoll`
+   *  for its own two-roll preview, not a direct dispatch. */
+  reconByFire: (attackerId: UnitId, targetHexId: HexId) => void;
+  /** Play an Action/Bonus-type Card (§8.5-8.6) from `side`'s hand — NOT
+   *  necessarily `currentSide` (several cards are playable on either side's
+   *  hand regardless of whose Turn it is, §8's Card Catalog). `unitId` is
+   *  required for a Green-cost card, optional for Blue-cost. */
+  playCard: (side: SideId, cardId: CardId, unitId?: UnitId) => void;
+  /** §13.5: arm (or disarm, pass `null`) an Artillery Card from `side`'s hand — the next board click plans its Strike. */
+  armObaCard: (card: { side: SideId; cardId: CardId } | null) => void;
+  /** §13.5: plan an OBA Strike targeting `targetHexId`, resolving one Round later. */
+  planObaStrike: (side: SideId, cardId: CardId, targetHexId: HexId) => void;
   /** Pre-Mission Setup phase: arm (or disarm, pass `null`) a Setup Pool Unit for placement. */
   armSetupUnit: (unitId: UnitId | null) => void;
   /** Places the given Setup Pool Unit at `hexId` — free, no CAP gate, no Spent Check. */
@@ -327,6 +360,8 @@ interface Store {
    *  ±2 and to `pendingRoll.capDiceModMax`) and rebuild its preview —
    *  only meaningful before the first die of the sequence is rolled. */
   adjustPendingCapMod: (delta: number) => void;
+  /** §11.7 ONLY: adjusts the Reveal Number's own CAP mod, independent of `adjustPendingCapMod`. */
+  adjustPendingRevealMod: (delta: number) => void;
   confirmProceed: () => void;
   confirmCancel: () => void;
   /** §17.10 Mines CAP-choice dialog: adjust one target's mod (clamped ±2),
@@ -375,14 +410,16 @@ type GateableAction = Extract<
       | 'INDIRECT_FIRE'
       | 'FIRE_SMOKE'
       | 'HASTY_DEFENSE'
-      | 'EXIT';
+      | 'EXIT'
+      | 'HIDDEN_MOVE'
+      | 'RECON_BY_FIRE';
   }
 >;
 
 export const useGame = create<Store>((set, get) => {
   /** The unit that performs a gateable action. */
   const actorOf = (action: GateableAction): UnitId =>
-    action.type === 'FIRE' || action.type === 'CLOSE_COMBAT' || action.type === 'INDIRECT_FIRE'
+    action.type === 'FIRE' || action.type === 'CLOSE_COMBAT' || action.type === 'INDIRECT_FIRE' || action.type === 'RECON_BY_FIRE'
       ? action.attackerId
       : action.unitId;
 
@@ -559,6 +596,7 @@ export const useGame = create<Store>((set, get) => {
     placingReinforcementFacing: null,
     placingReinforcementDone: [],
     armedSetupUnitId: null,
+    armedObaCard: null,
     history: [] as GameState[],
     future: [] as GameState[],
     picker: null,
@@ -756,6 +794,78 @@ export const useGame = create<Store>((set, get) => {
     if (!steps.length) return;
     const capDiceModMax = capDiceModMaxFor(g, attacker.side, action.capCostReduce);
     set({ pendingRoll: { action: { ...action, capDiceMod }, kind: 'fire', steps, capDiceMod, capDiceModMax } });
+  };
+
+  /**
+   * §11.7 Recon by Fire: a 1- or 2-step preview. Step 1 is always the Reveal
+   * Number roll; step 2 (the follow-up Attack) only appears when that roll
+   * succeeds AND a Hidden enemy Unit actually occupies the target Hex —
+   * mirrors `doReconByFire`'s own conditional-second-roll shape exactly,
+   * threading the RNG from `roll.rng` so the preview can never disagree with
+   * what commits. `revealMod`/`hitMod` are independent (§11.7 — CAPs spent on
+   * one never carry to the other), unlike every other multi-roll Action here.
+   */
+  const requestReconRoll = (
+    action: Extract<Action, { type: 'RECON_BY_FIRE' }>,
+    revealMod = 0,
+    hitMod = 0,
+  ) => {
+    const g = get().game;
+    if (!g) return;
+    const attacker = g.units[action.attackerId];
+    if (!attacker) return;
+    const zone = directFireZone(g, attacker, action.targetHexId);
+    if (!zone.legal) {
+      set({ lastEvents: [{ type: 'illegal', round: g.round, text: zone.reason ?? 'illegal' }] });
+      return;
+    }
+    const roll = rollReveal(g, action.targetHexId, revealMod);
+    const revealOdds = oddsForHitNumber(roll.hitNumber);
+    const steps: RollStep[] = [
+      {
+        dice: roll.dice,
+        success: roll.hit,
+        headline: roll.hit ? 'REVEAL SUCCEEDS' : 'NO REVEAL',
+        detail: `Reveal Number ${roll.hitNumber} (6 + Terrain DR Mod) — 2d6 ≥ ${roll.hitNumber}`,
+        label: `${action.attackerId} recons ${action.targetHexId}`,
+        hitPct: pct(revealOdds.hit),
+      },
+    ];
+    const target = roll.hit
+      ? Object.values(g.units).find((u) => u.hexId === action.targetHexId && u.hidden && u.side !== attacker.side)
+      : undefined;
+    if (target) {
+      // §11.2: preview with the SAME "face the revealer" facing `doReconByFire`
+      // will assign on commit, so the AR/DR/Hit Number shown here matches.
+      const previewTarget: Unit = { ...target, facing: facingToward(target.hexId, attacker.hexId) };
+      const attackRoll = rollAttack({ ...g, rng: roll.rng }, attacker, previewTarget, hitMod);
+      const hitEffects = previewHitEffects(g, [{ targetId: target.id, roll: attackRoll }], attackRoll.rng);
+      const odds = oddsForHitNumber(attackRoll.hitNumber);
+      steps.push({
+        dice: attackRoll.dice,
+        success: attackRoll.hit,
+        headline: attackRoll.critical ? 'CRITICAL HIT' : attackRoll.hit ? 'HIT' : 'MISS',
+        detail: `${target.id} revealed! AR ${attackRoll.ar} vs DR ${attackRoll.dr} — 2d6 ≥ ${attackRoll.hitNumber}${attackRoll.isFlank ? ' (flank)' : ''}`,
+        label: `${action.attackerId} → ${target.id}`,
+        arMods: attackRoll.arMods,
+        drMods: attackRoll.drMods,
+        hitEffect: hitEffects[0],
+        hitPct: pct(odds.hit),
+        critPct: pct(odds.crit),
+      });
+    }
+    const capDiceModMax = capDiceModMaxFor(g, attacker.side, action.capCostReduce);
+    set({
+      pendingRoll: {
+        action: { ...action, capRevealDiceMod: revealMod, capHitDiceMod: hitMod },
+        kind: 'recon',
+        steps,
+        capDiceMod: hitMod,
+        capDiceModMax,
+        capRevealDiceMod: revealMod,
+        capRevealDiceModMax: capDiceModMax,
+      },
+    });
   };
 
   const requestIndirectFireRoll = (action: Extract<Action, { type: 'INDIRECT_FIRE' }>, capDiceMod = 0) => {
@@ -995,6 +1105,7 @@ export const useGame = create<Store>((set, get) => {
     placingReinforcementFacing: null,
     placingReinforcementDone: [],
     armedSetupUnitId: null,
+    armedObaCard: null,
     losMode: false,
     losSource: null,
     shiftHeld: false,
@@ -1039,6 +1150,7 @@ export const useGame = create<Store>((set, get) => {
         placingReinforcementFacing: null,
         placingReinforcementDone: [],
         armedSetupUnitId: null,
+    armedObaCard: null,
         losMode: false,
         losSource: null,
         pivotPicker: false,
@@ -1109,6 +1221,15 @@ export const useGame = create<Store>((set, get) => {
         return;
       }
 
+      // §13.5 Plan an OBA Strike: an armed Artillery Card is targeted at
+      // ANY Hex on the Map (no restriction unless the Mission adds one at
+      // resolution time) — click anywhere to secretly queue the Strike.
+      const armedOba = get().armedObaCard;
+      if (armedOba) {
+        get().planObaStrike(armedOba.side, armedOba.cardId, hexId);
+        return;
+      }
+
       // Pre-Mission Setup phase: only two clicks mean anything while this is
       // ongoing — choosing the just-placed Unit's facing, or placing the next
       // armed Setup Pool Unit onto a legal (empty) Hex.
@@ -1127,8 +1248,13 @@ export const useGame = create<Store>((set, get) => {
           }
         }
         const armed = get().armedSetupUnitId;
-        if (armed && legalSetupHexes(game).includes(hexId)) {
-          get().placeSetupUnit(armed, hexId);
+        if (armed) {
+          // A Mines token additionally can't land on an existing structure
+          // (§17.0) — mirror `doSetupPlace`'s own validation in the picker.
+          const entry = game.setupPool?.find((u) => u.id === armed);
+          if (legalSetupHexes(game, !!entry?.mine).includes(hexId)) {
+            get().placeSetupUnit(armed, hexId);
+          }
         }
         return;
       }
@@ -1254,7 +1380,12 @@ export const useGame = create<Store>((set, get) => {
         return;
       }
 
-      const here = Object.values(game.units).filter((u) => u.hexId === hexId);
+      // §11 Hidden Units: a hidden enemy Unit must not leak into the stacked-
+      // unit picker either — same visibility predicate as Board.tsx's own
+      // `unitsByHex` filter.
+      const here = Object.values(game.units).filter(
+        (u) => u.hexId === hexId && (!u.hidden || u.side === game.currentSide),
+      );
 
       // Ctrl+click on a stacked hex → manual picker.
       if (opts.ctrl && here.length > 1) {
@@ -1342,6 +1473,12 @@ export const useGame = create<Store>((set, get) => {
           (u) => u.side === sel.side && acts.some((a) => a.type === 'LOAD' && a.vehicleId === u.id),
         )?.id;
         const canLoad = !!loadVehicleId;
+        // §11.3-11.6 Hidden Move — a Hex-targeted option like Move, offered
+        // whether becoming Hidden or already Hidden and moving.
+        const canHiddenMove = acts.some((a) => a.type === 'HIDDEN_MOVE' && a.toHexId === hexId);
+        // §11.7 Recon by Fire — a Hex-targeted Attack, legal on any Hex in the
+        // Fire Zone regardless of whether an enemy is known to be there.
+        const canReconByFire = acts.some((a) => a.type === 'RECON_BY_FIRE' && a.targetHexId === hexId);
         const optionCount =
           Number(canMoveHere) +
           Number(canFire) +
@@ -1350,7 +1487,9 @@ export const useGame = create<Store>((set, get) => {
           Number(canAttackFortification) +
           Number(canIndirectFire) +
           Number(canFireSmoke) +
-          Number(canLoad);
+          Number(canLoad) +
+          Number(canHiddenMove) +
+          Number(canReconByFire);
 
         // Several things are possible here (e.g. move INTO an enemy hex vs attack
         // it) → let the player choose (§5.4). Otherwise do the single option.
@@ -1388,6 +1527,14 @@ export const useGame = create<Store>((set, get) => {
         }
         if (canLoad && loadVehicleId) {
           get().load(sel.id, loadVehicleId);
+          return;
+        }
+        if (canHiddenMove) {
+          get().hiddenMove(sel.id, hexId);
+          return;
+        }
+        if (canReconByFire) {
+          get().reconByFire(sel.id, hexId);
           return;
         }
         // Click the already-selected unit → deselect.
@@ -1576,6 +1723,57 @@ export const useGame = create<Store>((set, get) => {
     removeHastyDefense: (unitId) => get().dispatch({ type: 'REMOVE_HASTY_DEFENSE', unitId }),
     // §4.0: Exit the Map via a designated exit zone — no roll, straight through capGate to dispatch.
     exit: (unitId) => capGate({ type: 'EXIT', unitId }, (a) => get().dispatch(a)),
+    // §11.3: Hidden Move — no roll to preview (Spent Check happens the same
+    // way any other Action's does, via `dispatch`), straight through capGate.
+    hiddenMove: (unitId, toHexId) =>
+      capGate({ type: 'HIDDEN_MOVE', unitId, toHexId }, (a) => get().dispatch(a)),
+    // §11.7: Recon by Fire routes through `requestReconRoll` for its own
+    // two-roll (Reveal Number, then conditionally an Attack) preview —
+    // mirrors `fire`/`closeCombat` routing through `requestFireRoll` rather
+    // than dispatching straight to `reduce`.
+    reconByFire: (attackerId, targetHexId) =>
+      capGate({ type: 'RECON_BY_FIRE', attackerId, targetHexId }, (a) =>
+        requestReconRoll(a as Extract<Action, { type: 'RECON_BY_FIRE' }>),
+      ),
+
+    // §8.5-8.6: Play Card doesn't fit `capGate`'s shape exactly (a Blue-cost
+    // card needs no Unit at all, and never cares about Fresh/Spent), so this
+    // is its own small CAP-confirm gate rather than extending `GateableAction`.
+    playCard: (side, cardId, unitId) => {
+      const g = get().game;
+      if (!g) return;
+      const action: Extract<Action, { type: 'PLAY_CARD' }> = { type: 'PLAY_CARD', side, cardId, unitId };
+      const card = CARD_CATALOG[cardId];
+      const unit = unitId ? g.units[unitId] : undefined;
+      if (card?.cost?.color === 'green' && unit?.status === 'spent') {
+        const cost = modifiedActionCost(g, action);
+        if (cost == null) {
+          get().dispatch(action);
+          return;
+        }
+        const cap = g.players[unit.side].capCurrent;
+        if (cap < cost) {
+          set({ lastEvents: [{ type: 'illegal', round: g.round, text: `${unit.id} is Spent and needs ${cost} CAP (only ${cap} left)` }] });
+          return;
+        }
+        set({
+          pendingConfirm: {
+            message: `${unit.id} is Spent. Spend ${cost} CAP to play this card at 0AP (§8.6)? CAP ${cap} → ${cap - cost}.`,
+            proceed: () => get().dispatch({ ...action, capCostReduce: cost }),
+          },
+        });
+        return;
+      }
+      get().dispatch(action);
+    },
+    // §13.5: arm an Artillery Card — the next board click (any Hex) plans its Strike.
+    armObaCard: (card) => set({ armedObaCard: card }),
+    planObaStrike: (side, cardId, targetHexId) => {
+      const g = get().game;
+      if (!g) return;
+      get().dispatch({ type: 'PLAN_OBA_STRIKE', side, cardId, targetHexId });
+      set({ armedObaCard: null });
+    },
 
     // Pre-Mission Setup phase: arm a Setup Pool Unit, then a board click on a
     // legal Hex places it — free, no CAP gate, no roll, straight to dispatch.
@@ -1662,6 +1860,7 @@ export const useGame = create<Store>((set, get) => {
         placingReinforcementFacing: null,
         placingReinforcementDone: [],
         armedSetupUnitId: null,
+    armedObaCard: null,
         selectedUnitId: null,
         groupMode: false,
         groupSel: [],
@@ -1859,7 +2058,23 @@ export const useGame = create<Store>((set, get) => {
         case 'GROUP_ATTACK':
           requestGroupAttackRoll(p.action.leaderId, p.action.supporterIds, p.action.targetId, p.action.capCostReduce ?? 0, next);
           break;
+        case 'RECON_BY_FIRE':
+          // This stepper means the Hit Number mod for 'recon' — the Reveal
+          // Number's own mod (`capRevealDiceMod`) is untouched here.
+          requestReconRoll(p.action, p.capRevealDiceMod ?? 0, next);
+          break;
       }
+    },
+    // §11.7 ONLY: the Reveal Number's own stepper, independent of
+    // `adjustPendingCapMod` (which means the Hit Number mod for this kind).
+    adjustPendingRevealMod: (delta) => {
+      const p = get().pendingRoll;
+      if (!p || p.kind !== 'recon' || p.action.type !== 'RECON_BY_FIRE') return;
+      const max = p.capRevealDiceModMax ?? 0;
+      const current = p.capRevealDiceMod ?? 0;
+      const next = Math.max(-max, Math.min(max, current + delta));
+      if (next === current) return;
+      requestReconRoll(p.action, next, p.capDiceMod ?? 0);
     },
 
     confirmProceed: () => {
@@ -1923,6 +2138,7 @@ export const useGame = create<Store>((set, get) => {
         placingReinforcementFacing: null,
         placingReinforcementDone: [],
         armedSetupUnitId: null,
+    armedObaCard: null,
         pendingRoll: null,
         pendingConfirm: null,
         chooser: null,
@@ -1949,6 +2165,7 @@ export const useGame = create<Store>((set, get) => {
         placingReinforcementFacing: null,
         placingReinforcementDone: [],
         armedSetupUnitId: null,
+    armedObaCard: null,
         pendingRoll: null,
         pendingConfirm: null,
         chooser: null,

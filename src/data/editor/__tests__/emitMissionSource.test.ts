@@ -36,6 +36,8 @@ function fixture(): EditorAuthoredState {
       armedTemplateId: null,
       armedSide: 'A',
       armedFacing: 0,
+      armedHidden: false,
+      mineHitNumber: 8,
       setupPool: [],
       setupFirstSide: 'A',
       setupInstructions: '',
@@ -59,6 +61,7 @@ function fixture(): EditorAuthoredState {
       search: '',
       nationFilter: 'all',
       draftFacing: 0,
+      draftHidden: false,
     },
     victory: {
       hexes: [
@@ -83,12 +86,15 @@ function fixture(): EditorAuthoredState {
       draftControl: 'neutral',
     },
     advanced: {
-      battleCards: { A: { round1: 2, eachRoundAfter: 1 }, B: { round1: 0, eachRoundAfter: 0 } },
-      hiddenIds: [],
-      obaAllowedRounds: [],
-      obaStrikes: [],
       airSupport: { A: '', B: '' },
       overlays: [],
+    },
+    cards: {
+      battleCardIds: [],
+      drawPerRound: { A: { round1: 2, eachRoundAfter: 1 }, B: { round1: 0, eachRoundAfter: 0 } },
+      initialHand: { A: [], B: [] },
+      obaAllowedRounds: [],
+      missionCardText: {},
     },
   };
 }
@@ -172,6 +178,43 @@ describe('emitMissionSource', () => {
     expect(game.phase).toBe('setup');
     expect(game.setupSide).toBe('B');
     expect(game.setupPool).toHaveLength(2);
+  });
+
+  it('exports hidden units and a Mines Setup Pool token (§11), never referencing a fake mines template', () => {
+    const f = fixture();
+    f.forces.placed[0]!.hidden = true;
+    f.forces.setupPool = [
+      { id: 'B-mines-1', side: 'B', templateId: 'mines', facing: 0, hidden: true, mine: { hitNumber: 9 } },
+      { id: 'B-setup-1', side: 'B', templateId: 'sov-rifle', facing: 3 },
+    ];
+    // §11: a reinforcement-wave unit can also be authored hidden.
+    f.reinforcements.waves.A[0]!.units[0]!.hidden = true;
+    const src = emitMissionSource(f);
+    // A Mines token's placeholder templateId must never land in the templates
+    // import list — `UNIT_TEMPLATES['mines']!` would crash the module at load.
+    expect(src).not.toContain("UNIT_TEMPLATES['mines']");
+    expect(src).toContain("UNIT_TEMPLATES['sov-rifle']");
+
+    const match = src.match(/export const \w+: MissionDef = ([\s\S]*);\s*$/);
+    const plainJs = match![1]!.replace(/\]!/g, ']');
+    // eslint-disable-next-line @typescript-eslint/no-implied-eval
+    const missionDef = new Function('UNIT_TEMPLATES', `return (${plainJs});`)(UNIT_TEMPLATES) as MissionDef;
+    expect(missionDef.units[0]!.hidden).toBe(true);
+    const mineEntry = missionDef.setupForces!.find((u) => u.mine)!;
+    expect(mineEntry).toMatchObject({ side: 'B', hidden: true, mine: { hitNumber: 9 } });
+    expect(missionDef.reinforcements![0]!.units[0]!.hidden).toBe(true);
+
+    // Play-time round trip: placing the mine during setup writes the hidden
+    // Mines obstacle onto the Hex instead of creating a Unit.
+    const game = initGame(missionDef);
+    expect(game.phase).toBe('setup');
+    expect(game.units[missionDef.units[0]!.id]!.hidden).toBe(true);
+    const poolMine = game.setupPool!.find((u) => u.mine)!;
+    expect(poolMine.mine).toEqual({ hitNumber: 9 });
+    // §11: a hidden reinforcement-wave unit stays hidden once `initGame`
+    // builds its runtime `ReinforcementUnit` entry.
+    const reinforcement = game.reinforcements.find((r) => r.id === 'A-ger-rifle-2')!;
+    expect(reinforcement.hidden).toBe(true);
   });
 
   it('produces well-formed, self-contained TypeScript source', () => {

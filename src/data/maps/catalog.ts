@@ -11,10 +11,14 @@ import { generateOpenBoard } from '../hexBoardMap';
 import { MISSION1_MAP } from './mission1';
 import { MAP_7_MAP } from './map-7';
 import { ATB_MAP_1_MAP } from './atb-map-1';
+import { ATB_MAP_4_MAP } from './atb-map-4';
+import { ATB_MAP_5_MAP } from './atb-map-5';
 import { ATB_MAP_1_OVERLAY } from './atb-map-1';
 import { MAP_1_MISSION_1_PARTISANS_MAP } from './map-1-mission-1-partisans';
 import { MAP_8_MAP, MAP_8_OVERLAY } from './map-8';
 import { MAP_1_MISSION_1_PARTISANS_OVERLAY } from './map-1-mission-1-partisans';
+import { ATB_MAP_4_OVERLAY } from './atb-map-4';
+import { ATB_MAP_5_OVERLAY } from './atb-map-5';
 import type { MapHexDef } from '../../engine/types';
 
 
@@ -42,6 +46,8 @@ export const MAP_CATALOG: Record<string, MapCatalogEntry> = {
   'map-7': { id: 'map-7', name: "Map 7", hexes: MAP_7_MAP },
   'atb-map-1': { id: 'atb-map-1', name: "AtB Map 1", hexes: ATB_MAP_1_MAP, overlayImage: ATB_MAP_1_OVERLAY },
   'map-1-mission-1-partisans': { id: 'map-1-mission-1-partisans', name: "Map 1 (Mission 1 — Partisans)", hexes: MAP_1_MISSION_1_PARTISANS_MAP, overlayImage: MAP_1_MISSION_1_PARTISANS_OVERLAY },
+  'atb-map-4': { id: 'atb-map-4', name: "AtB Map 4", hexes: ATB_MAP_4_MAP, overlayImage: ATB_MAP_4_OVERLAY },
+  'atb-map-5': { id: 'atb-map-5', name: "AtB Map 5", hexes: ATB_MAP_5_MAP, overlayImage: ATB_MAP_5_OVERLAY },
   'map-8': { id: 'map-8', name: "Map 8", hexes: MAP_8_MAP, overlayImage: MAP_8_OVERLAY },
 };
 

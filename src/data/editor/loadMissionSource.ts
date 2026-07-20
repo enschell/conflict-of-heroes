@@ -29,6 +29,7 @@ import { MAP_CATALOG } from '../maps/catalog';
 import type {
   EditorAdvancedState,
   EditorBoard,
+  EditorCardsState,
   EditorForcesState,
   EditorFortification,
   EditorInfo,
@@ -78,7 +79,7 @@ function synthesizeMapEntry(def: MissionDef): {
   const fortifications: Record<string, EditorFortification> = {};
   const cleanHexes: MapHexDef[] = def.hexes.map((h) => {
     if (h.obstacle) {
-      obstacles[h.id] = { kind: h.obstacle.kind, side: h.obstacle.ownerSide, hitNumber: h.obstacle.hitNumber };
+      obstacles[h.id] = { kind: h.obstacle.kind, side: h.obstacle.ownerSide, hitNumber: h.obstacle.hitNumber, hidden: h.obstacle.hidden };
     }
     if (h.fortification) {
       fortifications[h.id] = { kind: h.fortification.kind, facing: h.fortification.facing ?? null };
@@ -111,13 +112,24 @@ function synthesizeMapEntry(def: MissionDef): {
 
 function loadForces(def: MissionDef): EditorForcesState {
   return {
-    placed: def.units.map((u) => ({ id: u.id, side: u.side, templateId: u.templateId, hexId: u.hexId, facing: u.facing })),
+    placed: def.units.map((u) => ({ id: u.id, side: u.side, templateId: u.templateId, hexId: u.hexId, facing: u.facing, hidden: u.hidden })),
     search: '',
     nationFilter: 'all',
     armedTemplateId: null,
     armedSide: 'A',
     armedFacing: 0,
-    setupPool: (def.setupForces ?? []).map((u) => ({ id: u.id, side: u.side, templateId: u.templateId, facing: u.facing })),
+    armedHidden: false,
+    // Resume with the first loaded Mines token's Hit Number (if any), so a
+    // follow-up mine placed in this editing session matches the mission's own.
+    mineHitNumber: (def.setupForces ?? []).find((u) => u.mine)?.mine!.hitNumber ?? 8,
+    setupPool: (def.setupForces ?? []).map((u) => ({
+      id: u.id,
+      side: u.side,
+      templateId: u.templateId,
+      facing: u.facing,
+      hidden: u.hidden,
+      mine: u.mine,
+    })),
     setupFirstSide: def.setupFirstSide ?? 'A',
     setupInstructions: def.setupInstructions ?? '',
   };
@@ -135,10 +147,10 @@ function loadReinforcements(def: MissionDef): EditorReinforcementsState {
       earliestRound: w.earliestRound,
       description: w.entryDescription,
       entryHexIds: w.entryHexIds,
-      units: w.units.map((u) => ({ id: u.id, templateId: u.templateId, facing: u.facing })),
+      units: w.units.map((u) => ({ id: u.id, templateId: u.templateId, facing: u.facing, hidden: u.hidden })),
     });
   }
-  return { activeSide: 'A', waves, expandedWaveId: null, search: '', nationFilter: 'all', draftFacing: 0 };
+  return { activeSide: 'A', waves, expandedWaveId: null, search: '', nationFilter: 'all', draftFacing: 0, draftHidden: false };
 }
 
 function loadVictory(def: MissionDef, hexes: MapHexDef[]): EditorVictoryState {
@@ -175,15 +187,24 @@ function loadVictory(def: MissionDef, hexes: MapHexDef[]): EditorVictoryState {
 function loadAdvanced(def: MissionDef): EditorAdvancedState {
   const notes = def.advancedNotes;
   return {
-    battleCards: {
-      A: notes?.battleCards?.A ?? { round1: 0, eachRoundAfter: 0 },
-      B: notes?.battleCards?.B ?? { round1: 0, eachRoundAfter: 0 },
-    },
-    hiddenIds: notes?.hiddenUnitIds ?? [],
-    obaAllowedRounds: notes?.obaAllowedRounds ?? [],
-    obaStrikes: notes?.obaStrikes?.map((o) => ({ id: o.id, plannedRound: o.plannedRound })) ?? [],
     airSupport: { A: notes?.airSupport?.A ?? '', B: notes?.airSupport?.B ?? '' },
     overlays: notes?.overlays ?? [],
+  };
+}
+
+function loadCards(def: MissionDef): EditorCardsState {
+  const cfg = def.cardConfig;
+  return {
+    battleCardIds: cfg?.battleCardIds ?? [],
+    drawPerRound: {
+      A: cfg?.drawPerRound?.A ?? { round1: 0, eachRoundAfter: 0 },
+      B: cfg?.drawPerRound?.B ?? { round1: 0, eachRoundAfter: 0 },
+    },
+    initialHand: { A: cfg?.initialHand?.A ?? [], B: cfg?.initialHand?.B ?? [] },
+    obaAllowedRounds: cfg?.obaAllowedRounds ?? [],
+    missionCardText: Object.fromEntries(
+      Object.entries(def.missionCardText ?? {}).filter((e): e is [string, string] => e[1] !== undefined),
+    ),
   };
 }
 
@@ -197,5 +218,6 @@ export function buildEditorStateFromMission(def: MissionDef): EditorAuthoredStat
     reinforcements: loadReinforcements(def),
     victory: loadVictory(def, def.hexes),
     advanced: loadAdvanced(def),
+    cards: loadCards(def),
   };
 }

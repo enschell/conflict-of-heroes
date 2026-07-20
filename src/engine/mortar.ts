@@ -102,8 +102,9 @@ export function indirectFireZone(
 /**
  * §13.9 Air Burst: a red-Flank (soft) target loses the Heavy Woods +2DR bonus
  * vs High Explosive fire (mirrors `combat.ts`'s private `terrainDMForAttack`).
+ * Exported for `cards.ts`'s OBA Attacks (§13.8), which are HE by the same rule.
  */
-function heTerrainDM(state: GameState, hexId: HexId, fpColor: DRColor): number {
+export function heTerrainDM(state: GameState, hexId: HexId, fpColor: DRColor): number {
   const hex = state.hexes[hexId];
   if (!hex) return 0;
   if (fpColor === 'red' && hex.terrain === 'woodsHeavy') return 0;
@@ -164,8 +165,10 @@ export function rollIndirectFire(
   const aEff = effectiveStats(state, attacker);
   const dist = distance(parseHexId(attacker.hexId), parseHexId(targetHexId));
   const band = rangeBand(dist, aEff.range);
+  // §11: a Hidden enemy Unit is never a valid Indirect Fire target — only
+  // the KNOWN (non-Hidden) enemies stacked at the target Hex are hit.
   const targets = Object.values(state.units)
-    .filter((u) => u.side !== attacker.side && u.hexId === targetHexId)
+    .filter((u) => u.side !== attacker.side && u.hexId === targetHexId && !u.hidden)
     .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
 
   const rolls: IndirectAttackRoll[] = [];

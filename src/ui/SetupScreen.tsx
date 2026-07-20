@@ -10,17 +10,20 @@ import { MISSION_1 } from '../data/missions/mission1';
 import { ARMOR_SANDBOX } from '../data/missions/sandbox';
 import { NEW_MISSION_MISSION } from '../data/missions/new-mission';
 import { SOS_MISSION_4_MISSION } from '../data/missions/SoS Mission 4';
+import { ATB_FIREFIGHT_9_KV2_MISSION } from '../data/missions/atb-firefight-9-kv2';
 import { FIRE_SUPPORT_SANDBOX } from '../data/missions/fireSupportSandbox';
 import { HILLS_SANDBOX } from '../data/missions/hillsSandbox';
 import { OBSTACLES_SANDBOX } from '../data/missions/obstaclesSandbox';
 import { FORTIFICATIONS_SANDBOX } from '../data/missions/fortificationsSandbox';
 import { HEX_BOARD_DEMO } from '../data/missions/hexBoardDemo';
 import { SETUP_PHASE_SANDBOX } from '../data/missions/setupPhaseSandbox';
+import { HIDDEN_UNITS_SANDBOX } from '../data/missions/hiddenUnitsSandbox';
+import { CARDS_SANDBOX } from '../data/missions/cardsSandbox';
 import { EditorBoard } from './editor/EditorBoard';
 import type { RotationCluster } from '../engine';
 import type { MissionDef, SideId } from '../engine/types';
 
-const REAL_MISSIONS: MissionDef[] = [MISSION_1, SOS_MISSION_4_MISSION];
+const REAL_MISSIONS: MissionDef[] = [MISSION_1, SOS_MISSION_4_MISSION, ATB_FIREFIGHT_9_KV2_MISSION];
 
 const TEST_MISSIONS: MissionDef[] = [
   NEW_MISSION_MISSION,
@@ -31,6 +34,8 @@ const TEST_MISSIONS: MissionDef[] = [
   FORTIFICATIONS_SANDBOX,
   HEX_BOARD_DEMO,
   SETUP_PHASE_SANDBOX,
+  HIDDEN_UNITS_SANDBOX,
+  CARDS_SANDBOX,
 ];
 
 function templateName(templateId: string): string {

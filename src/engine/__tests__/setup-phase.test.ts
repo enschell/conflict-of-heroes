@@ -181,4 +181,65 @@ describe('legalSetupHexes', () => {
     addUnit(s, 'X', 'A', 1, 0, 0);
     expect(legalSetupHexes(s).sort()).toEqual(['0,0', '2,0']);
   });
+
+  it('forMine additionally excludes Hexes with an existing Obstacle/Fortification (§17.0)', () => {
+    const s = baseState();
+    addHex(s, 0, 0);
+    addHex(s, 1, 0);
+    addHex(s, 2, 0);
+    s.hexes['1,0']!.features.obstacle = { kind: 'barbedWire', destroyed: false, ownerSide: 'A' };
+    s.hexes['2,0']!.features.fortification = { kind: 'trench', destroyed: false };
+    expect(legalSetupHexes(s).sort()).toEqual(['0,0', '1,0', '2,0']); // units may stand on them
+    expect(legalSetupHexes(s, true)).toEqual(['0,0']); // a Mine may not stack on either
+  });
+});
+
+describe('SETUP_PLACE of a Mines token (§17.10, data-only hidden)', () => {
+  function mineScene() {
+    const s = baseState();
+    for (let q = 0; q <= 3; q++) addHex(s, q, 0);
+    addTemplate(s, rifleTemplate());
+    s.phase = 'setup';
+    s.setupSide = 'A';
+    s.setupPool = [
+      { id: 'A-mines-1', side: 'A', nation: 'germans', templateId: 'mines', facing: 0, hidden: true, mine: { hitNumber: 8 } },
+      { id: 'B1', side: 'B', nation: 'soviets', templateId: 'rifle', facing: 3 },
+    ];
+    return s;
+  }
+
+  it('placing writes a hidden Mines obstacle onto the Hex — no Unit is created', () => {
+    const s = mineScene();
+    const r = reduce(s, { type: 'SETUP_PLACE', unitId: 'A-mines-1', hexId: '1,0' });
+    expect(r.state.units['A-mines-1']).toBeUndefined();
+    expect(r.state.hexes['1,0']!.features.obstacle).toEqual({
+      kind: 'mines',
+      hitNumber: 8,
+      destroyed: false,
+      ownerSide: 'A',
+      hidden: true,
+    });
+    expect(r.state.setupPool!.some((u) => u.id === 'A-mines-1')).toBe(false);
+    // No facing window — an obstacle has no facing.
+    expect(r.state.pendingFacingChoices ?? []).toEqual([]);
+    // Placing the mine counted as Side A's setup — hand-off to B.
+    expect(r.state.setupSide).toBe('B');
+  });
+
+  it('denies placing a Mines token onto a Hex that already has an Obstacle', () => {
+    const s = mineScene();
+    s.hexes['1,0']!.features.obstacle = { kind: 'roadBlock', destroyed: false, ownerSide: 'B' };
+    const r = reduce(s, { type: 'SETUP_PLACE', unitId: 'A-mines-1', hexId: '1,0' });
+    expect(r.state).toBe(s);
+  });
+
+  it('a hidden non-mine pool Unit carries hidden onto the placed Unit (data-only)', () => {
+    const s = mineScene();
+    s.setupPool = [
+      { id: 'A1', side: 'A', nation: 'germans', templateId: 'rifle', facing: 0, hidden: true },
+      ...s.setupPool!.filter((u) => u.id !== 'A-mines-1'),
+    ];
+    const r = reduce(s, { type: 'SETUP_PLACE', unitId: 'A1', hexId: '0,0' });
+    expect(r.state.units['A1']!.hidden).toBe(true);
+  });
 });

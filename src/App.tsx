@@ -14,6 +14,7 @@ import { ConfirmDialog } from './ui/ConfirmDialog';
 import { SavesDialog } from './ui/SavesDialog';
 import { DiceRoller } from './ui/DiceRoller';
 import { GroupPanel } from './ui/GroupPanel';
+import { HandPanel } from './ui/HandPanel';
 import { HoverPanel } from './ui/HoverPanel';
 import { Inspector } from './ui/Inspector';
 import { Log } from './ui/Log';
@@ -176,8 +177,10 @@ export function App() {
       <aside className="left">
         <TrackSheet side="A" />
         <ReinforcementsPanel side="A" />
+        <HandPanel side="A" />
         <TrackSheet side="B" />
         <ReinforcementsPanel side="B" />
+        <HandPanel side="B" />
       </aside>
 
       <main className="center">

@@ -2,6 +2,7 @@
  * Round and turn flow (rulebook §2.0–§2.3).
  */
 import { capCeiling } from './cap';
+import { applyResolvedObaStrike, drawBattleCards, resolveObaStrike } from './cards';
 import { roll2d6 } from './rng';
 import { dissipateSmoke } from './smoke';
 import type { GameState, SideId } from './types';
@@ -18,14 +19,20 @@ import {
 const SIDES: SideId[] = ['A', 'B'];
 
 /**
- * Pre-Round Sequence (infantry subset, §9.4) + Initiative. Mutates `state`.
+ * Pre-Round Sequence (§9.4) + Initiative. Mutates `state`.
  * Flips Spent units Fresh keeping markers + facing (§9.6), clears Stress, resets
  * CAP to ceiling (floor 3, §7.13), dissipates Smoke (§14.4: Heavy → Light,
- * Light → removed), then sets Initiative (§9.11):
+ * Light → removed), draws Battle Cards (§9.8, step 6 — no-op without a
+ * `cardDeck`), resolves any OBA Strikes due this Round (§13.6-13.9, step 9 —
+ * no-op without `pendingObaStrikes`; deliberately no interactive CAP-mod UI
+ * yet, see `cards.ts`'s `resolveObaStrike` doc comment), then sets Initiative
+ * (§9.11):
  *  - Round 1: the mission-defined side goes first (§2.0).
  *  - Later Rounds: only the side WITHOUT VP Advantage rolls 2d6; on **7+** it
  *    takes the first Turn, otherwise the VP leader does.
- * (Cards and OBA planning/resolution are later modules.)
+ * (Prepare Reinforcements, step 7, needs no code here — availability is
+ * already gated by `earliestRound` at ENTER-legality time. Plan OBA, step 8,
+ * is the player-driven `PLAN_OBA_STRIKE` Action, not a `startRound` mutation.)
  */
 export function startRound(state: GameState): void {
   for (const u of Object.values(state.units)) {
@@ -39,6 +46,26 @@ export function startRound(state: GameState): void {
   }
   dissipateSmoke(state);
   state.consecutivePasses = 0;
+
+  if (state.cardDeck) {
+    for (const side of SIDES) {
+      const draw = state.drawPerRound?.[side];
+      if (!draw) continue;
+      drawBattleCards(state, side, state.round === 1 ? draw.round1 : draw.eachRoundAfter);
+    }
+  }
+  // §8.7 Halt Order may have just ended the Mission mid-draw — skip straight
+  // past OBA resolution/Initiative, neither of which make sense once over.
+  if (state.phase === 'gameOver') return;
+
+  if (state.pendingObaStrikes?.length) {
+    const due = state.pendingObaStrikes.filter((s) => s.resolveRound === state.round);
+    state.pendingObaStrikes = state.pendingObaStrikes.filter((s) => s.resolveRound !== state.round);
+    for (const strike of due) {
+      const resolution = resolveObaStrike(state, strike);
+      applyResolvedObaStrike(state, strike, resolution);
+    }
+  }
 
   if (state.round === 1) {
     state.initiativeSide = state.firstInitiativeSide;

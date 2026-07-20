@@ -8,13 +8,15 @@
  * at least `cost` CAPs available.
  */
 import { HIT_MARKERS } from '../data/hitMarkers';
+import { CARD_CATALOG } from '../data/cards/catalog';
 import { attackContext, closeCombatContext } from './combat';
 import { canOccupy, fortificationAt, isOccupying } from './fortifications';
 import { idOf, neighbors, parseHexId } from './hex';
+import { becomingHiddenCandidates, hiddenMoveBase } from './hidden';
 import { effectiveStats, templateOf } from './hits';
 import { bestSpotterFor, directFireZone, indirectFireZone } from './mortar';
 import { RALLY_AP_COST } from './rally';
-import { directionTo, moveCost, pivotCost } from './movement';
+import { directionTo, moveCost, pivotCost, planVehicleMove } from './movement';
 import { legalEntryHexes } from './reinforcements';
 import type { Action, Facing, GameState, Unit, UnitId } from './types';
 
@@ -89,6 +91,24 @@ export function modifiedActionCost(state: GameState, action: Action): number | n
       const u = state.units[action.unitId];
       return u ? effectiveStats(state, u).move + stress(u) : null;
     }
+    case 'HIDDEN_MOVE': {
+      const u = state.units[action.unitId];
+      return u ? hiddenMoveBase(state, u) + stress(u) : null;
+    }
+    case 'RECON_BY_FIRE': {
+      const u = state.units[action.attackerId];
+      return u ? effectiveStats(state, u).apToFire + stress(u) : null;
+    }
+    case 'PLAY_CARD': {
+      const card = CARD_CATALOG[action.cardId];
+      if (!card?.cost) return null;
+      // Blue (§8.6): a flat CAP spend, no AP, no Stress concept at all.
+      if (card.cost.color === 'blue') return card.cost.amount;
+      const u = action.unitId ? state.units[action.unitId] : undefined;
+      return u ? card.cost.amount + stress(u) : null;
+    }
+    case 'PLAN_OBA_STRIKE':
+      return 0;
     default:
       return null;
   }
@@ -120,6 +140,35 @@ export function legalActionsForUnit(state: GameState, unitId: UnitId): Action[] 
   // A Transported Unit rides along with its Vehicle's Move — it may not Move,
   // Pivot, or Attack on its own, but may still Rally, Stall, or Unload (§15.8).
   const carried = !!unit.carriedBy;
+
+  // §11.1: a Hidden Unit's ONLY legal Actions are Rally, Stall, and Hidden
+  // Move (§11.3) — everything else would reveal it (`reduce()`'s own top-of-
+  // function check enforces this too; this is what keeps the UI from ever
+  // offering a Hidden Unit a Move/Fire/etc. button in the first place).
+  // Deliberately duplicates the RALLY/STALL blocks below rather than sharing
+  // code — a Hidden Unit's action list is a small, closed set, not "the
+  // normal list minus a few items."
+  if (unit.hidden) {
+    if (unit.hitMarkers.length > 0 && actionable(RALLY_AP_COST)) {
+      const enemyHere = Object.values(state.units).some((u) => u.side !== unit.side && u.hexId === unit.hexId);
+      if (!enemyHere) actions.push({ type: 'RALLY', unitId, ...cr(RALLY_AP_COST) });
+    }
+    if (actionable(1)) actions.push({ type: 'STALL', unitId, ...cr(1) });
+    if (!carried && eff.canMove) {
+      const hiddenBase = hiddenMoveBase(state, unit);
+      if (actionable(hiddenBase)) {
+        for (const toHexId of neighbors(parseHexId(unit.hexId)).map(idOf)) {
+          if (!state.hexes[toHexId]) continue;
+          const legal =
+            tmpl.kind === 'vehicle'
+              ? planVehicleMove(state, unit, [toHexId]).ap != null
+              : moveCost(state, unit, toHexId).ap != null;
+          if (legal) actions.push({ type: 'HIDDEN_MOVE', unitId, toHexId, ...cr(hiddenBase) });
+        }
+      }
+    }
+    return actions;
+  }
 
   // §17.2: may this Unit occupy a live Fortification on `hexId`? Mirrors
   // `fortifications.ts`'s `canOccupy`, but for a hypothetical destination Hex
@@ -159,12 +208,28 @@ export function legalActionsForUnit(state: GameState, unitId: UnitId): Action[] 
         actions.push({ type: 'MOVE', unitId, toHexId: unit.hexId, occupyFortification: true, ...cr(occupyCost) });
       }
     }
+    // Hidden Move — becoming Hidden (§11.4): `becomingHiddenCandidates`
+    // already filters to Hexes out of all non-Hidden enemy LOS AND
+    // genuinely passable (not just cheap) — the same helper `doHiddenMove`
+    // validates against, so there's one source of truth for legality here.
+    const hiddenBase = hiddenMoveBase(state, unit);
+    if (actionable(hiddenBase)) {
+      for (const toHexId of becomingHiddenCandidates(state, unit)) {
+        actions.push({ type: 'HIDDEN_MOVE', unitId, toHexId, ...cr(hiddenBase) });
+      }
+    }
   }
   // §16.1: Wagons ('none') may not attack at all; Trucks ('closeCombatOnly')
   // may only attack in Close Combat, never with ranged FIRE.
   if (eff.canFire && !carried && tmpl.attackMode !== 'none') {
     for (const target of Object.values(state.units)) {
       if (target.side === unit.side) continue;
+      // §11: a Hidden enemy Unit cannot be targeted by a normal Attack —
+      // only Recon by Fire (§11.7) may find one. (A Hidden Unit sharing a
+      // Hex with a non-Hidden Unit would already have revealed via the
+      // post-Action sweep before this point, so this mainly matters for
+      // ranged Fire/Indirect Fire against a Unit hidden at a distance.)
+      if (target.hidden) continue;
       // Close combat against an enemy sharing this hex (§7.7.3); otherwise a
       // normal ranged attack if arc/LOS/range allow.
       if (target.hexId === unit.hexId) {
@@ -196,12 +261,29 @@ export function legalActionsForUnit(state: GameState, unitId: UnitId): Action[] 
     }
   }
 
+  // Recon by Fire (§11.7): attack a suspected Hex in the Fire Zone — the
+  // target isn't a known Unit (that's the whole point), so this enumerates
+  // by Hex, unconditional on whether anything is actually there, mirroring
+  // Fire Smoke's Hex-targeted (not Unit-targeted) shape below.
+  if (eff.canFire && !carried && tmpl.attackMode !== 'none' && tmpl.attackMode !== 'closeCombatOnly') {
+    for (const targetHexId of Object.keys(state.hexes)) {
+      const zone = directFireZone(state, unit, targetHexId);
+      if (!zone.legal) continue;
+      if (actionable(eff.apToFire)) {
+        actions.push({ type: 'RECON_BY_FIRE', attackerId: unitId, targetHexId, ...cr(eff.apToFire) });
+      }
+    }
+  }
+
   // Mortar Indirect Attack (§13.2): one action per enemy-occupied Hex (an
   // Attack needs something to attack).
   if (eff.canFire && !carried && tmpl.attackMode !== 'none' && tmpl.kind === 'mortar') {
+    // §11: only Hexes with a KNOWN (non-Hidden) enemy — Indirect Fire targets
+    // a specific enemy-occupied Hex, which presumes the attacker knows one is
+    // there; a Hidden enemy alone in a Hex isn't a legal target this way.
     const enemyHexIds = new Set(
       Object.values(state.units)
-        .filter((u) => u.side !== unit.side && u.hexId !== unit.hexId)
+        .filter((u) => u.side !== unit.side && u.hexId !== unit.hexId && !u.hidden)
         .map((u) => u.hexId),
     );
     for (const targetHexId of enemyHexIds) {
@@ -327,6 +409,21 @@ export function legalActionsForUnit(state: GameState, unitId: UnitId): Action[] 
         if (!ok) continue;
         actions.push({ type: 'UNLOAD', unitId, toHexId, ...groupCr(base, vehicle) });
       }
+    }
+  }
+
+  // Play Card (§8.5-8.6): one entry per Green-cost Action/Bonus card in this
+  // Unit's own side's hand that this specific Unit qualifies to play. A
+  // Blue-cost card needs no Unit at all (§8.6), so it isn't unit-scoped here
+  // — the live Hand panel dispatches those directly via `canPlayCard`/
+  // `PLAY_CARD` with no `unitId`, not through this per-Unit enumeration.
+  for (const cardId of player.hand) {
+    const card = CARD_CATALOG[cardId];
+    if (!card?.cost || card.cost.color !== 'green') continue;
+    if (card.restrictedTo?.nation && unit.nation !== card.restrictedTo.nation) continue;
+    if (card.restrictedTo?.kind && tmpl.kind !== card.restrictedTo.kind) continue;
+    if (actionable(card.cost.amount)) {
+      actions.push({ type: 'PLAY_CARD', side: unit.side, cardId, unitId, ...cr(card.cost.amount) });
     }
   }
 

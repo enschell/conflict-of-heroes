@@ -8,8 +8,21 @@
  */
 import type { GameState, HexId } from './types';
 
-/** Every Hex currently empty of any Unit — the only restriction on a Setup placement. */
-export function legalSetupHexes(state: GameState): HexId[] {
+/**
+ * Every Hex currently empty of any Unit — the only restriction on a Setup
+ * placement. Pass `forMine: true` when the armed pool entry is a Mines token
+ * (`SetupPoolUnit.mine`): a Hex may hold only one Obstacle/Fortification
+ * (§17.0), so those are additionally excluded — keeps the UI highlight in
+ * lockstep with `doSetupPlace`'s own validation.
+ */
+export function legalSetupHexes(state: GameState, forMine = false): HexId[] {
   const occupied = new Set(Object.values(state.units).map((u) => u.hexId));
-  return Object.keys(state.hexes).filter((id) => !occupied.has(id));
+  return Object.keys(state.hexes).filter((id) => {
+    if (occupied.has(id)) return false;
+    if (forMine) {
+      const f = state.hexes[id]!.features;
+      if (f.obstacle || f.fortification) return false;
+    }
+    return true;
+  });
 }

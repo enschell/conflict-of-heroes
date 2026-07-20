@@ -1,8 +1,17 @@
+/**
+ * Reinforcements: Side A's waves in a LEFT column, Side B's in a RIGHT column
+ * (user-requested layout — side-by-side instead of a single toggled list, so
+ * both sides' waves stay visible at once and vertical scrolling stays short).
+ * Each wave's unit picker is restricted to its own side's nations (Mission
+ * Info tab), same as the Starting Forces columns.
+ */
 import { useMemo } from 'react';
 import { assembledMap, assembledMapOverlays, assembledRotationClusters, useEditorStore } from '../../../state/editorStore';
 import type { EditorWave } from '../../../state/editorStore';
 import { UNIT_TEMPLATES } from '../../../data/units';
+import { NATIONS } from '../../../data/nations';
 import { hexesConnected } from '../../../engine';
+import { SIDE_COLOR } from '../../theme';
 import { EditorBoardOrError } from '../EditorBoard';
 import { UnitPicker } from '../UnitPicker';
 import { FACING_LABELS } from '../constants';
@@ -18,6 +27,7 @@ function WaveCard({ side, wave }: { side: SideId; wave: EditorWave }) {
   const removeUnitFromWave = useEditorStore((s) => s.removeUnitFromWave);
   const reinf = useEditorStore((s) => s.reinforcements);
   const setReinf = useEditorStore((s) => s.setReinf);
+  const nations = useEditorStore((s) => (side === 'A' ? s.info.sideA.nations : s.info.sideB.nations));
   const map = useEditorStore((s) => s.map);
   const { hexes: mapHexes, error: mapError } = useMemo(() => assembledMap(map), [map]);
   const mapOverlays = useMemo(() => assembledMapOverlays(map), [map]);
@@ -64,22 +74,35 @@ function WaveCard({ side, wave }: { side: SideId; wave: EditorWave }) {
             />
           </label>
           <h4>Add Units</h4>
-          <label className="editor__field-label">
-            Facing (applies to next Add)
-            <select value={reinf.draftFacing} onChange={(e) => setReinf({ draftFacing: parseInt(e.target.value, 10) as Facing })}>
-              {FACING_LABELS.map((label, i) => (
-                <option key={i} value={i}>
-                  {label}
-                </option>
-              ))}
-            </select>
-          </label>
+          <div className="editor__wave-row">
+            <label className="editor__field-label">
+              Facing (applies to next Add)
+              <select value={reinf.draftFacing} onChange={(e) => setReinf({ draftFacing: parseInt(e.target.value, 10) as Facing })}>
+                {FACING_LABELS.map((label, i) => (
+                  <option key={i} value={i}>
+                    {label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="editor__field-label">
+              <span>
+                <input
+                  type="checkbox"
+                  checked={reinf.draftHidden}
+                  onChange={(e) => setReinf({ draftHidden: e.target.checked })}
+                />{' '}
+                Hidden (§11)
+              </span>
+            </label>
+          </div>
           <UnitPicker
             search={reinf.search}
             onSearchChange={(search) => setReinf({ search })}
             nationFilter={reinf.nationFilter}
             onNationFilterChange={(nationFilter) => setReinf({ nationFilter })}
-            onPick={(templateId) => addUnitToWave(side, wave.id, templateId, reinf.draftFacing)}
+            nations={nations}
+            onPick={(templateId) => addUnitToWave(side, wave.id, templateId, reinf.draftFacing, reinf.draftHidden)}
             pickLabel="+ Add"
           />
           <h4>In this wave ({wave.units.length})</h4>
@@ -87,6 +110,7 @@ function WaveCard({ side, wave }: { side: SideId; wave: EditorWave }) {
             {wave.units.map((u) => (
               <li key={u.id}>
                 {UNIT_TEMPLATES[u.templateId]?.name ?? u.templateId} — facing {FACING_LABELS[u.facing]}
+                {u.hidden ? ' — hidden' : ''}
                 <button onClick={() => removeUnitFromWave(side, wave.id, u.id)}>×</button>
               </li>
             ))}
@@ -111,31 +135,35 @@ function WaveCard({ side, wave }: { side: SideId; wave: EditorWave }) {
   );
 }
 
-export function ReinforcementsSection() {
-  const activeSide = useEditorStore((s) => s.reinforcements.activeSide);
-  const waves = useEditorStore((s) => s.reinforcements.waves);
-  const setReinf = useEditorStore((s) => s.setReinf);
+function SideWaves({ side }: { side: SideId }) {
+  const waves = useEditorStore((s) => s.reinforcements.waves[side]);
   const addWave = useEditorStore((s) => s.addWave);
+  const nations = useEditorStore((s) => (side === 'A' ? s.info.sideA.nations : s.info.sideB.nations));
+  const nationNames = nations.length ? nations.map((n) => NATIONS[n]?.name ?? n).join(', ') : 'no nations set';
 
   return (
-    <div className="editor__section">
-      <div className="editor__toggle-row">
-        {(['A', 'B'] as const).map((side) => (
-          <button
-            key={side}
-            className={`editor__toggle${activeSide === side ? ' editor__toggle--active' : ''}`}
-            onClick={() => setReinf({ activeSide: side })}
-          >
-            Side {side}
-          </button>
-        ))}
-      </div>
-      {waves[activeSide].map((w) => (
-        <WaveCard key={w.id} side={activeSide} wave={w} />
+    <div className="editor__side-col" style={{ borderTopColor: SIDE_COLOR[side] }}>
+      <h3 className="editor__side-col-head">
+        Side {side} <span className="editor__side-col-nations">({nationNames})</span>
+      </h3>
+      {waves.length === 0 && <p className="editor__empty">No reinforcement waves for this side.</p>}
+      {waves.map((w) => (
+        <WaveCard key={w.id} side={side} wave={w} />
       ))}
-      <button className="primary" onClick={() => addWave(activeSide)}>
-        + Add Wave — Side {activeSide}
+      <button className="primary" onClick={() => addWave(side)}>
+        + Add Wave
       </button>
+    </div>
+  );
+}
+
+export function ReinforcementsSection() {
+  return (
+    <div className="editor__section">
+      <div className="editor__reinf-grid">
+        <SideWaves side="A" />
+        <SideWaves side="B" />
+      </div>
     </div>
   );
 }

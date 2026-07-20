@@ -33,12 +33,17 @@ export function SetupPanel() {
       )}
       <div className="reinforce__units">
         {pool.map((u) => {
-          const name = game.templates[u.templateId]?.name ?? u.templateId;
+          // A Mines token (§17.10) has a display-only templateId, never a
+          // real template — name it explicitly and badge it like the board's
+          // own MINES label color.
+          const name = u.mine
+            ? `Mines (Hit# ${u.mine.hitNumber}) — hidden`
+            : (game.templates[u.templateId]?.name ?? u.templateId);
           const armed = armedSetupUnitId === u.id;
           return (
             <div key={u.id} className="reinforce__unit" title={name}>
-              <span className="reinforce__badge" style={{ background: NATIONS[u.nation]?.color }}>
-                {code(name)}
+              <span className="reinforce__badge" style={{ background: u.mine ? '#b23a3a' : NATIONS[u.nation]?.color }}>
+                {u.mine ? 'MIN' : code(name)}
               </span>
               <span className="reinforce__name">{name}</span>
               <button className={`reinforce__place${armed ? ' is-active' : ''}`} onClick={() => armSetupUnit(armed ? null : u.id)}>

@@ -152,6 +152,9 @@ export function attackContext(
 
   if (useFlamethrower && !attackerTmpl.hasFlamethrower) return fail('this Unit has no Flamethrower (§18.0)', band, fpColor);
   if (!aEff.canFire) return fail('unit cannot fire', band, fpColor);
+  // §11: a Hidden enemy Unit is not a legal Attack target — only Recon by
+  // Fire (§11.7) may find one.
+  if (target.hidden) return fail('target is Hidden — use Recon by Fire (§11.7)', band, fpColor);
   // §17.5: Mortars may not fire — Direct or Indirect — from within a Bunker.
   if (attackerTmpl.kind === 'mortar' && deniedByBunkerMortarRule(state, attacker)) {
     return fail('Mortars may not fire from within a Bunker (§17.5)', band, fpColor);
@@ -364,6 +367,10 @@ export function closeCombatContext(
   if (attacker.id === target.id) return fail('cannot close-combat self', 'short', fpColor);
   if (attacker.side === target.side) return fail('friendly target', 'short', fpColor);
   if (attacker.hexId !== target.hexId) return fail('not in the same hex', 'short', fpColor);
+  // §11: a Hidden enemy Unit sharing this Hex would already have revealed
+  // via the post-Action sweep (§11.1 bullet 2) — defensive check in case
+  // that invariant is ever violated.
+  if (target.hidden) return fail('target is Hidden — use Recon by Fire (§11.7)', 'short', fpColor);
 
   const whiteBox = attackerTmpl.whiteBoxFp;
   // §18.0: Flamethrower substitutes a flat 3FP and its own +4 CC bonus,
@@ -486,8 +493,11 @@ export function rollCloseCombat(
 
 /** Enemy units sharing `hexId`, sorted by id for deterministic resolution. */
 export function enemiesInHex(state: GameState, side: SideId, hexId: string): Unit[] {
+  // §11: a Hidden enemy Unit never resolves as a stacked-fire target — Fire
+  // at a Hex only ever hits the KNOWN (non-Hidden) enemies stacked there,
+  // never a Hidden stack-mate the attacker doesn't know is present.
   return Object.values(state.units)
-    .filter((u) => u.side !== side && u.hexId === hexId)
+    .filter((u) => u.side !== side && u.hexId === hexId && !u.hidden)
     .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
 }
 

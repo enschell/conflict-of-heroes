@@ -201,6 +201,20 @@ export interface Unit {
    *  removed at will, for free, via `REMOVE_HASTY_DEFENSE`). A transported
    *  Unit cannot build one (§17.6 describes fortifying one's own position). */
   hastyDefense?: boolean;
+  /**
+   * §11 Hidden Units — a real mechanic: `hidden.ts`'s reveal-trigger sweep
+   * (run from `reducer.ts`'s `finish()`, plus a top-of-`reduce()` check for
+   * any Action other than Stall/Rally/Hidden Move) flips this to `undefined`
+   * automatically per §11.1's conditions; `HIDDEN_MOVE` (§11.3-11.6) and
+   * `RECON_BY_FIRE` (§11.7) are the two Actions that read/write it directly.
+   * `Board.tsx`/`HoverPanel.tsx` hide a hidden enemy Unit from rendering
+   * entirely while `unit.side !== <the currently active side>` — this is a
+   * render-layer-only concealment (no per-client server exists), trivially
+   * defeated via browser devtools; accepted deliberately for hotseat play,
+   * superseding an earlier locked decision that deferred this to online play.
+   * Default (absent/false) is visible.
+   */
+  hidden?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -226,6 +240,8 @@ export interface ReinforcementUnit {
   entryHexIds: HexId[];
   /** Human-readable entry condition for display, e.g. "Road Hex R07" (authored, not derived). */
   entryDescription: string;
+  /** See Unit.hidden — the Unit enters the Map already hidden. */
+  hidden?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -249,6 +265,17 @@ export interface SetupPoolUnit {
   /** The Mission's suggested facing; a SETUP_PLACE may override it, and the
    *  placed Unit also gets a free `pendingFacingChoices` correction window. */
   facing: Facing;
+  /** See Unit.hidden — the placed Unit starts hidden. */
+  hidden?: boolean;
+  /**
+   * This pool entry is a MINES token (§17.10), not a Unit: placing it writes
+   * `hex.features.obstacle {kind:'mines', ownerSide: side, hidden: true}`
+   * instead of creating a Unit — the engine's existing Mines mechanics are
+   * untouched, this is purely a new way to get one onto the board. When set,
+   * `templateId`/`facing` are display-only placeholders, never resolved
+   * against `templates`.
+   */
+  mine?: { hitNumber: number };
 }
 
 // ---------------------------------------------------------------------------
@@ -328,6 +355,9 @@ export interface ObstacleState {
   /** The side that placed this Obstacle — for Mines (§17.10), this is whose
    *  CAP pays for the up-to-2 Hit Number modification before rolling. */
   ownerSide: SideId;
+  /** See Unit.hidden — Mines are always placed hidden (§17.10); never
+   *  toggled off by an author, unlike a regular Unit's checkbox. */
+  hidden?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -499,6 +529,54 @@ export interface VictoryConfig {
 }
 
 // ---------------------------------------------------------------------------
+// Cards (§8) and Off-Board Artillery (§13.4-13.9)
+// ---------------------------------------------------------------------------
+
+/** Battle Cards are discarded when played; Weapon Cards default to the same
+ *  (no stated exception); Veteran Cards are NOT discarded (§8.2). */
+export type CardCategory = 'battle' | 'weapon' | 'veteran';
+
+/** §8.4 top-left Type Icon. Mission-type cards resolve immediately on draw,
+ *  never via `PLAY_CARD` (see `drawBattleCards`, `engine/cards.ts`).
+ *  Artillery-type cards activate via `PLAN_OBA_STRIKE`, not `PLAY_CARD`. */
+export type CardType = 'action' | 'bonus' | 'mission' | 'artillery';
+
+/** §8.6: Green = AP cost, CAP-reducible before a Spent Check, Fresh-unit-only
+ *  unless reduced to 0AP; Blue = paid entirely in CAPs, any Fresh-or-Spent
+ *  Unit, never a Spent Check. See `rules/08-battle-cards.md`'s Card Catalog
+ *  for the per-card color — many are a documented best-guess, since ink color
+ *  isn't recoverable from the OCR text the catalog was transcribed from. */
+export type CardCostColor = 'green' | 'blue';
+
+/** One catalog entry (`src/data/cards/`) — mirrors `rules/08-battle-cards.md`'s
+ *  Card Catalog section, the transcription this data is derived from. */
+export interface CardDef {
+  id: CardId;
+  name: string;
+  category: CardCategory;
+  type: CardType;
+  /** Physical copies included whenever this id is selected for a Mission's deck (§8.1). */
+  count: number;
+  /** Absent for `type: 'mission' | 'artillery'` — see `CardType`'s own doc comment. */
+  cost?: { color: CardCostColor; amount: number };
+  /** Full rules text, logged verbatim when the card is drawn/played. Framework-only scope:
+   *  the card's own bespoke effect is NOT mechanically simulated — only the shared
+   *  consequences (AP/CAP spend, Stress, discard) that every card of its type shares. */
+  effectText: string;
+  /** §8.9 Battle Icons. */
+  battleIcons?: { hidden?: boolean; group?: boolean; he?: boolean };
+  /** Mission-type cards whose real payload is Mission-specific ("See Mission Setup") —
+   *  looked up in `MissionDef.missionCardText` at draw time; a generic fallback logs if absent. */
+  missionSpecific?: boolean;
+  /** §8.7 Halt Order (card 20): ends the Mission immediately on draw, no redraw. */
+  endsMission?: boolean;
+  /** Weapon Cards restricted by their own printed text (e.g. "For use by German Foot Units"). */
+  restrictedTo?: { nation?: NationId; kind?: UnitKind };
+  /** Artillery Cards only (§13.8: Firepower used for every OBA Attack this card triggers). */
+  firepower?: { red: number; blue: number };
+}
+
+// ---------------------------------------------------------------------------
 // Events / log
 // ---------------------------------------------------------------------------
 
@@ -640,6 +718,62 @@ export type Action =
   // that side's pool is empty, `setupSide` flips to the other side (if it
   // still has pool Units) or the Mission proceeds into the real Round 1.
   | { type: 'SETUP_PLACE'; unitId: UnitId; hexId: HexId; facing?: Facing }
+  // Hidden Move (§11.3-11.6): flat 5AP, ignores Terrain Move Penalties, adds
+  // Stress/Hit-Marker penalties — one Action covering BOTH becoming Hidden
+  // (from `!unit.hidden`, destination must be out of all non-Hidden enemy
+  // LOS — §11.4) and moving while already Hidden (§11.5, may enter enemy LOS
+  // only via Open Terrain >2 Hexes away or Concealing Terrain, else it
+  // reveals on arrival — checked by the same post-Action sweep every other
+  // reveal condition uses). A failed Spent Check leaves the Unit Hidden
+  // (§11.6) — falls out for free, since a failed check only ever flips
+  // `status`. Deliberately ONE hex per Action, like a normal foot Move — no
+  // rulebook example or text describes a multi-hex/Bonus-Move Hidden Move.
+  // No `facing` field: a Hidden Unit has no facing until revealed (§11.2) —
+  // whichever facing is chosen happens through the normal free-facing-
+  // correction window a reveal already grants.
+  | { type: 'HIDDEN_MOVE'; unitId: UnitId; toHexId: HexId; capCostReduce?: number }
+  // Recon by Fire (§11.7): Attack a suspected Hex in the Attacker's Fire
+  // Zone. Roll 2d6 >= Reveal Number (6 + Terrain DR Mod); on success with a
+  // Hidden enemy Unit present, reveal it (owner picks facing) and
+  // immediately Attack it with matching red/blue FP, one Spent Check total.
+  // `capRevealDiceMod` and `capHitDiceMod` are DELIBERATELY independent —
+  // the rulebook is explicit that CAPs spent on the Reveal Number do not
+  // carry over to the follow-up Hit Number roll.
+  | {
+      type: 'RECON_BY_FIRE';
+      attackerId: UnitId;
+      targetHexId: HexId;
+      capCostReduce?: number;
+      capRevealDiceMod?: number;
+      capHitDiceMod?: number;
+    }
+  // Play an Action- or Bonus-type Card (§8.5-8.6) from `side`'s hand. Green
+  // cost (`cost.color === 'green'`): an AP cost like any other Action —
+  // `capCostReduce` lowers it before a Spent Check, requiring `unitId` be
+  // Fresh unless reduced to 0AP (any status then, no check, §8.6). Blue cost:
+  // `cost.amount` is a flat CAP spend, no AP, no Spent Check, `unitId`
+  // optional (flavor only). Mission/Artillery-type cards never reach this
+  // Action (see `CardType`'s doc comment) — dispatch denies them. Discarded
+  // from `hand` unless `category === 'veteran'` (§8.2). `groupSupporterIds`
+  // is the §8.9 "Groups may play a card" battle icon — only meaningful when
+  // `battleIcons.group` is set on the card.
+  | {
+      type: 'PLAY_CARD';
+      side: SideId;
+      cardId: CardId;
+      unitId?: UnitId;
+      capCostReduce?: number;
+      groupSupporterIds?: UnitId[];
+    }
+  // Activate an Artillery-type Card to plan an OBA Strike (§13.4-13.6): no
+  // cost, discards the card, secretly targets `targetHexId` for automatic
+  // resolution one Round later (`turn.ts`'s Pre-Round Sequence, not a player
+  // Action — see `resolveObaStrike`, `engine/cards.ts`). Simplification,
+  // documented in CLAUDE.md: the rulebook places this inside the Pre-Round
+  // Sequence itself; this engine has no such sub-phase yet, so it's legal any
+  // time during the owning side's own Turn instead — the 1-Round delay and
+  // Drift/blast mechanics themselves are unaffected.
+  | { type: 'PLAN_OBA_STRIKE'; side: SideId; cardId: CardId; targetHexId: HexId }
   | { type: 'PASS' };
 
 export type ActionType = Action['type'];
@@ -729,6 +863,32 @@ export interface GameState {
    * never read by `reduce`.
    */
   setupInstructions?: string;
+  /**
+   * The Mission's single, shared, seeded Battle Card Draw Deck (§8.1 — one
+   * deck, not per-side). Built once in `initGame` from
+   * `MissionDef.cardConfig.battleCardIds` and shuffled with `rng.ts`'s
+   * `shuffle`; absent entirely for a Mission with no `cardConfig`. Weapon/
+   * Veteran cards never pass through this deck (Mission-issued starting
+   * hands instead, `MissionDef.cardConfig.initialHand`) — only Battle Cards
+   * are drawn per-Round (§9.8). No reshuffle-on-empty rule is stated
+   * anywhere, so none exists: an emptied `drawPile` just yields no further
+   * draws.
+   */
+  cardDeck?: { drawPile: CardId[]; discardPile: CardId[] };
+  /**
+   * OBA Strikes planned via `PLAN_OBA_STRIKE` (§13.5), awaiting automatic
+   * resolution in a later Pre-Round Sequence (`turn.ts`'s `startRound`, not a
+   * player Action — see `resolveObaStrike`, `engine/cards.ts`).
+   * `resolveRound` is always `plannedOnRound + 1` (§13.5 "resolved in the
+   * next Pre-Round Sequence").
+   */
+  pendingObaStrikes?: { side: SideId; cardId: CardId; targetHexId: HexId; resolveRound: number }[];
+  /** See `MissionDef.missionCardText` — carried through unchanged by `initGame`. */
+  missionCardText?: Partial<Record<CardId, string>>;
+  /** See `MissionDef.cardConfig.obaAllowedRounds` — carried through unchanged by `initGame`. */
+  obaAllowedRounds?: number[];
+  /** See `MissionDef.cardConfig.drawPerRound` — carried through unchanged by `initGame`. */
+  drawPerRound?: Partial<Record<SideId, { round1: number; eachRoundAfter: number }>>;
 }
 
 /** Result of reducing an action: the next state plus emitted events. */
@@ -758,7 +918,7 @@ export interface MapHexDef {
   /** See Hex.edgeCut — board-relative half-plane clip flags for this hex. */
   edgeCut?: Hex['edgeCut'];
   /** §17.7 Obstacle placed here at setup (`destroyed` always starts false). */
-  obstacle?: { kind: ObstacleKind; hitNumber?: number; destroyDr?: number; ownerSide: SideId };
+  obstacle?: { kind: ObstacleKind; hitNumber?: number; destroyDr?: number; ownerSide: SideId; hidden?: boolean };
   /** §17.1 Fortification placed here at setup (`destroyed` always starts false). */
   fortification?: { kind: FortificationKind; facing?: Facing; destroyDr?: number };
 }
@@ -769,6 +929,8 @@ export interface UnitPlacement {
   templateId: string;
   hexId: HexId;
   facing: Facing;
+  /** See Unit.hidden — the Unit starts hidden. */
+  hidden?: boolean;
 }
 
 /** A Mission-authored reinforcement wave: a set of Units + when/where they may enter (§4.12). */
@@ -781,7 +943,7 @@ export interface ReinforcementWaveDef {
   entryHexIds: HexId[];
   /** Human-readable entry condition for display, e.g. "Road Hex R07" (authored, not derived). */
   entryDescription: string;
-  units: { id: UnitId; templateId: string; facing: Facing }[];
+  units: { id: UnitId; templateId: string; facing: Facing; hidden?: boolean }[];
 }
 
 /**
@@ -832,7 +994,7 @@ export interface MissionDef {
    * normal Mission with no pre-round setup phase; `phase` then goes straight
    * to `'playing'` exactly as before this feature existed.
    */
-  setupForces?: { id: UnitId; side: SideId; templateId: string; facing: Facing }[];
+  setupForces?: { id: UnitId; side: SideId; templateId: string; facing: Facing; hidden?: boolean; mine?: { hitNumber: number } }[];
   /** Which side places its `setupForces` pool first. Defaults to 'A' if omitted. */
   setupFirstSide?: SideId;
   /** Free-text guidance for how the setup phase should proceed (display-only, not read by the engine). */
@@ -866,24 +1028,53 @@ export interface MissionDef {
   /** Longer per-side victory-condition-flavored instructions (Mission Editor authoring; display-only, not read by the engine). */
   missionInstructions?: Partial<Record<SideId, string>>;
   /**
-   * Data authored for future milestones (M12 Cards, M8 Hidden Units, OBA
-   * scheduling, Air Support, a real map-rotation/catalog tool) that the
-   * engine does not yet consume. Carried losslessly through the Mission
-   * Editor's export so nothing typed into its "Advanced/Future" section is
-   * silently dropped; `initGame`/`reduce` never read this.
+   * Data authored for future milestones (Air Support, a real map-rotation/
+   * catalog tool) that the engine does not yet consume. Carried losslessly
+   * through the Mission Editor's export so nothing typed into its "Advanced/
+   * Future" section is silently dropped; `initGame`/`reduce` never read this.
+   * Cards/OBA fields formerly lived here — see `cardConfig` below, which
+   * supersedes (not duplicates) them now that both are real, consumed
+   * mechanics.
    */
   advancedNotes?: MissionAdvancedNotes;
+  /**
+   * Cards (§8) + OBA (§13.4-13.9) configuration — real and consumed by
+   * `initGame`/`reduce`/`turn.ts`, not "inert authored data" like
+   * `advancedNotes`. Absent entirely ⇒ no `GameState.cardDeck`, no hand
+   * seeding, no Pre-Round-Sequence card-draw/OBA-resolve steps — a Mission
+   * with no `cardConfig` behaves exactly as it did before Cards existed.
+   */
+  cardConfig?: {
+    /** Battle Card ids included in this Mission's shared deck (§8.1) — each repeated by its catalog `count`. */
+    battleCardIds: CardId[];
+    /** Per-side Battle Cards drawn at the start of Round 1, and each Round after (§9.8). */
+    drawPerRound?: Partial<Record<SideId, { round1: number; eachRoundAfter: number }>>;
+    /** Weapon/Veteran cards a side starts the Mission already holding (§8.2/§8.3 — Mission-issued, not drawn). */
+    initialHand?: Partial<Record<SideId, CardId[]>>;
+    /** Rounds OBA may be used at all (§13.4), if the Mission restricts it; omitted ⇒ any Round. */
+    obaAllowedRounds?: number[];
+  };
+  /**
+   * Per-Mission text for Mission-type cards whose catalog entry is
+   * `missionSpecific` (Score/Mission Event/Objectives — the catalog only has
+   * "See Mission Setup" placeholders for these). Logged verbatim when drawn;
+   * a generic fallback logs if a drawn Mission-type card's id has no entry
+   * here.
+   */
+  missionCardText?: Partial<Record<CardId, string>>;
 }
 
-/** See `MissionDef.advancedNotes` — inert until the corresponding milestone lands. */
+/** See `MissionDef.advancedNotes` — inert until the corresponding milestone lands.
+ *  `battleCards`/`obaAllowedRounds`/`obaStrikes` below are DEAD FIELDS, superseded by
+ *  `MissionDef.cardConfig` now that Cards/OBA are real — kept only until the Mission
+ *  Editor's own migration (CLAUDE.md's Cards section) removes their Advanced-tab UI
+ *  and emit/load round-trip in the same pass; do not add new Missions authoring these. */
 export interface MissionAdvancedNotes {
-  /** M12: Battle Cards drawn at the start of Round 1, and each Round after. */
+  /** @deprecated superseded by `MissionDef.cardConfig.drawPerRound`. */
   battleCards?: Partial<Record<SideId, { round1: number; eachRoundAfter: number }>>;
-  /** M8: Unit ids (starting placements or reinforcements) that begin hidden. */
-  hiddenUnitIds?: UnitId[];
-  /** Rounds in which OBA may be used at all (§13.4), if the Mission restricts it. */
+  /** @deprecated superseded by `MissionDef.cardConfig.obaAllowedRounds`. */
   obaAllowedRounds?: number[];
-  /** A planned OBA Strike always resolves the Round after it's planned (§13.5-13.6). */
+  /** @deprecated no longer meaningful — planning is now the real `PLAN_OBA_STRIKE` Action. */
   obaStrikes?: { id: string; plannedRound: number }[];
   /** Round each side receives Air Support (provisional — not yet a transcribed rule). */
   airSupport?: Partial<Record<SideId, number>>;

@@ -6,11 +6,22 @@ Guidance for Claude Code when building this project. Read this first, every sess
 > **3rd Edition** rulebook (Academy Games). This project is **3rd-edition rules only** (the v3
 > migration is complete — see §A).
 >
-> **Do not invent rules from memory, and do not read the PDF.** The rulebook has been transcribed
-> into a curated, section-by-section reference under **`rules/`**. When implementing or changing a
-> mechanic, open **`rules/INDEX.md`**, find the chapter(s) that cover it, and read the matching
-> **`rules/NN-*.md`** file(s) first. Cite the v3 section number (`N.M`) in code comments, commits,
-> and tests. The `rules/` files are **committed** and authoritative.
+> **Do not invent rules from memory.** The rulebook has been transcribed into a curated,
+> section-by-section reference under **`rules/`**. When implementing or changing a mechanic, open
+> **`rules/INDEX.md`**, find the chapter(s) that cover it, and read the matching **`rules/NN-*.md`**
+> file(s) first. Cite the v3 section number (`N.M`) in code comments, commits, and tests. The
+> `rules/` files are **committed** and authoritative — read those, not the source PDF, for anything
+> they already cover.
+>
+> **Reading the source PDF directly** (`docs/SoS3 Rulebook v70 single pages.pdf`, if present) is
+> permitted when a mechanic genuinely needs content `rules/` hasn't transcribed yet (e.g. §G's Battle
+> Card catalog — the individual card texts, as opposed to the card MECHANICS `rules/08` already
+> covered) and the user hasn't supplied it another way — this was an explicit user override of what
+> was previously an absolute prohibition here, made once §G needed the real card catalog. When you do
+> read the PDF for something new, **transcribe what you found into the matching `rules/NN-*.md` file**
+> (as §G's build did) so it's the committed, authoritative reference from then on — don't leave future
+> sessions re-reading the PDF for the same content, and don't reproduce more than the specific
+> passage needed.
 
 ---
 
@@ -127,7 +138,10 @@ field is checked before the normal `mode`/`game` routing.
   onHexClick?}`), NOT a reuse of the live `Board.tsx` (which is hardwired to ~15 live `GameState`
   selectors) — reuses `ui/hexgeo.ts`'s pure geometry directly. `hexgeo.ts`'s
   `fringeHexes`/`playableBounds`/`computeLayout` take `Pick<GameState,'hexes'>` so the editor can
-  call them without a live `GameState`.
+  call them without a live `GameState`. Placed-unit markers render as the REAL `UnitCounter`
+  (image-backed art, stat overlay, facing) via `EditorMarker.unit?` + a minimal pseudo-GameState
+  (`COUNTER_PREVIEW_GAME` — safe because `templateOf`/`effectiveStats` only read `state.templates`
+  and the unit's own empty hit markers); stacks show the first counter + the live board's ×N badge.
 - **Export:** a real, self-contained TypeScript `MissionDef` source file (not JSON) via
   `data/editor/emitMissionSource.ts` — a from-scratch JS-value-to-TS pretty printer (no `prettier`
   dependency). Inlines the picked map's hexes + placements + waves; only `UNIT_TEMPLATES` is
@@ -169,8 +183,11 @@ field is checked before the normal `mode`/`game` routing.
   `endOfRound`/`endOfMission` — VP awarded only on an explicit list of Rounds (e.g. "1 VP for K09 in
   Rounds 3, 4, and 5 only," not every Round and not just at Mission end). UI: the award-timing
   `<select>` gained a third option; picking it reveals a comma-separated Rounds text field.
-- **Cards/Hidden Units/OBA/Air Support stay inert on purpose** (§8's M12/M8), captured losslessly in
-  `MissionDef.advancedNotes` but read by nothing yet.
+- **Cards/OBA/Air Support stayed inert on purpose at the time** (§8's M12), captured losslessly in
+  `MissionDef.advancedNotes` but read by nothing. (Hidden Units, formerly grouped with these as M8,
+  went real first — see §F. Cards/OBA themselves later went real too, superseding `advancedNotes`'
+  Cards fields with `MissionDef.cardConfig` — see §G. Air Support is the one field from this original
+  list still genuinely inert.)
 - **A real gap caught mid-build:** `obstacles.ts`'s `rollMinesAttack` defaults an unset Hit Number to
   0 (always-hits) — the Map section's tool rail gained an explicit "Mines Hit Number (§17.10)"
   input (default 8) so this can't silently ship.
@@ -226,8 +243,20 @@ field is checked before the normal `mode`/`game` routing.
   depends on the merged map.
 - Every font-size under the editor's CSS scope was scaled 1.5× per user request (readability);
   `.editor__unit-list` shows exactly 6 unit cards before scrolling.
-- **Mouse-wheel zoom, 0.5×–4×**, mirrors `Board.tsx`'s own already-debugged implementation exactly
-  (see the StrictMode note in §7).
+- **Ctrl+wheel zoom, 0.5×–4×; plain wheel pans vertically**, mirrors `Board.tsx`'s own
+  already-debugged implementation exactly (see the StrictMode note in §7).
+- **Starting Forces + Reinforcements are side-by-side layouts, not stacked** (user-requested):
+  Starting Forces is a `[Side A column | board | Side B column]` grid (`.editor__forces-grid`);
+  Reinforcements is two wave columns (`.editor__reinf-grid`). Each side column owns ONE
+  `UnitPicker` restricted to that side's nations (`UnitPicker`'s `nations` prop, fed from the
+  Mission Info tab's per-side nation picks — the nation dropdown collapses away entirely when a
+  side has exactly one nation, and an unset side falls back to the full catalog). The old
+  "Add to Side A/B" toggle is gone: the column IS the side. Starting Forces' column has a
+  Place-on-Map/Setup-Pool destination toggle deciding whether a picked unit arms for a board
+  click or goes straight into that side's pool; facing/hidden/Mines controls are per-column
+  (local state, pushed into `forces.armed*` on arm/change so a later board click places exactly
+  what the column shows). Shared, side-agnostic bits (armed-status line under the board,
+  Sets Up First, Setup Instructions) stay outside the columns.
 
 ---
 
@@ -366,9 +395,251 @@ normal. Every existing Mission (no `setupForces`) skips this entirely — `initG
   both Units, hand-off to Side A worked, and placing Side A's last Unit transitioned straight into a
   real Round 1 with initiative rolled normally. Full suite (503 tests) + typecheck + build +
   conformance (0 violations) green throughout.
+- **Hidden flag + Mines as Starting Forces:** `Unit`/`UnitPlacement`/`SetupPoolUnit`/
+  `MissionDef.setupForces` entries and `ObstacleState`/`MapHexDef.obstacle` all gained
+  `hidden?: boolean` (default visible). Originally shipped DATA-ONLY (authored/exported/carried
+  through `initGame`, but no renderer hid anything) — **§F later made this a real, live mechanic**
+  (render-layer visibility filter + the full §11 Hidden Move/Recon by Fire ruleset); read §F before
+  touching `hidden` again. **Mines are additionally placeable from the Starting Forces tab** (not
+  just the Map section's paint tool): a fixed-location Mines token (`MINE_ARM_ID` sentinel in `editorStore.ts`'s
+  `armedTemplateId`) writes into the SAME `map.obstacles` record the Map tool uses, always
+  `hidden: true`; a Setup Pool Mines token (`SetupPoolUnit.mine: {hitNumber}`,
+  `addMineToSetupPool`) is placed by the PLAYER during the Pre-Mission phase —
+  `doSetupPlace` branches on `entry.mine` and writes `hex.features.obstacle {kind:'mines',
+  ownerSide, hidden:true}` instead of creating a Unit (no facing window; §17.0 one-structure-per-
+  Hex validated, with `legalSetupHexes(state, forMine)` keeping the purple picker in lockstep).
+  The engine's §17.10 Mines mechanics are untouched — this is purely a new way to get one onto the
+  board. **Gotcha encoded in a test:** a Mines token's `templateId` ('mines') is a display-only
+  placeholder — `emitMissionSource.ts`'s `collectTemplateIds` must skip it or the export emits
+  `UNIT_TEMPLATES['mines']!` and crashes at import time.
 - **Known follow-ups:** one-unit-at-a-time placement only (no Group setup placement, unlike
   Reinforcements' queue); no per-side setup-zone Hex restriction (any empty Hex on the whole board is
-  legal); no localStorage/autosave.
+  legal); no localStorage/autosave; fixed-location Mines placed from the Starting Forces tab are
+  removed via the Map section's Placed list (no remove control on the Forces tab itself).
+
+---
+
+## F. Hidden Units (§11, built — supersedes the old M8-deferred decision)
+
+Full §11 built on user request, reversing the original locked decision (§8's old M8 entry) that
+deferred Hidden Units entirely to online play. That decision's reasoning was sound — hotseat shares
+one screen/one `GameState`, so any hotseat "hide" is a **render-layer filter, defeatable via
+browser devtools** — but the user explicitly asked for exactly that anyway, informed of the
+tradeoff. **This is a deliberate, accepted limitation, not an oversight**: do not "fix" it with a
+hotseat-only workaround, and do not re-litigate the decision without a fresh explicit ask. §11.8
+Sniper is out of scope (a separate unit-ability feature).
+
+- **Visibility (render layer only — engine state is never actually secret):** `Board.tsx`/
+  `HoverPanel.tsx` compute `activeSide = phase==='setup' ? setupSide : currentSide` once and filter
+  every unit list with `!u.hidden || u.side === activeSide` before building render/interaction data
+  — the owner always sees their own Hidden Units; the enemy sees them only once `hidden` clears.
+  `store.ts`'s stacked-unit picker (`hexClick`'s `here`) got the identical filter (a leak fixed
+  during this build — it bypassed Board.tsx's own filtering).
+- **Reveal is engine-computed, not a UI concern** (`engine/hidden.ts`, new pure-helpers module,
+  mirroring `fortifications.ts`/`obstacles.ts`'s shape): `isConcealed(state, hexId) = isCover(...)
+  || smokeLevel(...) === 2` is the single predicate behind §11.1's "Open vs Concealing Terrain"
+  bullets — a Wheeled/Tracked Hidden Unit reveals if any non-hidden enemy has LOS to its Hex and
+  `!isConcealed`; a Foot/Gun Hidden Unit additionally needs to be within 2 Hexes of such an enemy
+  (Concealing Terrain blocks the reveal outright regardless of distance, which is why §11.5's
+  "stays hidden in cover even adjacent to the enemy" needs no separate rule — it falls out of
+  `isConcealed` alone). `mustReveal`/`mustRevealForSharedHex` cover the rest of §11.1's triggers
+  (any Action but Stall/Rally/Hidden Move; sharing a Hex with a non-Hidden Unit; a successful Recon
+  by Fire).
+- **Two reveal hook points in `reducer.ts`, both funneled through one `finish()`:** (1) a top-of-
+  `reduce()` pre-check reveals the acting Unit(s) before dispatch, for every Action type except a
+  small exempt set (`STALL, RALLY, HIDDEN_MOVE, CHOOSE_FACING, SETUP_PLACE, ENTER`) — so every
+  *other* existing Action (MOVE, FIRE, PIVOT, ...) needed zero changes of its own, it just sees an
+  already-revealed, ordinary Unit; (2) `finish()` itself — the single funnel every successful `doX`
+  calls (`deny()` bypasses it, returning the untouched original state) — sweeps every currently-
+  Hidden Unit through `mustReveal` after every Action, which is what makes cascade-reveal (revealing
+  one stacked Unit auto-reveals its now-non-Hidden Hex-mates in the same Action) fall out for free
+  instead of needing bespoke stacking logic.
+- **`HIDDEN_MOVE` (§11.3-11.6):** flat 5 AP (`hiddenMoveBase`, only the hit-marker delta needs
+  isolating — Stress/CAP-reduce ride the existing `planCost` machinery), ignores terrain movement
+  penalties. Branches on `unit.hidden`: **Becoming Hidden** (§11.4) validates against
+  `becomingHiddenCandidates` (the Unit's own Hex ∪ its neighbors, filtered to Hexes out of all
+  non-hidden enemy LOS, further filtered on neighbor candidates by basic move passability — the
+  self-Hex candidate is exempt from that check since a Hex isn't its own neighbor); **Move While
+  Hidden** (§11.5) walks the path Hex-by-Hex and reveals mid-move at the first Hex that fails
+  concealment, rather than relying solely on the end-of-Action sweep (which would only ever check
+  the final Hex). §11.6 (a failed Spent Check keeps the Unit Hidden, just Spent) needs no special
+  code — a failed Spent Check only ever flips `status`, never `hidden`.
+- **`RECON_BY_FIRE` (§11.7):** validated via the existing `directFireZone` (reused as-is — already
+  implements "a Target Hex in the Attacker's Fire Zone," no distinction between a suspected-empty
+  Hex and a confirmed-occupied one). A genuinely new shape versus every other double-roll Action in
+  this codebase (§17.11's Fortification double-roll shares ONE CAP mod across both rolls): the
+  Reveal Number roll (`6 + Terrain DR Mod`) and the conditional follow-up Attack roll have
+  **independent** CAP dice mods (`capRevealDiceMod` vs `capDiceMod`/Hit Number mod), per the
+  rulebook's explicit "CAPs spent on one don't carry to the other." On a successful reveal with a
+  Hidden enemy actually present: reveal it (owner-chosen facing, via `facingToward` — "face the
+  revealer," matching the worked example), then resolve a normal attack against it, one Spent Check
+  total. **Miss-vs-empty-hex is never distinguished in logs/UI** — the attacker only ever learns
+  pass/fail on the Reveal roll itself, never "there was nothing there" specifically (confirmed live:
+  a Reveal-succeeds-but-empty-Hex recon logs `"...→ no reveal"`, textually indistinguishable from
+  what a Reveal-fails case would show).
+- **UI:** `UnitCounter.tsx` gained a violet "HIDDEN" badge (both the `counterImage` and plain
+  fallback branches). `Board.tsx` gained two new dashed highlight sets on the selected Unit's legal
+  Hexes — violet `#8b5cf6` for Hidden Move targets, burnt-orange `#c2410c` for Recon by Fire targets
+  (deliberately distinct from `transportTargets`' amber, since both could theoretically be true at
+  once). `Inspector.tsx` gained two `HIDDEN_MOVE`/`RECON_BY_FIRE` status lines alongside the
+  existing Move line. `store.ts`'s `hexClick` folded both new Action types into its existing
+  rules-legal `optionCount` tally, so an ambiguous click (e.g. a Hex that's both a plain Move target
+  and a Hidden Move target) opens `ActionChooser` instead of guessing — confirmed live. Recon by
+  Fire routes through a new `requestReconRoll` builder (mirrors `requestFireRoll`'s shape): a 1-step
+  `PendingRoll` (just the Reveal roll) on a miss or an empty-Hex hit, or 2 steps (Reveal + Attack) on
+  a genuine hit against a Hidden Unit. `DiceRoller.tsx` renders a second, independent CAP-mod
+  stepper for `kind: 'recon'` (Reveal Number mod always shown before the first die; the Hit Number
+  mod only shown once a second step exists) — both decided up front, before any die is rolled, so
+  adjusting either never has to "un-roll" an already-settled die.
+- **Reinforcement waves can be authored Hidden too** (closing a gap the original data-only build
+  left open): `ReinforcementWaveDef.units[]`/`EditorWave`'s `WaveUnit` gained `hidden?: boolean`;
+  the Mission Editor's Reinforcements tab has a "Hidden (§11)" checkbox next to the Facing selector;
+  `emitMissionSource.ts`/`loadMissionSource.ts` round-trip it; **`state.ts`'s `initGame` reinforcement-
+  building loop copies it onto the built `ReinforcementUnit`** — this last step is the one piece that
+  was still missing after the type field alone was added; a hidden reinforcement that `ENTER`s the
+  Map (an Action deliberately exempt from bullet-1's auto-reveal, mirroring `doSetupPlace`) stays
+  Hidden on arrival, subject to the normal post-Action sweep from then on.
+- **A real correctness gap found and closed while wiring the UI** (not hypothetical — normal FIRE/
+  CLOSE_COMBAT/INDIRECT_FIRE had no check stopping them from targeting a Hidden Unit directly, and
+  the stacked-Hex resolvers could hit a Hidden Unit sharing a Hex with a visible one): `actions.ts`'s
+  target enumeration, `combat.ts`'s `enemiesInHex`/`attackContext`/`closeCombatContext`, and
+  `mortar.ts`'s `rollIndirectFire` all gained an explicit `!u.hidden`/`target.hidden` exclusion —
+  the only sanctioned way to attack a suspected Hidden Unit is Recon by Fire.
+- **The dead Advanced-tab "Hidden Units" checklist was removed**, not left alongside the real
+  mechanic — it predated this build, was never wired to `initGame`, and would have been a confusing
+  footgun (two different "hidden" controls, one doing nothing) had it survived.
+  `EditorAdvancedState.hiddenIds`/`toggleHidden()`, `AdvancedSection.tsx`'s checklist block, and
+  `MissionAdvancedNotes.hiddenUnitIds` (+ its emit/load round-trip) are all gone.
+- **Verified live:** `Hidden Units Sandbox (test)` mission (`data/missions/hiddenUnitsSandbox.ts` —
+  two Woods hexes, one Hidden Unit per side starting in cover, one visible Unit per side adjacent/in
+  Fire Zone). Confirmed in the actual browser, not just Vitest: the owner-always-sees/enemy-never-
+  sees visibility split at Mission start; a real `HIDDEN_MOVE` (`ActionChooser` correctly offered
+  both plain Move and Hidden Move; committed at flat 5 AP, failed its Spent Check, stayed Hidden);
+  the full-board visibility flip on turn change: a real `RECON_BY_FIRE` through `DiceRoller`'s
+  `'recon'` kind (Reveal Number + CAP stepper, correct `"no reveal"` wording on a Reveal-succeeds-
+  but-empty-Hex case, Spent Check afterward). Full suite (566 tests) + typecheck + build +
+  conformance (0 violations) green throughout.
+
+---
+
+## G. Battle/Weapon/Veteran Cards (§8) + Off-Board Artillery (§13.4-13.9, built)
+
+M12 — the last unbuilt v3 rules module. Full engine mechanics + real Mission Editor authoring +
+a minimal, plain-text live-game hand panel (the fancy card-art UI stays deliberately deferred, per
+user request). **The individual card catalog (title/cost/effect text for all ~38 real cards) was
+sourced by reading `docs/SoS3 Rulebook v70 single pages.pdf` directly** — the user explicitly
+overrode this file's earlier standing "never read the PDF" instruction for this one build (§0/CLAUDE.md
+itself has been updated to reflect that override is now historical, not a live prohibition going
+forward — see the note at the end of this section). `rules/08-battle-cards.md`'s "Card Catalog"
+section is the resulting committed transcription — read that, not the PDF, for anything Cards-related
+from here on.
+
+- **One real data gap, deliberately left open and flagged, not silently guessed:** each card's
+  Green-vs-Blue cost color (§8.6) is conveyed only by ink color on the physical card, which text
+  extraction can't recover (no `pdftoppm`/ImageMagick/ghostscript/`mutool` available in this
+  environment to render pages as images). ~13 nonzero-cost cards carry a best-guess color with an
+  inline `// TODO(cost-color)` comment in `src/data/cards/*.ts` — correctable later with a glance at
+  the physical/PDF cards. Zero-cost cards are unaffected (0AP behaves identically either color).
+- **Framework-only scope, confirmed with the user up front:** every card gets real Draw/Hold/
+  Discard, Green/Blue cost-paying, Action-vs-Bonus Stress/Turn-ending consequences, Mission-card
+  auto-resolve, and the Hidden battle icon's reveal exemption — but a card's own BESPOKE rules text
+  (Adrenaline's free action, Follow Me's auto-rally, etc.) is NOT mechanically simulated. Playing a
+  card logs its full name/cost/effect text as a `GameEvent` and applies only the shared consequences
+  every card of its type/color shares. This is deliberate scope-narrowing, not an oversight — a
+  natural incremental follow-up once specific cards are prioritized.
+- **OBA is real, not stubbed** (the user's explicit choice — Artillery Icon Cards are worthless
+  without it, and Drift/blast math is pure rules, not bespoke per-card text): `PLAN_OBA_STRIKE`
+  (§13.5) queues a Strike for `state.round + 1`; `turn.ts`'s `startRound` automatically resolves any
+  due Strike (§13.6-13.9) via `cards.ts`'s `resolveObaStrike` (Drift Check, then one Attack — always
+  HE vs Flank Defense — against every non-Hidden Unit in the final marker Hex and its 6 neighbors,
+  including friendly Units per §13.8) + `applyResolvedObaStrike` (commits the roll, logs the Drift
+  Check and every Attack in full — this **is** the "text read-out" for OBA, since there's no
+  marker-on-map UI either). **One documented, engine-internal convention**: the Drift direction's
+  1-6 roll maps onto the engine's existing 6-hex `AXIAL_DIRECTIONS` order — the physical Artillery
+  Marker's own printed arrow numbering isn't recoverable from the OCR source, so this is our own
+  consistent mapping, not a reproduction of print art (the rulebook's own worked-example drift
+  *destination* is therefore illustrative flavor only in the test suite, not a literal fixture — the
+  Drift Check pass/fail, drift distance = the failed roll's value, and the friendly-fire Attack math
+  ARE literal, reproduced fixtures). **CAP mod defaults to 0 for both the Drift Check and the
+  follow-up Attacks this pass** — no interactive stepper UI exists for OBA yet (same "framework, not
+  full UI" scope), flagged as a follow-up once a real Cards UI lands.
+- **One documented simplification for `PLAN_OBA_STRIKE`'s timing**: the rulebook places this action
+  "during the Pre-Round Sequence" itself; this engine has no such sub-phase distinct from normal
+  Turn-Actions, so it's legal any time during the owning side's own Turn instead — the 1-Round delay
+  and Drift/blast mechanics themselves are unaffected, only *when in the Turn cycle* you may declare
+  it. It is intentionally free (doesn't end the Turn or Stress a Unit), since in the real rules this
+  happens entirely outside the Turn structure to begin with.
+- **A genuinely new mechanical wrinkle, scoped narrowly rather than built out fully**: several cards
+  (Battle Card #06 Battlefield Confusion, Veteran Cards V05 and V09) are playable "during the
+  opponent's Turn" per their own printed text — this engine's every other Action has always been
+  strictly `currentSide`-gated. `PLAY_CARD` deliberately has **no** `currentSide` check at all (any
+  side may attempt to play from its own hand at any time) — not a full interrupt-stack system, just
+  an absence of the usual gate, since per-card interrupt-timing enforcement is itself a
+  bespoke-effect concern out of framework scope.
+- **A real, live-caught bug, fixed during browser verification (not just Vitest)**: the first
+  `playCard`/`planObaStrike` store implementations inferred `side` from `GameState.currentSide`
+  rather than from which side's hand panel the click came from — silently denying (mislabeled as
+  "card not in hand") any attempt to play a card belonging to the side that *wasn't* currently active,
+  which is a normal, intended case for this feature (cards are playable regardless of whose Turn it
+  is). Fixed by threading an explicit `side` parameter from `HandPanel.tsx` (which already knows
+  whose hand it's rendering) through `playCard`/`armObaCard`/`planObaStrike`, replacing the
+  single-`CardId` `armedObaCardId` with `armedObaCard: { side, cardId } | null`. **Lesson: a store
+  action that infers "which side" from `currentSide` is wrong for any mechanic that isn't
+  strictly turn-gated — cards are the first mechanic in this codebase where that assumption doesn't
+  hold**, matching the M13 online-play lesson about not assuming "whose Turn is it" is universal.
+- **Data model**: `CardDef` (`engine/types.ts`) — category (`battle`/`weapon`/`veteran`, discard
+  rule), type (`action`/`bonus`/`mission`/`artillery`, §8.4 icon), `cost` (absent for mission/
+  artillery), `battleIcons` (§8.9: hidden/group/HE), `restrictedTo` (Weapon Cards' own nation/kind
+  text), `firepower` (Artillery only). `MissionDef.cardConfig` (battleCardIds, drawPerRound,
+  initialHand, obaAllowedRounds) and `MissionDef.missionCardText` are real, consumed fields —
+  **supersede**, not duplicate, the old inert `MissionAdvancedNotes.battleCards`/`obaAllowedRounds`/
+  `obaStrikes` (now `@deprecated` dead fields, kept only until nothing references them). `GameState`
+  gained `cardDeck` (one shared, seeded, shuffled Draw Deck per §8.1 — not per-side), `drawPerRound`,
+  `obaAllowedRounds`, `missionCardText`, `pendingObaStrikes` — all carried through by `initGame`
+  (which also builds+shuffles the deck via a new `rng.ts` `shuffle` and seeds each side's
+  `PlayerState.hand` from `initialHand` — **this wiring was the one genuinely missing piece** after
+  types/catalog/reducer/turn/actions were all done; caught only while authoring the verification
+  Mission, not by any test, since no prior test exercised `initGame` with a real `cardConfig`).
+- **`src/engine/cards.ts`** (new): `buildBattleDeck`/`drawBattleCards` (§8.1/§9.8, Mission-card
+  auto-resolve-and-redraw lives here, Halt Order ends the Mission immediately), `canPlayCard` (coarse
+  legality, mirrors `directFireZone`'s shape), `resolveDriftCheck`/`resolveObaStrike` (pure, thread
+  `RngState` like every other roll)/`applyResolvedObaStrike` (the one mutating, `state`-first
+  function here, matching `victory.ts`'s `gainVp`/`turn.ts`'s own direct-mutation convention rather
+  than `reducer.ts`'s closure-and-`events`-array pattern — needed since `turn.ts`'s `startRound` has
+  no access to `reducer.ts`'s private `applyHit`/`destroyUnit` closures; a documented, narrow
+  simplification: a Transport destroyed by OBA doesn't auto-unload its passenger here, unlike
+  `reducer.ts`'s own `destroyUnit`, since duplicating that closure-based §15.11 logic wasn't worth
+  the coupling for this rare edge case).
+- **`turn.ts`'s `startRound`** gained the Draw-Battle-Cards step (§9.4 step 6, right after CAP reset)
+  and the Resolve-pending-OBA step (step 9, right before the Initiative roll) — both no-ops for any
+  Mission without `cardConfig`. A Halt-Order-triggered Mission end mid-draw short-circuits the rest
+  of `startRound` (skips OBA resolution/Initiative, neither of which make sense once the Mission is
+  over).
+- **Mission Editor**: the Advanced tab's Battle Cards/OBA sections were replaced with a real
+  `battleCardIds` checklist (against the full catalog, not just aggregate draw counts), per-side
+  Weapon/Veteran `initialHand` checklists, a real `obaAllowedRounds` picker, and a conditional
+  `missionCardText` field per Mission-type card actually in the deck. The "⚠ Coming later" banner was
+  narrowed to just the still-genuinely-inert Air Support/Terrain Overlays sections underneath.
+- **Live UI**: `HandPanel.tsx` (new, mounted per-side in the left sidebar next to
+  `ReinforcementsPanel`) — a plain name/cost/effect-text row per held card, a "Play" button (disabled
+  with a tooltip for a Green-cost card with no Unit selected), and a "Target… (§13.5)" button for
+  Artillery cards that arms `store.ts`'s `armedObaCard` (the next board-hex click plans the Strike,
+  reusing `Board.tsx`'s existing `hexClick` dispatch path via a new early-return branch — no new board
+  highlighting was added, a small, explicitly-noted gap since any Hex is a legal OBA target anyway).
+- **Verified live** (not just Vitest): `Cards Sandbox (test)` mission
+  (`data/missions/cardsSandbox.ts` — one of each catalog category/type: '01' Adrenaline
+  Action/Green, '12' Swift Action Action/Blue, '18' Score Mission-type with authored
+  `missionCardText`, 'W01' Grenades Weapon/German-restricted, 'V06' Iron Will Veteran, 'W06'
+  Divisional Artillery). Confirmed in the actual browser: both sides' hands render correctly at
+  Round 1 with the right initial-hand + drawn-card counts; a Green Action-type card (Adrenaline)
+  played end-to-end — logged, discarded, Unit Stressed, Turn switched to the other side; an Artillery
+  card armed, targeted at a Hex, and planned (logged, discarded, queued for Round 2) — and, after
+  both sides Passed to end Round 1, Round 2's Pre-Round Sequence automatically resolved the Strike
+  (Drift Check succeeded, logged in full) exactly as designed. Full suite (617 tests) + typecheck +
+  build + conformance (0 violations) green throughout.
+- **CLAUDE.md's own former "do not read the PDF" instruction** (this file's opening paragraph) was
+  explicitly overridden by the user for this one build and has been updated accordingly — see the
+  opening paragraph's current wording for what's actually in force now.
 
 ---
 
@@ -389,19 +660,24 @@ This repo is self-describing: a fresh session needs only the code + these docs.
   `npm run build`, `npm run conformance`. All green = known-good baseline.
 - **Run it:** `npm run dev` → http://localhost:5173. Windows: Node 24 is at
   `C:\Program Files\nodejs` (not on Git Bash's PATH; in PowerShell prepend it).
-- **Current status:** the v3 cutover, M5–M11, and M13 steps 1-4 (online multiplayer, deployed live
-  on Render) are all done; conformance is at 0 violations. **M8 (Hidden Units) is deliberately
-  deferred to online play** (§8, locked decision — a hotseat render-layer hide would be trivially
-  defeated; build it once a real per-client server exists to filter state on). **M12 (Cards/OBA)
-  remains the only unbuilt v3 combat module**, scheduled after the rest of M13 (opponent-approved
-  undo, real visual design). §8 has the full detail on every milestone and why each decision was
-  made — read that, not this bullet, for specifics.
+- **Current status:** the v3 cutover, M5–M11, M13 steps 1-4 (online multiplayer, deployed live on
+  Render), and **now M12 (Cards/OBA)** are all done; conformance is at 0 violations. **Every v3 rules
+  module is now built** — §8's milestone roadmap has no remaining unbuilt combat module, only M13's
+  own follow-up work (opponent-approved undo, real visual design) is still open. **M8 (Hidden Units)
+  was built too** (§F — the original "defer to online play" decision was explicitly reversed on user
+  request; it's a render-layer-only mechanism, devtools-defeatable, and that tradeoff is accepted,
+  not an oversight). §8 has the full detail on every milestone and why each decision was made — read
+  that, not this bullet, for specifics.
   Separately from the v3/M-numbered roadmap: the board geometry was migrated pointy-top → flat-top
   (§B, done, every mission/sandbox re-authored onto it); **§C's Mission Editor** and **§D's Map
   Editor** are both built, in-app authoring tools off `SetupScreen` — read their sections before
   touching either again. **§E's Pre-Mission Setup phase** is also built (a Mission-configurable
   pre-Round-1 forces-placement sequence, not a `rules/` chapter) — read it before touching
-  `setupForces`/`SETUP_PLACE`/`SetupPanel.tsx` again.
+  `setupForces`/`SETUP_PLACE`/`SetupPanel.tsx` again. **§F's Hidden Units** (§11) is built — read it
+  before touching `hidden`/`HIDDEN_MOVE`/`RECON_BY_FIRE`/`hidden.ts` again. **§G's Cards/OBA** (§8,
+  §13.4-13.9) is built — read it before touching `cards.ts`/`PLAY_CARD`/`PLAN_OBA_STRIKE`/
+  `HandPanel.tsx` again, and before assuming the card catalog is complete (it has ~13 flagged
+  best-guess cost colors, see §G).
 
 ---
 
@@ -417,9 +693,9 @@ at the end wins (the v3 "no-tie" VP track — one side always leads).
   authoritative server + WebSocket rooms can be added later with **no engine changes**.
 - **Vertical slice = infantry + vehicles, Mission 1 ("Partisans") playable end-to-end.** Vehicles
   (M6), Mortars + Smoke (M7), Hills/Elevation (M9), Fortifications and Obstacles (M10 — Barbed Wire,
-  Mines, Road Block, Trenches, Bunkers, Hasty Defenses), and Flamethrowers + Pioneers (M11) are all
-  built; OBA and hidden units remain **later modules** (roadmap §8) — Hidden Units specifically
-  deferred to online play, see §8.
+  Mines, Road Block, Trenches, Bunkers, Hasty Defenses), Flamethrowers + Pioneers (M11), Hidden
+  Units (M8, §F), and Battle/Weapon/Veteran Cards + OBA (M12, §G — framework-only card effects, real
+  OBA Drift/blast mechanics) are all built. Every v3 combat rules module is now built.
 - **Stack:** Vite + React + TypeScript, **client-only**. SVG hex board. Pure-function rules engine.
   Zustand store. Vitest for tests.
 - **Content:** we author our **own** stats/terrain/scenario data and **original simple graphics**.
@@ -521,7 +797,7 @@ conflict-of-heroes/
       smoke.ts              # §14: Heavy/Light DR/AR, LOS-path bonus, Rally bonus, dissipation
       obstacles.ts          # §17.7-17.10: rollMinesAttack, minesTargetsFor/OwnerSide, destroysBarbedWire
       fortifications.ts     # §17.1-17.6,17.11-17.12: canOccupy, fortificationDrBonus, rollStructureDestroy
-      cards.ts              # (deferred) Battle/Weapon cards §8; OBA (§13.4-13.9) waits on this too
+      cards.ts               # §8 Battle/Weapon/Veteran Cards + §13.4-13.9 OBA (Drift/blast), §G
       index.ts              # public engine API surface
       __tests__/            # Vitest
     data/                   # authored content (no logic)
@@ -541,7 +817,7 @@ conflict-of-heroes/
       editor/emitMissionSource.ts  # §C: authored editor state -> real self-contained TS MissionDef source
       editor/emitMapSource.ts      # §D: authored map state -> real self-contained TS MapHexDef[] source
       editor/__tests__/
-      cards/                # deferred to the cards milestone
+      cards/                 # §G: BATTLE_CARDS/WEAPON_CARDS/VETERAN_CARDS catalog + merged CARD_CATALOG
       __tests__/
     state/  store.ts persistence.ts             # Zustand + localStorage saves; store.ts also owns M13's online dispatch fork
     state/editorStore.ts    # §C: Mission Editor's own small Zustand store
@@ -574,7 +850,7 @@ GameState = {
     nations: NationId[]
     capStart: number; capCurrent: number; unitLosses: number   // capCurrent floored at 3 (7.13)
     vp: number
-    hand: CardId[]                    // (cards deferred)
+    hand: CardId[]                    // §8/§G — real, drawn/discarded via cards.ts + reducer.ts
     passed: boolean
     // NOTE v3: no `activatedUnitId`, no `ap` pool.
   }>
@@ -630,12 +906,12 @@ When in doubt, open `rules/INDEX.md`. Read the file before implementing; cite `N
 | Fire Zone: arc, LOS, range | `los.ts`, `range.ts`, `hex.ts` | 5.0–5.3 | `rules/05` |
 | Combat: DR/AR, soft/armored, flank, terrain, walls, **HN=DR−AR**, stacked, close combat, crewed | `combat.ts` | 6.0–6.12 | `rules/06` |
 | Hits, hit markers, critical (+4), 2nd hit, rally, destroyed, CAP loss | `hits.ts`, `rally.ts`, `cap.ts` | 7.0–7.13 | `rules/07` |
-| Battle/Weapon cards (Green/Blue cost) | `cards.ts` *(deferred)* | 8.0–8.8 | `rules/08` |
+| **Battle/Weapon/Veteran Cards** ✅: deck construction/draw/discard (§8.1/§9.8), Green/Blue cost-paying, Action-vs-Bonus Stress/Turn-ending, Mission-card auto-resolve, Hidden battle-icon reveal exemption — framework-only (bespoke per-card effects not simulated); real card catalog transcribed in this file's own Card Catalog section | `cards.ts`, `reducer.ts`, `actions.ts`, `data/cards/` *(§G)* | 8.0–8.9 | `rules/08` |
 | Round end, **Pre-Round Sequence (10 steps)**, **Initiative (2d6≥7, non-advantage)**, VP no-tie | `turn.ts`, `victory.ts` | 9.0–9.11 | `rules/09` |
 | **Group Actions** (one Spent Check; group move = highest; attack = leader +1AR/supporter) | `groups.ts` *(M5)* | 10.0–10.12 | `rules/10` |
-| *(later)* hidden units | — | 11.x | `rules/11` |
+| **Hidden Units** ✅: reveal triggers (any Action but Stall/Rally/Hidden Move, sharing a Hex with a non-Hidden Unit, Open-Terrain LOS+range for Foot, any LOS for Wheeled/Tracked, a successful Recon by Fire), Hidden Move (flat 5AP, becoming-Hidden vs move-while-Hidden), Recon by Fire (independent Reveal-Number/Hit-Number CAP mods) — render-layer-only visibility (hotseat, devtools-defeatable, accepted tradeoff); §11.8 Sniper out of scope | `hidden.ts`, `reducer.ts`, `actions.ts` *(§F)* | 11.x | `rules/11` |
 | **Hills/elevation**: move cost (Sloping ±1AP, Steep ±2AP incl. vehicle Steep-impassable-off-road), elevation-aware LOS (Plateau Effect, Blind Spots), Elevation Combat Bonus | `movement.ts`, `los.ts`, `combat.ts` *(M9)* | 12.x | `rules/12` |
-| Mortars: Direct/Indirect Attack, Spotter Hex, HE/Air Burst, Spotter Hex Elevation Bonus (M9); *(later)* OBA/drift (pending Cards, M12) | `combat.ts`, `mortar.ts` *(M7/M9)* | 13.0–13.3, 13.9 | `rules/13` |
+| Mortars: Direct/Indirect Attack, Spotter Hex, HE/Air Burst, Spotter Hex Elevation Bonus (M9); **OBA** ✅: Drift Check, blast (target Hex + 6 neighbors, incl. friendly), Artillery Card Firepower (§G) | `combat.ts`, `mortar.ts` *(M7/M9)*, `cards.ts` *(§G)* | 13.0–13.3, 13.9 | `rules/13` |
 | Smoke: DR/AR, LOS blocking, Rally bonus, dissipation | `smoke.ts`, `los.ts`, `turn.ts`, `rally.ts` *(M7)* | 14.x | `rules/14` |
 | **Vehicles**: movement (wheeled/tracked, Bonus Moves), combat specifics, Transport/Towing; *(later)* Towing damaged Vehicles (§15.10) | `movement.ts`, `combat.ts`, `hits.ts`, `reducer.ts` *(M6)* | 15.x | `rules/15` |
 | **Special units**: Turreted, Open-Topped, APC Transport Bonus, Trucks/Wagons, Field Guns, Mobile Vehicles (§16.4) | `combat.ts`, `movement.ts`, `reducer.ts`, `actions.ts`, `victory.ts` *(M6)* | 16.x | `rules/16` |
@@ -692,8 +968,10 @@ target's DR colour (blue → vehicle pile, red → foot pile).
     adds immunity to Mines Attacks + Fire Smoke capped to Range 1. **Counter art (prototype):**
     `counterImage?: string` swaps a Unit's counter to the image-backed `UnitCounter.tsx` layout
     (opt-in; omit to keep the old rendering).
-  - **Add a card:** `{id, type, cost:{green?,blue?}, effect}` in `data/cards/` — deferred, not yet
-    a real action type.
+  - **Add a card:** a `CardDef` (`{id, name, category, type, count, cost?, effectText, battleIcons?,
+    restrictedTo?, firepower?}`) in `src/data/cards/battleCards.ts`/`weaponCards.ts`/`veteranCards.ts`
+    (§G) — real, played via `PLAY_CARD`/`PLAN_OBA_STRIKE`, framework-only (the card's own bespoke
+    effect isn't mechanically simulated, only its shared type/cost/discard mechanics).
   - **Add a mission:** new file in `data/missions/`. To build on the flat-top substrate (real
     labels/board number/multi-board merging), start from `data/hexBoardMap.ts`'s
     `generateOpenBoard(boards)` and override hexes by `id` (see `hexBoardDemo.ts`). Hand-authoring a
@@ -702,9 +980,10 @@ target's DR colour (blue → vehicle pile, red → foot pile).
 - **Actions** are plain serializable objects (`engine/types.ts`'s `Action` union): `MOVE`, `PIVOT`,
   `FIRE`/`CLOSE_COMBAT` (+ `capDiceMod?`/`capCostReduce?`/`minesCapMods?`), `RALLY`, `STALL`,
   `PASS`; Group Actions `GROUP_MOVE`/`GROUP_ATTACK`/`GROUP_RALLY`; Transport `LOAD`/`UNLOAD`;
-  reinforcement `ENTER`; Mortar `INDIRECT_FIRE`/`FIRE_SMOKE`. `minesCapMods` is resolved by the
-  store's Mines CAP-choice dialog (`MinesConfirm.tsx`) *before* dispatch, since the Mines' owning
-  side may not be the acting side. Cards (`PLAY_CARD`) deferred. **Removed in v3:**
+  reinforcement `ENTER`; Mortar `INDIRECT_FIRE`/`FIRE_SMOKE`; Cards `PLAY_CARD`/`PLAN_OBA_STRIKE`
+  (§G — the latter queues an OBA Strike, resolved automatically by `turn.ts`, not itself a roll).
+  `minesCapMods` is resolved by the store's Mines CAP-choice dialog (`MinesConfirm.tsx`) *before*
+  dispatch, since the Mines' owning side may not be the acting side. **Removed in v3:**
   `ACTIVATE_UNIT`, `MARK_SPENT`.
 - **Tests:** colocate in `__tests__/`. Reproduce the v3 red-box examples from `rules/NN-*.md` as
   fixtures — they're worked rule implementations and make excellent oracles. Shared fixture builders
@@ -735,8 +1014,14 @@ an AP pool)*
   board-list to walk), per-side Starting Forces (fixed placements AND the Setup Pool, labeled
   "placed by the player pre-Round 1"), and Reinforcements per wave. Nothing here reads live
   `GameState` — it's pure `MissionDef` inspection, so it works before any game exists.
-- **Mouse-wheel zoom, centered on the cursor** ✅ `Board.tsx` drives the `<svg>` `viewBox` from
-  `zoom`/`pan` state, clamped `[0.5,4]×`. **Never call `setPan` from inside `setZoom`'s functional
+- **Mouse wheel pans vertically; Ctrl+wheel zooms, centered on the cursor** ✅ `Board.tsx` (live
+  game) and `ui/editor/EditorBoard.tsx` (Mission Editor AND Map Editor, which both render through
+  it) each drive their own `<svg>` `viewBox` from `zoom`/`pan` state, clamped `[0.5,4]×`. Plain
+  wheel only ever changes `pan.y` (divided by the current zoom, so a given scroll notch moves a
+  consistent on-screen distance regardless of zoom level) — it never touches `zoom` at all; Ctrl
+  held is what routes into the pre-existing cursor-centered zoom math. `preventDefault()` fires on
+  every wheel event before that branch, which also suppresses the browser's own native Ctrl+wheel
+  page-zoom, not just page scroll. **Never call `setPan` from inside `setZoom`'s functional
   updater** — `<StrictMode>` double-invokes updaters and would compound the pan math; read/write a
   plain ref and call both setters with already-computed values instead (see memory
   `conflict-of-heroes-strictmode-nested-setstate`).
@@ -849,14 +1134,16 @@ an AP pool)*
   Hex, per §13.3). Direct Attacks reuse `FIRE`; Indirect Attacks are `INDIRECT_FIRE`, resolved via a
   Spotter Hex that supplies LOS while Arc/Range stay keyed to the Mortar's own Hex. `smoke.ts` —
   Heavy/Light DR/AR, LOS blocking, Rally bonus, dissipation; `FIRE_SMOKE` places Heavy Smoke on any
-  non-Water Hex whether or not occupied. *Deferred on purpose:* **OBA (§13.4-13.9)** waits for the
-  real Cards subsystem (M12), since it's specified as Artillery Weapon Cards.
-- **M8 — Hidden Units (§11) — DEFERRED to online play, locked decision.** Hidden Units are
-  fundamentally secret-information state, and hotseat shares one screen/one `GameState` — there's no
-  "look away" enforcement possible short of a genuine per-player view. Build it once M13's
-  authoritative server exists to filter state on. **Do not attempt a hotseat-only approximation**
-  (hiding enemy Units from the board render by `currentSide`) — trivially defeated via devtools, and
-  would need rebuilding anyway.
+  non-Water Hex whether or not occupied. *Deferred at the time:* **OBA (§13.4-13.9)** waited for the
+  real Cards subsystem, since it's specified as Artillery Weapon Cards — both shipped together later
+  as M12 (§G).
+- **M8 — Hidden Units (§11)** ✅ Originally deferred to online play (locked decision: hotseat shares
+  one screen/one `GameState`, so there's no "look away" enforcement short of a genuine per-player
+  view) — **reversed on explicit user request**, informed of the tradeoff. Built as exactly the
+  "hotseat-only approximation" the original decision warned against (hiding enemy Units from the
+  board render by `currentSide`/`activeSide`) — still trivially defeated via devtools, still
+  accepted as-is. Full detail in §F: reveal triggers, Hidden Move, Recon by Fire, the
+  `finish()`-funnel reveal sweep, and the render-layer visibility filter.
 - **M9 — Hills and Elevation (§12)** ✅ Elevation Move Cost Penalty (Sloping ±1AP ascending-only,
   Steep ±2AP both directions, impassable to vehicles off-road unless on a Road); elevation-aware
   `hasLOS` (ties block only if strictly exceeding the higher endpoint's level, except a genuine
@@ -920,9 +1207,15 @@ an AP pool)*
   stale cached `index.html` referencing an old hashed bundle 404s cleanly instead of serving HTML in
   place of missing JS). **Still open:** a real over-the-internet test with a genuinely separate
   second person hasn't been confirmed either way — ask before assuming.
-  **Not yet built:** opponent-approved Undo request; the real visual design for the lobby/status UI.
-  → M12 Cards (incl. OBA) → the rest of M13 (visual design, opponent-approved undo) → M8 Hidden
-  Units (now genuinely buildable).
+  **Not yet built:** opponent-approved Undo request; the real visual design for the lobby/status UI —
+  the only work left in the whole v3/M-numbered roadmap. (M8 Hidden Units and M12 Cards/OBA, both
+  formerly entries after M13 here, shipped early/out-of-order on user request — see §F/§G.)
+- **M12 — Battle/Weapon/Veteran Cards (§8) + Off-Board Artillery (§13.4-13.9)** ✅ — see §G for the
+  full build detail (decisions, data model, live verification). The last remaining unbuilt v3 rules
+  module; shipped after M13 steps 1-4, on user request, reversing the original "Cards need real
+  per-client secret info that only online play provides" deferral reasoning below — the user
+  explicitly asked for the framework-only, render-doesn't-matter version instead of waiting for a
+  true secret-hand mechanism, the same kind of tradeoff M8 Hidden Units already accepted.
 
 ---
 

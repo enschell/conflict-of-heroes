@@ -15,7 +15,10 @@ import { quote, raw, slugify, toSource } from './tsSource';
 function collectTemplateIds(state: EditorAuthoredState): string[] {
   const ids = new Set<string>();
   for (const p of state.forces.placed) ids.add(p.templateId);
-  for (const p of state.forces.setupPool) ids.add(p.templateId);
+  // A Mines token's templateId is a display-only placeholder ('mines'), not a
+  // real UNIT_TEMPLATES key — including it would emit `UNIT_TEMPLATES['mines']!`
+  // and crash the exported module at import time.
+  for (const p of state.forces.setupPool) if (!p.mine) ids.add(p.templateId);
   for (const side of ['A', 'B'] as const) {
     for (const w of state.reinforcements.waves[side]) {
       for (const u of w.units) ids.add(u.templateId);
@@ -66,17 +69,8 @@ function buildExitZones(state: EditorAuthoredState): ExitZoneDef[] | undefined {
 
 function buildAdvancedNotes(state: EditorAuthoredState) {
   const { advanced } = state;
-  const anyBattleCards = (['A', 'B'] as const).some(
-    (s) => advanced.battleCards[s].round1 !== 0 || advanced.battleCards[s].eachRoundAfter !== 0,
-  );
   const anyAirSupport = advanced.airSupport.A !== '' || advanced.airSupport.B !== '';
   const notes = {
-    battleCards: anyBattleCards ? advanced.battleCards : undefined,
-    hiddenUnitIds: advanced.hiddenIds.length ? advanced.hiddenIds : undefined,
-    obaAllowedRounds: advanced.obaAllowedRounds.length ? advanced.obaAllowedRounds : undefined,
-    obaStrikes: advanced.obaStrikes.length
-      ? advanced.obaStrikes.map((o) => ({ id: o.id, plannedRound: o.plannedRound }))
-      : undefined,
     airSupport: anyAirSupport
       ? { A: advanced.airSupport.A === '' ? undefined : advanced.airSupport.A, B: advanced.airSupport.B === '' ? undefined : advanced.airSupport.B }
       : undefined,
@@ -84,6 +78,30 @@ function buildAdvancedNotes(state: EditorAuthoredState) {
   };
   const hasAny = Object.values(notes).some((v) => v !== undefined);
   return hasAny ? notes : undefined;
+}
+
+/** §8/§13.4-13.9: real, consumed Cards/OBA configuration (not "advanced notes"). */
+function buildCardConfig(state: EditorAuthoredState) {
+  const { cards } = state;
+  if (!cards.battleCardIds.length) return undefined;
+  const anyDraw = (['A', 'B'] as const).some(
+    (s) => cards.drawPerRound[s].round1 !== 0 || cards.drawPerRound[s].eachRoundAfter !== 0,
+  );
+  const anyInitialHand = cards.initialHand.A.length > 0 || cards.initialHand.B.length > 0;
+  return {
+    battleCardIds: cards.battleCardIds,
+    drawPerRound: anyDraw ? cards.drawPerRound : undefined,
+    initialHand: anyInitialHand
+      ? { A: cards.initialHand.A.length ? cards.initialHand.A : undefined, B: cards.initialHand.B.length ? cards.initialHand.B : undefined }
+      : undefined,
+    obaAllowedRounds: cards.obaAllowedRounds.length ? cards.obaAllowedRounds : undefined,
+  };
+}
+
+function buildMissionCardText(state: EditorAuthoredState) {
+  const { cards } = state;
+  const entries = Object.entries(cards.missionCardText).filter(([id, text]) => cards.battleCardIds.includes(id) && text.trim());
+  return entries.length ? Object.fromEntries(entries) : undefined;
 }
 
 /** Produce the full, self-contained TypeScript `MissionDef` source text. */
@@ -123,7 +141,7 @@ export function emitMissionSource(state: EditorAuthoredState): string {
       earliestRound: w.earliestRound,
       entryHexIds: w.entryHexIds,
       entryDescription: w.description,
-      units: w.units.map((u) => ({ id: u.id, templateId: u.templateId, facing: u.facing })),
+      units: w.units.map((u) => ({ id: u.id, templateId: u.templateId, facing: u.facing, hidden: u.hidden || undefined })),
     })),
   );
 
@@ -144,9 +162,23 @@ export function emitMissionSource(state: EditorAuthoredState): string {
     unitKillVp: Object.keys(unitKillVp).length ? unitKillVp : undefined,
     vpPerSurvivor: Object.keys(vpPerSurvivor).length ? vpPerSurvivor : undefined,
     hexes,
-    units: state.forces.placed.map((p) => ({ id: p.id, side: p.side, templateId: p.templateId, hexId: p.hexId, facing: p.facing })),
+    units: state.forces.placed.map((p) => ({
+      id: p.id,
+      side: p.side,
+      templateId: p.templateId,
+      hexId: p.hexId,
+      facing: p.facing,
+      hidden: p.hidden || undefined,
+    })),
     setupForces: state.forces.setupPool.length
-      ? state.forces.setupPool.map((p) => ({ id: p.id, side: p.side, templateId: p.templateId, facing: p.facing }))
+      ? state.forces.setupPool.map((p) => ({
+          id: p.id,
+          side: p.side,
+          templateId: p.templateId,
+          facing: p.facing,
+          hidden: p.hidden || undefined,
+          mine: p.mine,
+        }))
       : undefined,
     setupFirstSide: state.forces.setupPool.length && state.forces.setupFirstSide !== 'A' ? state.forces.setupFirstSide : undefined,
     setupInstructions: state.forces.setupInstructions || undefined,
@@ -160,6 +192,8 @@ export function emitMissionSource(state: EditorAuthoredState): string {
     sideOrders: Object.keys(sideOrders).length ? sideOrders : undefined,
     missionInstructions: Object.keys(missionInstructions).length ? missionInstructions : undefined,
     advancedNotes: buildAdvancedNotes(state),
+    cardConfig: buildCardConfig(state),
+    missionCardText: buildMissionCardText(state),
   };
 
   const constName = id.toUpperCase().replace(/-/g, '_') + '_MISSION';

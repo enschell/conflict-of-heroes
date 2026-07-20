@@ -165,6 +165,20 @@ export function UnitCounter({
                 </text>
               </g>
             )}
+            {/* §11 Hidden Units — floats above (top-left), distinct purple from
+                the blue Hasty-Defense/Fortification badges below the counter.
+                Only ever reaches this render call for the owner's own view
+                (Board.tsx/HoverPanel.tsx filter enemy-owned hidden Units out
+                before UnitCounter is invoked at all) or the Inspector's own
+                unfiltered by-id lookup of a selected Unit. */}
+            {unit.hidden && (
+              <g>
+                <rect x={x} y={y - fs} width={fs * 1.9} height={fs} rx={2} fill="#8b5cf6" />
+                <text x={x + fs * 0.95} y={y - fs * 0.2} fontSize={fs * 0.65} fill="#fff" fontWeight={700} textAnchor="middle">
+                  HIDDEN
+                </text>
+              </g>
+            )}
             {/* §17.6 Hasty Defense marker — floats below (the corners above are
                 already packed with FP/DR/range in this layout). */}
             {unit.hastyDefense && (
@@ -304,6 +318,17 @@ export function UnitCounter({
                 textAnchor="middle"
               >
                 {hit.slice(0, 4).toUpperCase()}
+              </text>
+            </g>
+          )}
+          {/* §11 Hidden Units — see the counterImage branch's identical badge
+              above for why this is safe to render unconditionally (never
+              reached for an enemy-owned hidden Unit the viewer shouldn't see). */}
+          {unit.hidden && (
+            <g>
+              <rect x={x} y={y - fs} width={fs * 1.9} height={fs} rx={2} fill="#8b5cf6" />
+              <text x={x + fs * 0.95} y={y - fs * 0.2} fontSize={fs * 0.65} fill="#fff" fontWeight={700} textAnchor="middle">
+                HIDDEN
               </text>
             </g>
           )}

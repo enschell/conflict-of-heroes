@@ -2,7 +2,8 @@
  * Game state construction and (de)serialization.
  */
 import { makeArmoredHitPile, makeFootHitPile } from '../data/hitMarkers';
-import { makeRng } from './rng';
+import { buildBattleDeck } from './cards';
+import { makeRng, shuffle } from './rng';
 import { startRound } from './turn';
 import type {
   FirefightDef,
@@ -49,7 +50,9 @@ function buildPlayer(side: SideId, def: FirefightDef): PlayerState {
     capCurrent: def.caps[side],
     unitLosses: 0,
     vp: def.startVp?.[side] ?? 0, // §9.2 starting VP (e.g. Mission 1: Soviets 1)
-    hand: [],
+    // §8.2/§8.3: Weapon/Veteran cards this side starts the Mission already
+    // holding (Mission-issued, not drawn — only Battle Cards are drawn per-Round).
+    hand: [...(def.cardConfig?.initialHand?.[side] ?? [])],
     passed: false,
   };
 }
@@ -72,6 +75,8 @@ export function initGame(def: FirefightDef): GameState {
       stressed: false,
       hitMarkers: [],
       assignedWeaponCards: [],
+      // Data-only for now (see Unit.hidden) — carried through, never rendered.
+      hidden: p.hidden || undefined,
     };
   }
 
@@ -93,6 +98,7 @@ export function initGame(def: FirefightDef): GameState {
         earliestRound: wave.earliestRound,
         entryHexIds: wave.entryHexIds,
         entryDescription: wave.entryDescription,
+        hidden: u.hidden || undefined,
       });
     }
   }
@@ -107,6 +113,9 @@ export function initGame(def: FirefightDef): GameState {
     nation: templates[u.templateId]?.nation ?? u.side,
     templateId: u.templateId,
     facing: u.facing,
+    hidden: u.hidden || undefined,
+    // A Mines token (§17.10) — placed as a hidden hex obstacle, not a Unit.
+    mine: u.mine,
   }));
 
   const footPile: HitPile = makeFootHitPile();
@@ -118,8 +127,20 @@ export function initGame(def: FirefightDef): GameState {
   const startNet = players.A.vp - players.B.vp;
   const vpMarker = startNet !== 0 ? startNet : firstInitiativeSide === 'A' ? -1 : 1;
 
+  // §8.1: the Mission's single, shared, seeded Battle Card Draw Deck — built
+  // and shuffled here (before `state.rng` is fixed) so the shuffle itself is
+  // part of the deterministic seed, same as every other roll.
+  let rng = makeRng(def.seed);
+  let cardDeck: GameState['cardDeck'];
+  if (def.cardConfig) {
+    const unshuffled = buildBattleDeck(def.cardConfig.battleCardIds);
+    const shuffled = shuffle(rng, unshuffled);
+    rng = shuffled.rng;
+    cardDeck = { drawPile: shuffled.value, discardPile: [] };
+  }
+
   const state: GameState = {
-    rng: makeRng(def.seed),
+    rng,
     phase: 'setup',
     round: 1,
     roundsTotal: def.roundsTotal,
@@ -158,6 +179,10 @@ export function initGame(def: FirefightDef): GameState {
       vpPerSurvivor: def.vpPerSurvivor,
     },
     log: [],
+    cardDeck,
+    drawPerRound: def.cardConfig?.drawPerRound,
+    obaAllowedRounds: def.cardConfig?.obaAllowedRounds,
+    missionCardText: def.missionCardText,
   };
 
   // Set victory-hex control: the Mission-authored starting owner is the

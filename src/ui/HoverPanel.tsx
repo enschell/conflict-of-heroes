@@ -76,11 +76,13 @@ export function HoverPanel() {
   if (!game) return null;
 
   const hex = hover ? game.hexes[hover.id] : undefined;
-  // NOTE (M8, deferred — see CLAUDE.md §8): once Hidden Units exist, this
-  // filter must also drop enemy-owned hidden Units — this hover panel would
-  // otherwise leak them the same way the board render would. No `hidden`
-  // field exists on Unit yet, so there's nothing to check today.
-  const units = hover ? Object.values(game.units).filter((u) => u.hexId === hover.id) : [];
+  // §11 Hidden Units: same concealment predicate as Board.tsx's own
+  // `unitsByHex` filter — a hidden enemy Unit must not leak through this
+  // panel either, since it renders the same information (art, stats).
+  const activeSide = game.phase === 'setup' ? game.setupSide : game.currentSide;
+  const units = hover
+    ? Object.values(game.units).filter((u) => u.hexId === hover.id && (!u.hidden || u.side === activeSide))
+    : [];
   const t = hex ? TERRAIN[hex.terrain] : null;
   const art = hex ? artForHex(hex) : null;
 

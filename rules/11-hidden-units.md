@@ -15,25 +15,19 @@ To place Hidden Units, secretly choose and mark the
 coordinates of the Hexes where your Hidden Units are located
 on a piece of paper or a Hidden Unit Tracking Map.
 Hidden Unit Tracking Maps are available for printing at
-www.AcademyGames.com/AtB.
+[www.AcademyGames.com/AtB](http://www.AcademyGames.com/AtB).
 
 ## 11.1 Revealing Hidden Units
 
-dd A Hidden Unit must be revealed when:
-i H • It performs any Action other than Stall, Rally, Hidden
-| Move, or a Battle Card Hidden Action (8.8) .
-11 It occupies a Hex with non-Hidden Unit.
-• any
-• Wheeled or Tracked Units occupy Open Terrain in LOS
-of any enemy.
-• Foot Units occupy Open Terrain in LOS and within 2
-Hexes of any enemy. (They remain hidden if further away.)
-• An enemy Unit attacks the Hidden Unit’s Hex and scores
-a Recon by Fire (11.7).
-Multiple hidden Units may be in the same area without
-revealing one another, even if in the same hex.
-A player may reveal a Hidden Unit at will. Any hidden enemy
-Units could then also be revealed per the rules above.
+A Hidden Unit must be revealed when: 
+
+• It performs any Action other than Stall, Rally, Hidden | Move, or a Battle Card Hidden Action (8.8).  
+* It occupies a Hex with any non-Hidden Unit.   
+• Wheeled or Tracked Units occupy Open Terrain in LOS of any enemy.   
+• Foot Units occupy Open Terrain in LOS and within 2 Hexes of any enemy. (They remain hidden if further away.)   
+• An enemy Unit attacks the Hidden Unit’s Hex and scores a Recon by Fire (11.7). 
+
+Multiple hidden Units may be in the same area without revealing one another, even if in the same hex. A player may reveal a Hidden Unit at will. Any hidden enemy Units could then also be revealed per the rules above.
 
 ## 11.2 Place Revealed Units
 
@@ -52,13 +46,12 @@ Hidden or move while Hidden. These Units:
 
 ## 11.4 Becoming Hidden
 
-A Non-Hidden Unit may take a 5AP Hidden Move Action to
-become Hidden. It must:
-• Be able to move, and
-• Be out of ALL non-hidden enemy LOS
-The Unit may be Hidden in the Hex it previously occupied, or
-in any adjacent Hex that is not in enemy LOS. Remove the
-Unit from the Map and mark its location on your Tracking Map.
+A Non-Hidden Unit may take a 5AP Hidden Move Action to become Hidden. It must: 
+
+• Be able to move, and   
+• Be out of ALL non-hidden enemy LOS.
+
+ The Unit may be Hidden in the Hex it previously occupied, or in any adjacent Hex that is not in enemy LOS. Remove the Unit from the Map and mark its location on your Tracking Map.
 
 Units
 
@@ -85,135 +78,123 @@ Mark the Unit as Spent on your Tracking Map.
 
 ## 11.7 Recon by Fire
 
-Reveal Hidden Units: As an Action, you may Attack a suspected
-Hidden Unit Hex in the hope of revealing a Hidden Unit.
-• Choose a Target Hex that is in the Attacker’s Fire Zone.
-• Roll a 2d6 equal to or higher than the Reveal Number.
-Reveal Number = 6 + Terrain DR Modifier (6.4).
-If you roll below the required Reveal Number, your opponent
-ridicules you for even attempting to find their Unit.
-If your roll is successful and NO Hidden Unit occupies the
-Hex, your opponent tells you so and may again ridicule you.
-If your roll is successful and a Hidden Unit does occupy
-the Hex:
-• Immediately place the revealed Hidden Unit on the Map,
-facing any direction.
-• Your Unit now Attacks the revealed Target with its red or
-blue FP, depending on the Target’s Defense color.
-Your Unit makes one Spent Check based on its Attack Cost.
-Reminder: The Reveal Number and Hit Number may each be
-modified with up to 2CAPs (3.2) .
-If you roll under a required Reveal Number, you will not know
-if you missed a Hidden Unit or if there is not one there.
-Hiding a Unit
-A Soviet Turn: A Soviet Rifles
-Unit moves backward to get out
-of the LOS of a German HMG
-which is set up behind the Wood
-Buildings Hex 2-E09.
-The Rifles are moving into Open
-Terrain with a Move Cost of 1AP, 11 3
-but must add a +1AP Backwards 21 5 0
-Move Penalty. They make a 2AP
-Spent Check, roll a 3 and remain 1
-fresh, and are Stressed. E09 A
-German Turn: The Germans are
-occupied elsewhere.
-B Soviet Turn: The Rifles, now 12 2
-out of LOS of the HMG, are able 12 10
-to take a Hidden Move Action
-to disappear into the fields. The
-Soviets remove the Rifles and
-place them beside the Map,
-secretly writing down which Hex
-they are Hidden in.
-Their Action Cost is:
-? B
-5AP Hidden Move Cost 11 3
-+ 1AP Stress = 6AP
-They make a 6AP Spent Check,
-fails with a 4 roll, and become
-spent. The Soviets mark the
-Rifles as Spent and Stressed on
-their Tracking Map.
-The Germans know the Rifles 12 2
-must be Hidden in Hex G06,
-H05, H06, or I05, since the other
-Hexes adjacent to its previous
-position are in LOS of the HMG.
-You are now ready to play
-Mission 3
+Reveal Hidden Units: As an Action, you may Attack a suspected  
+Hidden Unit Hex in the hope of revealing a Hidden Unit.  
+• Choose a Target Hex that is in the Attacker’s Fire Zone.  
+• Roll a 2d6 equal to or higher than the Reveal Number.  
+  
+Reveal Number = 6 + Terrain DR Modifier (6.4).  
+  
+If you roll below the required Reveal Number, your opponent  
+ridicules you for even attempting to find their Unit.  
+  
+If your roll is successful and NO Hidden Unit occupies the  
+Hex, your opponent tells you so and may again ridicule you.  
+  
+If your roll is successful and a Hidden Unit does occupy  
+the Hex:  
+• Immediately place the revealed Hidden Unit on the Map,  
+facing any direction.  
+• Your Unit now Attacks the revealed Target with its red or  
+blue FP, depending on the Target’s Defense color.  
+Your Unit makes one Spent Check based on its Attack Cost.  
+  
+Reminder: The Reveal Number and Hit Number may each be  
+modified with up to 2CAPs (3.2) .  
+  
+If you roll under a required Reveal Number, you will not know  
+if you missed a Hidden Unit or if there is not one there.  
 
-Hidden Movement
-A German Turn: The Germans
-have a Hidden Rifles in Hex
-1-N07, which is marked on their
-Tracking Map.
-They tell the Soviets that a Unit
-will be taking a Hidden Move
-Action. They write down that the
-Rifles moves into Woods Hex 31 01-2 0
-M07, which is adjacent to the
-Soviet Mortar. Since Hex M07
-is Concealing Terrain, the Rifles
-remain hidden, even though they
-are adjacent to the Soviet Mortar! (11.5) |
-The Action Cost for the Rifles to Hidden Move is 5AP. The i dd
-Germans spent 2CAPs to reduce the cost to 3AP (11.3) .
-The hidden Rifles make a 3AP Spent Check, roll a 4 and U
-remain fresh, and are Stressed. n
-i t
-Revealing a Hidden Unit
-B German Turn: On the Germans’
-next Turn, they choose to reveal
-their Rifles and place them on the
-Map. They then move into the Hex
-? B
-containing the Soviet Mortar.
-The Rifles’ Action Cost is: 21 5 0
-31 01-2 0
-1AP Move Cost + 1AP Heavy
-Woods Penalty + 1AP Stress = 10
-3AP
-The Germans make a Spent Check,
-roll a 5, and remain Fresh and Stressed.
-The Germans could have Hidden Moved into the Hex,
-revealing the Infantry automatically, rather than revealing the
-Infantry and then moving. However, this would have cost 6AP,
-instead of the 3AP for the normal Move Action.
-Attacking a Hidden Unit
-Soviet Turn: The Soviets believe
-Germans are hidden somewhere in 03
-the Light Woods to the southeast. 9
-They decide to Attack Hex 1-P05 2
-with their MMG Maxim. The Hex’s
-Reveal Number is 6, plus 1DR
-Modifier for the Light Woods, for
-a 7 Reveal Number (11.7) . The
-Soviets spend 2CAPs to reduce the
-Reveal Number to 5 before rolling.
-They roll an 8 and succeed.
-A German Rifles Unit was hiding in
-Hex P05. The Germans reveal and
-place it on the Map, facing it towards the MMG.
-The Soviets MMG now determines if it hit the revealed
-Rifles. The Hit Number is 10 (the Rifles’ 12 Defense + 1DR
-Light Woods − the MMG’s 3 Firepower = 10). The MMG
-may modify its Hit Number with CAPs, since the CAPs
-spent to modify the Reveal Number do not affect the Hit
-Number (11.7) . The MMG rolls an 8 and misses.
-The MMG makes a 3AP Spent Check, rolls a 3 and
-becomes Spent, and is Stressed.
-Hills and
-You will now learn about elevation changes and how these
-affect movement, Line-of-Sight, and combat.
 
+11.8 Sniper Units 
+
+Snipers are specially trained Units outfitted to   
+neutralize specific Targets at long range.  
+  
+Sniper Units are marked with theSniper symbol  
+next to their red and blue Firepowers.  
+  
+Sniper Attack Modifiers:  
+•Snipers always attack the Target'sredorblueFlankDefense.  
+•Snipers receiveno+3AR Short Range bonus(6.6).  
+•When targeting a Hex with stacked Units(6.8), even if  
+friendlies are present, the Sniper Attacks only a single enemy Unit.  
+•Snipers receive Veteran Card V07 ‘Concealed Fire’.  
+  
+Snipers are adept at shooting from and moving throughterrain without being revealed
+
+  
+[Example play: Hiding a Unit  
+A Soviet Turn: A Soviet Rifles  
+Unit moves backward to get out  
+of the LOS of a German HMG  
+which is set up behind the Wood  
+Buildings Hex 2-E09.  
+The Rifles are moving into Open  
+Terrain with a Move Cost of 1AP,   
+but must add a +1AP Backwards   
+Move Penalty. They make a 2AP  
+Spent Check, roll a 3 and remain  
+fresh, and are Stressed. 
+
+German Turn: The Germans are  
+occupied elsewhere.  
+  
+Soviet Turn: The Rifles, now   
+out of LOS of the HMG, are able   
+to take a Hidden Move Action  
+to disappear into the fields. The  
+Soviets remove the Rifles and  
+place them beside the Map,  
+secretly writing down which Hex  
+they are Hidden in.  
+Their Action Cost is:  
+5AP Hidden Move Cost   
++ 1AP Stress = 6AP  
+  
+They make a 6AP Spent Check,  
+fails with a 4 roll, and become  
+spent. The Soviets mark the  
+Rifles as Spent and Stressed on  
+their Tracking Map.  
+ The Germans know the Rifles  must be Hidden in Hex G06, H05, H06, or I05, since the other Hexes adjacent to its previous position are in LOS of the HMG.
+
+]
+
+[Example play:
+
+Hidden Movement   
+A German Turn: The Germans   
+have a Hidden Rifles in Hex 1-N07, which is marked on   
+their Tracking Map.   
+  
+They tell the Soviets that a Unit   
+will be taking a Hidden Move Action.   
+They write down that the Rifles moves into   
+Woods Hex M07, which is adjacent to the Soviet Mortar.   
+Since Hex M07 is Concealing Terrain, the Rifles remain   
+hidden, even though they are adjacent to the Soviet Mortar! (11.5)   
+The Action Cost for the Rifles to Hidden Move is 5AP.   
+The Germans spent 2CAPs to reduce the cost to 3AP (11.3) .   
+The hidden Rifles make a 3AP Spent Check, roll a 4 and remain fresh, and are Stressed.   
+]  
+[Example play:   
+Revealing a Hidden Unit  
+German Turn: On the Germans’ next Turn, they choose to reveal their Rifles and place them on the Map. They then move into the Hex ? containing the Soviet Mortar. The Rifles’ Action Cost is:  1AP Move Cost + 1AP Heavy Woods Penalty + 1AP Stress = 3AP. The Germans make a Spent Check, roll a 5, and remain Fresh and Stressed. The Germans could have Hidden Moved into the Hex, revealing the Infantry automatically, rather than revealing the Infantry and then moving. However, this would have cost 6AP, instead of the 3AP for the normal Move Action.   
+]  
+  
+[Example play:   
+Attacking a Hidden Unit   
+Soviet Turn: The Soviets believe Germans are hidden somewhere in the Light Woods to the southeast. They decide to Attack Hex P05 with their MMG Maxim. The Hex’s Reveal Number is 6, plus 1DR Modifier for the Light Woods, for a 7 Reveal Number (11.7) . The Soviets spend 2CAPs to reduce the Reveal Number to 5 before rolling. They roll an 8 and succeed. A German Rifles Unit was hiding in Hex P05. The Germans reveal and place it on the Map, facing, as they wish, towards the MMG. The Soviets MMG now determines if it hit the revealed Rifles. The Hit Number is 10 (the Rifles’ 12 Defense + 1DR Light Woods − the MMG’s 3 Firepower = 10). The MMG may modify its Hit Number with CAPs, since the CAPs spent to modify the Reveal Number DO NOT affect the Hit Number (11.7) . The MMG rolls an 8 and misses. The MMG makes a 3AP Spent Check, rolls a 3 and becomes Spent, and is Stressed.  
+] 
 
 ---
 
+
+
 ## Key mechanics (vision pass)
 
-- **11.0:** the Mission says which Units start **Hidden**; track their hex coordinates secretly (paper or a Hidden Unit Tracking Map).
+- **11.0:** the Mission says which Units start **Hidden**; track their hex coordinates secretly (paper or a Hidden Unit Tracking Map - you can also keep track of it progrmatically).
 - **11.1 A Hidden Unit must be revealed when** any of: it takes an Action **other than** Stall/Rally/Hidden Move/Battle-Card Hidden Action (8.8); it shares a hex with any non-Hidden Unit; a **Wheeled/Tracked** Unit sits in **Open Terrain in enemy LOS**; a **Foot Unit** sits in **Open Terrain in LOS within 2 hexes** of an enemy (hidden if farther); or an enemy scores a **Recon by Fire** on its hex (11.7). Multiple hidden Units (even in one hex) don't reveal each other.
 - **11.2:** when revealed, place on the marked hex; Hidden Units **have no facing** until revealed (choose it on placement).
 - **11.3 Hidden Move Action = 5AP**, which **ignores Terrain Move Penalties** but **adds** Stress/Hit-Marker penalties.
@@ -221,6 +202,8 @@ affect movement, Line-of-Sight, and combat.
 - **11.5 Move While Hidden (5AP, incl. Group):** stays hidden if it stays out of enemy LOS the whole move. A hidden **Foot Unit** may enter enemy LOS and stay hidden only if the hex is **Open Terrain >2 hexes from the enemy**, or **Concealing Terrain not shared with the enemy**. **Concealing Terrain** = Defensive Terrain (6.4) and **Heavy Smoke in any terrain**.
 - **11.6:** failing a Spent Check during a Hidden Move/Rally/Stall keeps the Unit **Hidden** (mark it Spent on the tracking map).
 - **11.7 Recon by Fire:** as an Action, attack a suspected hidden hex in your Fire Zone; roll **2d6 ≥ Reveal Number, where Reveal Number = 6 + Terrain DR Modifier** (6.4). On success with a Unit present: place it (any facing) and immediately Attack it with the matching red/blue FP, then take one Spent Check on your Attack Cost. Both the Reveal Number and the resulting Hit Number can each be modified by up to 2 CAPs (3.2).
+
+
 
 ## Examples (red boxes)
 

@@ -33,6 +33,8 @@ export function ActionChooser() {
   const unload = useGame((s) => s.unload);
   const indirectFire = useGame((s) => s.indirectFire);
   const fireSmoke = useGame((s) => s.fireSmoke);
+  const hiddenMove = useGame((s) => s.hiddenMove);
+  const reconByFire = useGame((s) => s.reconByFire);
   const select = useGame((s) => s.select);
   const close = useGame((s) => s.closeChooser);
 
@@ -67,6 +69,8 @@ export function ActionChooser() {
   const canCC = !!ccCtx?.legal && !isHopelessShot(ccCtx.hitNumber);
   const indirectAct = acts.find((a) => a.type === 'INDIRECT_FIRE' && a.targetHexId === hexId);
   const smokeAct = acts.find((a) => a.type === 'FIRE_SMOKE' && a.targetHexId === hexId);
+  const hiddenMoveAct = acts.find((a) => a.type === 'HIDDEN_MOVE' && a.toHexId === hexId);
+  const reconByFireAct = acts.find((a) => a.type === 'RECON_BY_FIRE' && a.targetHexId === hexId);
   const loadAct =
     vehicleHere && acts.find((a) => a.type === 'LOAD' && a.vehicleId === vehicleHere.id);
   // §15.9: clicking a carried Unit's own (its Vehicle's) Hex is ambiguous
@@ -136,6 +140,16 @@ export function ActionChooser() {
       {smokeAct && (
         <button className="unit-picker__row" onClick={() => run(() => fireSmoke(unit.id, hexId))}>
           ☁ Fire Smoke onto {hexId} (§14.1)
+        </button>
+      )}
+      {hiddenMoveAct && (
+        <button className="unit-picker__row" onClick={() => run(() => hiddenMove(unit.id, hexId))}>
+          🫥 {unit.hidden ? 'Hidden Move here' : 'Become Hidden here'} (§11.3)
+        </button>
+      )}
+      {reconByFireAct && (
+        <button className="unit-picker__row" onClick={() => run(() => reconByFire(unit.id, hexId))}>
+          🔎 Recon by Fire at {hexId} (§11.7)
         </button>
       )}
       {loadAct && vehicleHere && (

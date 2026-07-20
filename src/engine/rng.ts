@@ -68,3 +68,19 @@ export function rollSpentDie(rng: RngState): { value: number; rng: RngState } {
   );
   return { value: SPENT_DIE_FACES[index]!, rng: next };
 }
+
+/**
+ * Fisher-Yates shuffle over the seeded RNG (§8.1: the Battle Card Draw Deck is
+ * shuffled once at Mission start). Pure — returns a new array, never mutates
+ * `arr`, and returns the advanced RNG alongside it like every other roll here.
+ */
+export function shuffle<T>(rng: RngState, arr: readonly T[]): { value: T[]; rng: RngState } {
+  const out = [...arr];
+  let cur = rng;
+  for (let i = out.length - 1; i > 0; i--) {
+    const { value: j, rng: next } = randInt(cur, 0, i);
+    cur = next;
+    [out[i], out[j]] = [out[j]!, out[i]!];
+  }
+  return { value: out, rng: cur };
+}

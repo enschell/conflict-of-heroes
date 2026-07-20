@@ -11,8 +11,10 @@ import { buildHex } from '../../engine';
 import type { RotationCluster } from '../../engine';
 import { EDGE_CORNERS, clipHexPolygon, computeMapOverlayGroups, hexCenter, hexCorners, playableBounds, pointsAttr, tightHexBounds, HEX_SIZE } from '../hexgeo';
 import { HEX_STROKE, TERRAIN_FILL, WALL_STROKE } from '../theme';
-import type { Facing, Hex, HexId, MapHexDef, TerrainId } from '../../engine/types';
+import type { Facing, GameState, Hex, HexId, MapHexDef, SideId, TerrainId, Unit } from '../../engine/types';
 import { terrainArtVariantUrl } from '../../data/terrainArtVariants';
+import { UNIT_TEMPLATES } from '../../data/units';
+import { UnitCounter } from '../UnitCounter';
 
 /**
  * Terrain artwork for the editor's own board preview — a small, self-contained
@@ -47,6 +49,13 @@ export interface EditorMarker {
   label: string;
   color: string;
   facing?: Facing;
+  /**
+   * When set, this marker renders as the REAL `UnitCounter` (same component
+   * the live board uses — image-backed art via `counterImage`, stat overlay,
+   * facing rotation) instead of the plain badge, so authoring previews look
+   * like actual play. `count > 1` adds the live board's own ×N stack badge.
+   */
+  unit?: { templateId: string; side: SideId; facing: Facing; count?: number };
 }
 
 export type MarkerRenderer = (m: EditorMarker, ctx: { cx: number; cy: number; size: number }) => React.ReactNode;
@@ -81,6 +90,59 @@ const MARKER_RENDERERS: Partial<Record<string, MarkerRenderer>> = {};
 
 function rendererFor(kind: string): MarkerRenderer {
   return MARKER_RENDERERS[kind] ?? renderBadge;
+}
+
+/**
+ * Just enough `GameState` for `UnitCounter` to render an authoring preview:
+ * `templateOf`/`effectiveStats` only read `state.templates` (plus the unit's
+ * own — empty — hit markers), and `state.hexes` is only consulted for
+ * `occupyingFortification`, which a preview unit never has. Everything else
+ * on GameState is untouched by the counter, so this cast is safe here and
+ * keeps the editor decoupled from any live game.
+ */
+const COUNTER_PREVIEW_GAME = { templates: UNIT_TEMPLATES, hexes: {}, units: {} } as unknown as GameState;
+
+/** The real live-board counter (art, stats, facing) for an editor marker. */
+function renderUnitCounterMarker(m: EditorMarker, ctx: { cx: number; cy: number; size: number }) {
+  const u = m.unit!;
+  const tmpl = UNIT_TEMPLATES[u.templateId];
+  if (!tmpl) return renderBadge(m, ctx);
+  const previewUnit: Unit = {
+    id: `editor-preview-${m.hexId}`,
+    side: u.side,
+    nation: tmpl.nation,
+    templateId: u.templateId,
+    hexId: m.hexId,
+    facing: u.facing,
+    status: 'fresh',
+    stressed: false,
+    hitMarkers: [],
+    assignedWeaponCards: [],
+  };
+  const { cx, cy, size } = ctx;
+  return (
+    // pointerEvents none: the hex's own transparent click layer (rendered
+    // after markers, so on top) keeps handling all clicks, exactly as with
+    // the badge rendering — the counter is display-only here.
+    <g key={`${m.kind}-${m.hexId}-${m.label}`} pointerEvents="none">
+      <UnitCounter
+        game={COUNTER_PREVIEW_GAME}
+        unit={previewUnit}
+        center={{ x: cx, y: cy }}
+        size={size}
+        selected={false}
+        onClick={() => {}}
+      />
+      {(u.count ?? 1) > 1 && (
+        <g>
+          <circle cx={cx + size * 0.7} cy={cy - size * 0.7} r={size * 0.28} fill="#000a" />
+          <text x={cx + size * 0.7} y={cy - size * 0.62} fontSize={size * 0.3} fill="#fff" textAnchor="middle" fontWeight={700}>
+            ×{u.count}
+          </text>
+        </g>
+      )}
+    </g>
+  );
 }
 
 export interface EditorBoardProps {
@@ -199,11 +261,12 @@ export function EditorBoard({
     return m;
   }, [rotationClusters, hexMap]);
 
-  // Mouse-wheel zoom, centered on the cursor, 0.5x-4x — mirrors Board.tsx's
-  // own proven implementation exactly (same StrictMode gotcha applies: never
-  // call `setPan` from inside `setZoom`'s updater, since `<StrictMode>`
-  // double-invokes it and would compound the pan math — read/write a plain
-  // ref and call `setZoom`/`setPan` with already-computed values instead).
+  // Ctrl+wheel zooms, centered on the cursor, 0.5x-4x; plain wheel pans the
+  // map vertically instead — mirrors Board.tsx's own proven implementation
+  // exactly (same StrictMode gotcha applies: never call `setPan` from inside
+  // `setZoom`'s updater, since `<StrictMode>` double-invokes it and would
+  // compound the pan math — read/write a plain ref and call `setZoom`/
+  // `setPan` with already-computed values instead).
   const svgRef = useRef<SVGSVGElement>(null);
   const baseX = bounds.minX - HEX_SIZE * 0.4;
   const baseY = bounds.minY - HEX_SIZE * 0.4;
@@ -219,13 +282,19 @@ export function EditorBoard({
     if (!svg) return;
     const onWheel = (e: WheelEvent) => {
       e.preventDefault();
+      const { zoom: prevZoom, pan: prevPan } = viewRef.current;
+
+      if (!e.ctrlKey) {
+        setPan({ x: prevPan.x, y: prevPan.y + e.deltaY / prevZoom });
+        return;
+      }
+
       const pt = svg.createSVGPoint();
       pt.x = e.clientX;
       pt.y = e.clientY;
       const ctm = svg.getScreenCTM();
       if (!ctm) return;
       const cursor = pt.matrixTransform(ctm.inverse());
-      const { zoom: prevZoom, pan: prevPan } = viewRef.current;
       const factor = e.deltaY < 0 ? 1.15 : 1 / 1.15;
       const nextZoom = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, prevZoom * factor));
       if (nextZoom === prevZoom) return;
@@ -320,7 +389,11 @@ export function EditorBoard({
             {hex.label}
           </text>
         )}
-        {hexMarkers.map((m) => rendererFor(m.kind)(m, { cx: center.x, cy: center.y, size: HEX_SIZE }))}
+        {hexMarkers.map((m) =>
+          m.unit
+            ? renderUnitCounterMarker(m, { cx: center.x, cy: center.y, size: HEX_SIZE })
+            : rendererFor(m.kind)(m, { cx: center.x, cy: center.y, size: HEX_SIZE }),
+        )}
         <polygon
           points={pts}
           fill="transparent"

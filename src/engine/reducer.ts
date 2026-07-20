@@ -13,8 +13,10 @@
  * (+1AP next Turn if reused, §2.6).
  */
 import { HIT_MARKERS, isArmoredMarker } from '../data/hitMarkers';
+import { CARD_CATALOG } from '../data/cards/catalog';
 import { applyUnitLoss, clampCapMod, reduceActionCost } from './cap';
-import { attackContext, closeCombatContext, rollCloseCombat, rollStackFire } from './combat';
+import { canPlayCard } from './cards';
+import { attackContext, closeCombatContext, rollAttack, rollCloseCombat, rollStackFire } from './combat';
 import {
   canOccupy,
   closeCombatStructureAr,
@@ -25,6 +27,7 @@ import {
   rollStructureDestroy,
 } from './fortifications';
 import { isInFrontArc, parseHexId } from './hex';
+import { becomingHiddenCandidates, facingToward, hiddenMoveBase, mustReveal, rollReveal } from './hidden';
 import { effectiveStats, resolveHit, returnHitToPile, templateOf } from './hits';
 import { groupConnected, groupStress, hexesConnected, isValidSupporter } from './groups';
 import { directFireZone, indirectFireZone, rollIndirectFire } from './mortar';
@@ -46,6 +49,52 @@ import type {
   SideId,
   Unit,
 } from './types';
+
+/**
+ * §11.1 bullet 1: which Unit id(s) does `action` act through? Used by
+ * `reduce()`'s top-of-function check to auto-reveal any of them that's
+ * currently Hidden, before dispatching to the specific `doX` — so every
+ * existing Action (MOVE, FIRE, ...) just sees an already-revealed, ordinary
+ * Unit and needs no changes of its own. Exhaustive over `Action['type']` by
+ * intent (not enforced by the type system, since this only needs to be
+ * conservative — including an id that turns out not to be Hidden is a no-op).
+ */
+function revealCandidateUnitIds(action: Action): string[] {
+  switch (action.type) {
+    case 'MOVE':
+    case 'PIVOT':
+    case 'CHOOSE_FACING':
+    case 'RALLY':
+    case 'STALL':
+    case 'FIRE_SMOKE':
+    case 'HASTY_DEFENSE':
+    case 'REMOVE_HASTY_DEFENSE':
+    case 'EXIT':
+    case 'HIDDEN_MOVE':
+    case 'UNLOAD':
+      return [action.unitId];
+    case 'FIRE':
+    case 'CLOSE_COMBAT':
+    case 'INDIRECT_FIRE':
+    case 'RECON_BY_FIRE':
+      return [action.attackerId];
+    case 'GROUP_ATTACK':
+      return [action.leaderId, ...action.supporterIds];
+    case 'GROUP_RALLY':
+      return action.unitIds;
+    case 'GROUP_MOVE':
+      return action.moves.map((m) => m.unitId);
+    case 'LOAD':
+      return [action.unitId, action.vehicleId];
+    case 'PLAY_CARD':
+      return action.unitId ? [action.unitId] : [];
+    case 'ENTER':
+    case 'SETUP_PLACE':
+    case 'PASS':
+    case 'PLAN_OBA_STRIKE':
+      return [];
+  }
+}
 
 export function reduce(state: GameState, action: Action): ReduceResult {
   // Pre-Mission Setup phase: ONLY SETUP_PLACE — plus the free CHOOSE_FACING
@@ -80,7 +129,49 @@ export function reduce(state: GameState, action: Action): ReduceResult {
     state,
     events: [{ type: 'illegal', round: state.round, text: reason }],
   });
-  const finish = (): ReduceResult => ({ state: next, events });
+
+  const reveal = (unit: Unit, why: string) => {
+    unit.hidden = undefined;
+    grantFacingChoice(unit.id);
+    log('reveal', `${unit.id} is revealed (${why}, §11.1)`, unit.side);
+  };
+
+  // §11.1 bullet 1: any Hidden Unit this Action acts through reveals, UNLESS
+  // the Action is one of the rulebook's named exceptions (Stall/Rally/Hidden
+  // Move) or a phase-transition Action that deliberately carries `hidden`
+  // through untouched (SETUP_PLACE/ENTER — see `doSetupPlace`/`doEnter`).
+  // Doing this here, once, means every other `doX` closure below just sees
+  // an ordinary, already-revealed Unit and needs no changes of its own.
+  const REVEAL_EXEMPT = new Set<string>(['STALL', 'RALLY', 'HIDDEN_MOVE', 'CHOOSE_FACING', 'SETUP_PLACE', 'ENTER']);
+  // §8.9 Battle Icon: "Hidden Unit may take this card's Action and remain
+  // hidden" — a conditional exemption, unlike every other entry above, since
+  // it depends on the SPECIFIC card played, not the Action type alone.
+  const cardKeepsHidden = action.type === 'PLAY_CARD' && !!CARD_CATALOG[action.cardId]?.battleIcons?.hidden;
+  if (!REVEAL_EXEMPT.has(action.type) && !cardKeepsHidden) {
+    for (const id of revealCandidateUnitIds(action)) {
+      const u = next.units[id];
+      if (u?.hidden) reveal(u, 'took a revealing Action');
+    }
+  }
+
+  /**
+   * §11.1 bullets 2-4: the general post-Action sweep — run once, on every
+   * successful (non-denied) Action, right before returning. Checking EVERY
+   * currently-Hidden Unit (not just the one(s) `action` touched) is what
+   * gives cascade-reveals "for free": e.g. Recon by Fire revealing a Unit in
+   * a Hex where other Hidden Units are stacked will, in this SAME sweep, also
+   * catch those others' now-true "shares a Hex with a non-Hidden Unit"
+   * condition. `deny()` bypasses `finish()` entirely, so illegal/no-op
+   * Actions correctly skip this for free too.
+   */
+  const finish = (): ReduceResult => {
+    if (next.phase === 'playing') {
+      for (const u of Object.values(next.units)) {
+        if (u.hidden && mustReveal(next, u)) reveal(u, 'no longer concealed');
+      }
+    }
+    return { state: next, events };
+  };
 
   // -- shared helpers -------------------------------------------------------
 
@@ -453,6 +544,64 @@ export function reduce(state: GameState, action: Action): ReduceResult {
     return finish();
   };
 
+  /**
+   * Hidden Move (§11.3-11.6): one Action covering both becoming Hidden (from
+   * `!unit.hidden`) and moving while already Hidden. Flat 5AP base
+   * (`hiddenMoveBase`, ignores Terrain Move Penalties per §11.3) — `moveCost`/
+   * `planVehicleMove` are reused ONLY for their adjacency/passability signal
+   * (`.ap != null`) when already Hidden, never for their own AP number.
+   */
+  const doHiddenMove = (a: Extract<Action, { type: 'HIDDEN_MOVE' }>): ReduceResult => {
+    const unit = next.units[a.unitId];
+    if (!unit) return deny('no such unit');
+    if (unit.side !== next.currentSide) return deny('not your turn');
+    if (unit.carriedBy) return deny('a transported Unit cannot move on its own (§15.8)');
+
+    if (!unit.hidden) {
+      // §11.4 Becoming Hidden: must be able to move, and the destination must
+      // be out of ALL non-Hidden enemy LOS.
+      if (!effectiveStats(next, unit).canMove) return deny('unit cannot move (current Hit Marker forbids it, §7.5)');
+      if (!becomingHiddenCandidates(next, unit).includes(a.toHexId)) {
+        return deny(`${a.toHexId} is not a legal Hidden Move destination (§11.4 — must be out of all non-Hidden enemy LOS)`);
+      }
+    } else {
+      // §11.5 Move While Hidden: ordinary adjacency/passability only — staying
+      // hidden vs. revealing on arrival is decided by the post-Action sweep in
+      // `finish()`, not here.
+      const tmpl = templateOf(next, unit);
+      const legal =
+        tmpl.kind === 'vehicle'
+          ? planVehicleMove(next, unit, [a.toHexId]).ap != null
+          : moveCost(next, unit, a.toHexId).ap != null;
+      if (!legal) return deny('not a legal Hidden Move destination');
+    }
+
+    const base = hiddenMoveBase(next, unit);
+    const player = next.players[unit.side];
+    const { cost, capsSpent } = planCost(unit, base, a.capCostReduce ?? 0);
+    if (unit.status === 'spent' && cost > 0)
+      return deny('a Spent unit must spend CAPs to reduce its Action Cost to 0AP (§3.4)');
+    if (player.capCurrent < capsSpent) return deny('not enough CAP');
+    player.capCurrent -= capsSpent;
+
+    if (unit.hastyDefense) {
+      unit.hastyDefense = false;
+      log('hastyDefense', `${unit.id}'s Hasty Defense is stripped by moving (§17.6)`, unit.side);
+    }
+    unit.occupyingFortification = false;
+    unit.hexId = a.toHexId;
+    unit.hidden = true;
+    log('hiddenMove', `${unit.id} makes a Hidden Move to ${a.toHexId} (cost ${cost}, §11.3)`, unit.side);
+    // §17.10: Mines still attack a Hidden Unit entering the Hex, same as any
+    // other Move — no special exemption in the rulebook. (Unlike a normal
+    // MOVE, this doesn't thread a UI-chosen `minesCapMods` through; a Hidden
+    // Move into a live Mines Hex is a rare enough combination that the CAP-
+    // choice refinement is left as a follow-up rather than blocking this.)
+    resolveMines(a.toHexId, [unit.id]);
+    afterAction(unit, cost);
+    return finish();
+  };
+
   const doFire = (a: Extract<Action, { type: 'FIRE' }>): ReduceResult => {
     const attacker = next.units[a.attackerId];
     const target = next.units[a.targetId];
@@ -516,6 +665,78 @@ export function reduce(state: GameState, action: Action): ReduceResult {
       );
       if (structRoll.hit) destroyFeatureAt(targetHex!);
     }
+    afterAction(attacker, cost);
+    return finish();
+  };
+
+  /**
+   * Recon by Fire (§11.7): attack a suspected Hex in the attacker's Fire
+   * Zone. Two independent CAP-modifiable rolls under ONE Spent Check —
+   * `capRevealDiceMod` for the Reveal Number, `capHitDiceMod` for the
+   * follow-up Attack, deliberately never shared (the rulebook is explicit
+   * these don't carry over, unlike §17.11's single-shared-mod double roll).
+   * On a miss, or a hit against an empty Hex, the log/return stays symmetric
+   * — the attacker learns only pass/fail, never which happened.
+   */
+  const doReconByFire = (a: Extract<Action, { type: 'RECON_BY_FIRE' }>): ReduceResult => {
+    const attacker = next.units[a.attackerId];
+    if (!attacker) return deny('no such unit');
+    if (attacker.side !== next.currentSide) return deny('not your turn');
+    if (attacker.carriedBy) return deny('a transported Unit cannot attack (§15.8)');
+    const attackerTmpl = templateOf(next, attacker);
+    if (attackerTmpl.attackMode === 'none' || attackerTmpl.attackMode === 'closeCombatOnly')
+      return deny('this Unit cannot make a ranged Attack (§16.1)');
+    if (!next.hexes[a.targetHexId]) return deny('no such hex');
+    const zone = directFireZone(next, attacker, a.targetHexId);
+    if (!zone.legal) return deny(zone.reason ?? 'illegal Recon by Fire target (§11.7)');
+
+    const revealMod = clampCapMod(a.capRevealDiceMod ?? 0);
+    const hitMod = clampCapMod(a.capHitDiceMod ?? 0);
+    const player = next.players[attacker.side];
+    const eff = effectiveStats(next, attacker);
+    const { cost, capsSpent } = planCost(attacker, eff.apToFire, a.capCostReduce ?? 0);
+    if (attacker.status === 'spent' && cost > 0)
+      return deny('a Spent unit must spend CAPs to reduce its Action Cost to 0AP (§3.4)');
+    const capNeeded = capsSpent + Math.abs(revealMod) + Math.abs(hitMod);
+    if (player.capCurrent < capNeeded) return deny('not enough CAP for Recon by Fire');
+    player.capCurrent -= capNeeded;
+
+    const roll = rollReveal(next, a.targetHexId, revealMod);
+    next.rng = roll.rng;
+    const revealLog = `${attacker.id} Recon by Fire at ${a.targetHexId}: rolled ${roll.dice[0]}+${roll.dice[1]}=${roll.total} vs Reveal# ${roll.hitNumber}`;
+
+    const target = roll.hit
+      ? Object.values(next.units).find((u) => u.hexId === a.targetHexId && u.hidden && u.side !== attacker.side)
+      : undefined;
+
+    if (!target) {
+      // Deliberately the SAME log shape whether the roll failed or it
+      // succeeded against an empty Hex — §11.7: "you will not know if you
+      // missed a Hidden Unit or if there is not one there."
+      log('recon', `${revealLog} -> no reveal`, attacker.side);
+      afterAction(attacker, cost);
+      return finish();
+    }
+
+    // §11.2: the owner picks facing on reveal — approximated here as facing
+    // the revealing attacker (matches the worked example's "facing, as they
+    // wish, towards the MMG"), resolved synchronously since the follow-up
+    // Attack roll needs a real Front/Flank determination.
+    target.facing = facingToward(target.hexId, attacker.hexId);
+    target.hidden = undefined;
+    log('recon', `${revealLog} -> ${target.id} revealed!`, attacker.side);
+
+    const attackRoll = rollAttack(next, attacker, target, hitMod);
+    next.rng = attackRoll.rng;
+    log(
+      'fire',
+      `${attacker.id} fires on the just-revealed ${target.id}: rolled ${attackRoll.dice[0]}+${attackRoll.dice[1]}=` +
+        `${attackRoll.total} vs Hit# ${attackRoll.hitNumber} (AR ${attackRoll.ar} / DR ${attackRoll.dr})` +
+        `${attackRoll.isFlank ? ' (flank)' : ''} -> ${attackRoll.critical ? 'CRITICAL' : attackRoll.hit ? 'hit' : 'miss'}`,
+      attacker.side,
+    );
+    if (attackRoll.hit) applyHit(target, attackRoll.critical, attackRoll.fpColor);
+
     afterAction(attacker, cost);
     return finish();
   };
@@ -1084,6 +1305,7 @@ export function reduce(state: GameState, action: Action): ReduceResult {
         stressed: false,
         hitMarkers: [],
         assignedWeaponCards: [],
+        hidden: r.hidden || undefined,
       };
       next.units[unit.id] = unit;
       placed.push(unit);
@@ -1118,22 +1340,43 @@ export function reduce(state: GameState, action: Action): ReduceResult {
     if (entry.side !== next.setupSide) return deny("not your side's turn to set up");
     if (!legalSetupHexes(next).includes(a.hexId)) return deny(`${a.hexId} is not a legal Setup Hex`);
 
-    const unit: Unit = {
-      id: entry.id,
-      side: entry.side,
-      nation: entry.nation,
-      templateId: entry.templateId,
-      hexId: a.hexId,
-      facing: a.facing ?? entry.facing,
-      status: 'fresh',
-      stressed: false,
-      hitMarkers: [],
-      assignedWeaponCards: [],
-    };
-    next.units[unit.id] = unit;
-    next.setupPool = pool.filter((u) => u.id !== entry.id);
-    grantFacingChoice(unit.id);
-    log('setup', `${unit.id} sets up at ${a.hexId}`, unit.side);
+    if (entry.mine) {
+      // A Mines token (§17.10): placing it writes the standard Mines obstacle
+      // onto the Hex — always hidden (§11's render-layer concealment picks
+      // this up like any other hidden feature) — rather than creating a
+      // Unit. No facing window (an obstacle has no facing); the engine's
+      // existing Mines attack/CAP-mod/destroy mechanics take over unchanged.
+      const hex = next.hexes[a.hexId]!;
+      if (hex.features.obstacle) return deny(`${a.hexId} already has an Obstacle (§17.0)`);
+      if (hex.features.fortification) return deny(`${a.hexId} already has a Fortification (§17.0)`);
+      hex.features.obstacle = {
+        kind: 'mines',
+        hitNumber: entry.mine.hitNumber,
+        destroyed: false,
+        ownerSide: entry.side,
+        hidden: true,
+      };
+      next.setupPool = pool.filter((u) => u.id !== entry.id);
+      log('setup', `Side ${entry.side} places Mines at ${a.hexId} (hidden)`, entry.side);
+    } else {
+      const unit: Unit = {
+        id: entry.id,
+        side: entry.side,
+        nation: entry.nation,
+        templateId: entry.templateId,
+        hexId: a.hexId,
+        facing: a.facing ?? entry.facing,
+        status: 'fresh',
+        stressed: false,
+        hitMarkers: [],
+        assignedWeaponCards: [],
+        hidden: entry.hidden || undefined,
+      };
+      next.units[unit.id] = unit;
+      next.setupPool = pool.filter((u) => u.id !== entry.id);
+      grantFacingChoice(unit.id);
+      log('setup', `${unit.id} sets up at ${a.hexId}`, unit.side);
+    }
 
     const sideDone = !next.setupPool.some((u) => u.side === entry.side);
     if (sideDone) {
@@ -1210,6 +1453,111 @@ export function reduce(state: GameState, action: Action): ReduceResult {
     return finish();
   };
 
+  /**
+   * Play an Action- or Bonus-type Card (§8.5-8.6). Framework-only scope: this
+   * logs the card's full name/cost/effect text and applies only the shared
+   * mechanics every card of its type/color shares — the card's own bespoke
+   * rules text is NOT mechanically simulated (CLAUDE.md's Cards section).
+   * Green cost = an ordinary AP cost (CAP-reducible, Spent-Check-gated, Fresh
+   * unless reduced to 0AP); Blue cost = a flat CAP spend, no AP, never a
+   * Spent Check, no Unit required. An Action-type card Stresses its Unit and
+   * ends the Turn like any other real Action; a Bonus-type card does neither
+   * (§8.5: "not themselves Actions") — `currentSide` is left untouched.
+   * Deliberately NOT gated on `currentSide` — several cards are explicitly
+   * playable "during the opponent's Turn" (§8's Card Catalog), and this
+   * engine has no per-card interrupt-timing enforcement (framework scope).
+   */
+  const doPlayCard = (a: Extract<Action, { type: 'PLAY_CARD' }>): ReduceResult => {
+    const check = canPlayCard(next, a.side, a.cardId, a.unitId);
+    if (!check.legal || !check.card) return deny(check.reason ?? 'illegal');
+    const card = check.card;
+    const player = next.players[a.side];
+    const unit = a.unitId ? next.units[a.unitId] : undefined;
+
+    let cost = 0;
+    let capsSpent = 0;
+    if (card.cost!.color === 'green') {
+      const planned = planCost(unit!, card.cost!.amount, a.capCostReduce ?? 0);
+      cost = planned.cost;
+      capsSpent = planned.capsSpent;
+      if (unit!.status === 'spent' && cost > 0) {
+        return deny("a Spent Unit must spend CAPs to reduce this card's cost to 0AP (§8.6)");
+      }
+    } else {
+      capsSpent = card.cost!.amount; // Blue: the full printed amount is a flat CAP spend (§8.6).
+    }
+    if (player.capCurrent < capsSpent) return deny('not enough CAP');
+    player.capCurrent -= capsSpent;
+
+    log(
+      'card',
+      `Side ${a.side} plays ${card.name} (#${card.id}${unit ? ` via ${unit.id}` : ''}, ${card.cost!.color === 'green' ? `${cost}AP` : `${capsSpent}CAP`}): ${card.effectText}`,
+      a.side,
+    );
+
+    // §8.0/§8.2: Battle and Weapon Cards discard when played; Veteran Cards do not.
+    if (card.category !== 'veteran') {
+      player.hand = player.hand.filter((id) => id !== a.cardId);
+      if (card.category === 'battle' && next.cardDeck) next.cardDeck.discardPile.push(a.cardId);
+    }
+
+    if (card.cost!.color === 'green') {
+      if (cost > 0) {
+        const sc = spentCheck(next.rng, cost);
+        next.rng = sc.rng;
+        if (!sc.fresh) unit!.status = 'spent';
+        log('spent', `${unit!.id} Spent Check: rolled ${sc.roll} vs cost ${cost} -> ${sc.fresh ? 'Fresh' : 'Spent'}`, a.side);
+      } else {
+        log('spent', `${unit!.id} 0AP card — no Spent Check`, a.side);
+      }
+    }
+
+    if (card.type === 'action') {
+      if (unit) {
+        for (const u of Object.values(next.units)) if (u.side === a.side) u.stressed = false;
+        unit.stressed = true;
+      }
+      resetPassCycle();
+      switchTurn(next);
+    }
+    return finish();
+  };
+
+  /**
+   * Activate an Artillery-type Card to plan an OBA Strike (§13.4-13.6): no
+   * cost, discards the card, secretly queues `targetHexId` for automatic
+   * resolution one Round later (`turn.ts`'s Pre-Round Sequence — see
+   * `resolveObaStrike`/`applyResolvedObaStrike`, `engine/cards.ts`).
+   * Simplification, documented in CLAUDE.md: the rulebook places this inside
+   * the Pre-Round Sequence itself; this engine has no such sub-phase yet, so
+   * it's legal any time during the owning side's own Turn instead — free
+   * (doesn't end the Turn), since in the real rules this happens entirely
+   * outside the Turn structure to begin with.
+   */
+  const doPlanObaStrike = (a: Extract<Action, { type: 'PLAN_OBA_STRIKE' }>): ReduceResult => {
+    if (a.side !== next.currentSide) return deny('not your turn');
+    const player = next.players[a.side];
+    const card = CARD_CATALOG[a.cardId];
+    if (!card || card.type !== 'artillery') return deny('not an Artillery Card');
+    if (!player.hand.includes(a.cardId)) return deny('card not in hand');
+    if (!next.hexes[a.targetHexId]) return deny('no such hex');
+    if (next.obaAllowedRounds && !next.obaAllowedRounds.includes(next.round)) {
+      return deny('OBA is not available this Round (§13.4)');
+    }
+    player.hand = player.hand.filter((id) => id !== a.cardId);
+    const resolveRound = next.round + 1;
+    next.pendingObaStrikes = [
+      ...(next.pendingObaStrikes ?? []),
+      { side: a.side, cardId: a.cardId, targetHexId: a.targetHexId, resolveRound },
+    ];
+    log(
+      'oba',
+      `Side ${a.side} plans an OBA Strike (${card.name}) on ${a.targetHexId}, resolving Round ${resolveRound} (§13.5)`,
+      a.side,
+    );
+    return finish();
+  };
+
   // -- dispatch -------------------------------------------------------------
 
   switch (action.type) {
@@ -1251,6 +1599,14 @@ export function reduce(state: GameState, action: Action): ReduceResult {
       return doRemoveHastyDefense(action);
     case 'EXIT':
       return doExit(action);
+    case 'HIDDEN_MOVE':
+      return doHiddenMove(action);
+    case 'RECON_BY_FIRE':
+      return doReconByFire(action);
+    case 'PLAY_CARD':
+      return doPlayCard(action);
+    case 'PLAN_OBA_STRIKE':
+      return doPlanObaStrike(action);
     case 'PASS':
       return doPass();
     default:

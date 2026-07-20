@@ -16,7 +16,10 @@ import { OBSTACLES_SANDBOX } from './obstaclesSandbox';
 import { FORTIFICATIONS_SANDBOX } from './fortificationsSandbox';
 import { HEX_BOARD_DEMO } from './hexBoardDemo';
 import { SETUP_PHASE_SANDBOX } from './setupPhaseSandbox';
-import { SOS_MISSION_4_MISSION } from './sos-mission-4';
+import { HIDDEN_UNITS_SANDBOX } from './hiddenUnitsSandbox';
+import { CARDS_SANDBOX } from './cardsSandbox';
+import { SOS_MISSION_4_MISSION } from './SoS Mission 4';
+import { ATB_FIREFIGHT_9_KV2_MISSION } from './atb-firefight-9-kv2';
 
 export const MISSION_CATALOG: Record<string, MissionDef> = {
   [MISSION_1.id]: MISSION_1,
@@ -27,7 +30,10 @@ export const MISSION_CATALOG: Record<string, MissionDef> = {
   [FORTIFICATIONS_SANDBOX.id]: FORTIFICATIONS_SANDBOX,
   [HEX_BOARD_DEMO.id]: HEX_BOARD_DEMO,
   [SETUP_PHASE_SANDBOX.id]: SETUP_PHASE_SANDBOX,
+  [HIDDEN_UNITS_SANDBOX.id]: HIDDEN_UNITS_SANDBOX,
+  [CARDS_SANDBOX.id]: CARDS_SANDBOX,
   [SOS_MISSION_4_MISSION.id]: SOS_MISSION_4_MISSION,
+  [ATB_FIREFIGHT_9_KV2_MISSION.id]: ATB_FIREFIGHT_9_KV2_MISSION,
   [NEW_MISSION_MISSION.id]: NEW_MISSION_MISSION,
 };
 

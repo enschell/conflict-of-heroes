@@ -35,6 +35,19 @@ export type { HitOutcome, ResolvedHit } from './hits';
 export { hasLOS, inArc, canSightTarget, visibleHexesFrom } from './los';
 export { moveCost, directionTo, pivotCost, planVehicleMove } from './movement';
 export { rangeBand, fpRangeModifier } from './range';
+export {
+  isConcealed,
+  isOutOfAllEnemyLOS,
+  mustReveal,
+  mustRevealAtHex,
+  mustRevealForSharedHex,
+  revealNumber,
+  hiddenMoveBase,
+  becomingHiddenCandidates,
+  rollReveal,
+  facingToward,
+} from './hidden';
+export type { RevealRoll } from './hidden';
 export { rallyModifier, RALLY_AP_COST } from './rally';
 export {
   bestSpotterFor,

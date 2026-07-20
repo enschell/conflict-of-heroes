@@ -45,6 +45,7 @@ export function DiceRoller() {
   const commit = useGame((s) => s.commitRoll);
   const cancel = useGame((s) => s.cancelRoll);
   const adjustCapMod = useGame((s) => s.adjustPendingCapMod);
+  const adjustRevealMod = useGame((s) => s.adjustPendingRevealMod);
   const muted = useGame((s) => s.muted);
 
   const [stepIndex, setStepIndex] = useState(0);
@@ -115,7 +116,7 @@ export function DiceRoller() {
         {/* §3.2: CAP dice mod — only adjustable before the first die of the
             whole sequence is rolled (it applies to every step uniformly, so
             changing it mid-sequence would invalidate already-rolled dice). */}
-        {stepIndex === 0 && phase === 'ready' && (
+        {stepIndex === 0 && phase === 'ready' && pending.kind !== 'recon' && (
           <div className="confirm__mines-row">
             <span>
               CAP dice mod{(pending.capDiceMod ?? 0) !== 0 ? ` (${(pending.capDiceMod ?? 0) > 0 ? '+' : ''}${pending.capDiceMod})` : ''}
@@ -136,6 +137,58 @@ export function DiceRoller() {
               </button>
             </div>
           </div>
+        )}
+        {/* §11.7 Recon by Fire: the Reveal Number and follow-up Hit Number CAP
+            mods are independent (CAPs spent on one don't carry to the other),
+            so each gets its own stepper. Both are decided up front, before
+            the Reveal die is rolled — the Hit Number mod only matters if that
+            roll succeeds and a Unit is actually there, but locking the choice
+            in early avoids resetting the already-rolled Reveal die. */}
+        {stepIndex === 0 && phase === 'ready' && pending.kind === 'recon' && (
+          <>
+            <div className="confirm__mines-row">
+              <span>
+                Reveal Number CAP mod (§11.7){(pending.capRevealDiceMod ?? 0) !== 0 ? ` (${(pending.capRevealDiceMod ?? 0) > 0 ? '+' : ''}${pending.capRevealDiceMod})` : ''}
+              </span>
+              <div className="confirm__mines-stepper">
+                <button
+                  disabled={(pending.capRevealDiceMod ?? 0) <= -(pending.capRevealDiceModMax ?? 0)}
+                  onClick={() => adjustRevealMod(-1)}
+                >
+                  −
+                </button>
+                <span>{pending.capRevealDiceMod ?? 0}</span>
+                <button
+                  disabled={(pending.capRevealDiceMod ?? 0) >= (pending.capRevealDiceModMax ?? 0)}
+                  onClick={() => adjustRevealMod(1)}
+                >
+                  +
+                </button>
+              </div>
+            </div>
+            {steps.length > 1 && (
+              <div className="confirm__mines-row">
+                <span>
+                  Hit Number CAP mod, if revealed{(pending.capDiceMod ?? 0) !== 0 ? ` (${(pending.capDiceMod ?? 0) > 0 ? '+' : ''}${pending.capDiceMod})` : ''}
+                </span>
+                <div className="confirm__mines-stepper">
+                  <button
+                    disabled={(pending.capDiceMod ?? 0) <= -(pending.capDiceModMax ?? 0)}
+                    onClick={() => adjustCapMod(-1)}
+                  >
+                    −
+                  </button>
+                  <span>{pending.capDiceMod ?? 0}</span>
+                  <button
+                    disabled={(pending.capDiceMod ?? 0) >= (pending.capDiceModMax ?? 0)}
+                    onClick={() => adjustCapMod(1)}
+                  >
+                    +
+                  </button>
+                </div>
+              </div>
+            )}
+          </>
         )}
         {(step.arMods?.length || step.drMods?.length) ? (
           <div className="dice-mods">

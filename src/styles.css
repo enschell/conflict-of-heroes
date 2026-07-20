@@ -406,6 +406,40 @@ button.link {
   margin-bottom: 0.5rem;
 }
 
+/* ---- hand panel (§8 Cards — plain-text, the full card-art UI is deferred) ---- */
+.hand-panel {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 0.4rem 0.5rem;
+  margin-top: 0.4rem;
+}
+.hand-panel__head {
+  font-weight: 700;
+  font-size: 0.82rem;
+  margin-bottom: 0.35rem;
+}
+.hand-panel__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+.hand-panel__card {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 0.3rem 0.4rem;
+}
+.hand-panel__name {
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+.hand-panel__effect {
+  font-size: 0.75rem;
+  margin: 0.15rem 0 0.3rem;
+}
+
 .stats-grid {
   display: grid;
   grid-template-columns: auto 1fr;
@@ -613,7 +647,7 @@ button.link {
    so a ~300px-wide box reads as the requested 0.25× view. */
 .setup__map-thumb {
   width: 100%;
-  max-width: 320px;
+  max-width: 450px;
   margin: 0.6rem 0;
   border: 1px solid var(--line);
   border-radius: 6px;
@@ -1413,6 +1447,47 @@ button.link {
 .editor__map-body {
   display: flex;
   gap: 1rem;
+}
+/* Starting Forces: Side A column | board | Side B column. */
+.editor__forces-grid {
+  display: grid;
+  grid-template-columns: minmax(260px, 3fr) minmax(400px, 6fr) minmax(260px, 3fr);
+  gap: 1rem;
+  align-items: start;
+}
+/* Reinforcements: Side A waves | Side B waves. */
+.editor__reinf-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+  align-items: start;
+}
+/* One side's authoring column — top border carries the side color. */
+.editor__side-col {
+  background: #1f2116;
+  border: 1px solid #3a3d2e;
+  border-top: 4px solid #8b8871;
+  border-radius: 4px;
+  padding: 0.7rem 0.8rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+  min-width: 0;
+}
+.editor__side-col-head {
+  margin: 0;
+}
+.editor__side-col-nations {
+  font-weight: 400;
+  color: #8b8871;
+  font-size: 0.8em;
+}
+.editor__side-col .editor__unit-list {
+  max-height: 420px; /* tighter than the old full-width picker — the column is tall already */
+}
+.editor__forces-status {
+  text-align: center;
+  margin-top: 0.4rem;
 }
 .editor__map-board {
   flex: 1;

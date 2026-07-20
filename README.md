@@ -13,10 +13,19 @@ A personal, browser-based implementation of the Academy Games tactical wargame
   Guns, Mobile Vehicles, Open-Topped, APCs, Trucks/Wagons, Field Guns), Mortars + Smoke,
   Hills/Elevation §12 (move cost, elevation-aware LOS incl. Plateau Effect/Blind Spots, Elevation
   Combat Bonus), Fortifications and Obstacles §17 (Barbed Wire, Mines, Road Block, Trenches, Bunkers,
-  Hasty Defenses, and §17.11/17.12 destroying one by Attack), and Flamethrowers + Pioneers §18 are
-  all built. OBA (Battle/Weapon Cards) and hidden units are the only rules pieces left (see
-  `CLAUDE.md` §8) — both need real per-client secret info, which is exactly what online play now
-  makes possible (Mines follow the same always-visible rule for the same reason, today).
+  Hasty Defenses, and §17.11/17.12 destroying one by Attack), Flamethrowers + Pioneers §18,
+  **Hidden Units §11** (reveal triggers, Hidden Move, Recon by Fire — a render-layer-only mechanism
+  for hotseat, devtools-defeatable and accepted as such), and **Battle/Weapon/Veteran Cards §8 +
+  Off-Board Artillery §13.4-13.9** (deck construction/draw/discard, Green/Blue cost-paying,
+  Mission-card auto-resolve, real OBA Drift Check + blast resolution — framework-only card effects,
+  a card's own bespoke rules text isn't mechanically simulated yet, only its shared mechanics) are
+  all built. **Every v3 rules module is now built** (see `CLAUDE.md` §8) — Mines stay always-visible
+  on purpose, same anti-hide rationale Hidden Units itself uses.
+- **In-app authoring tools, no hand-written data files needed:** a **Mission Editor** (map picker,
+  Starting Forces incl. a Pre-Mission Setup Pool, Reinforcement waves, Victory Conditions, Hidden
+  flags/Mines) and a separate **Map Editor** (paint real terrain/roads/elevation, terrain art
+  variants, an optional gameplay-art overlay image) — both export real, self-contained TypeScript
+  source files. Multi-board Missions can be independently rotated (0°/90°/-90°/180°) and abutted.
 - **Stack:** Vite + React + TypeScript for the client; a small Node + WebSocket server (`server/`)
   for online play, serving the built client and relaying game Actions — see "Playing online."
   SVG hex board — **flat-top hexes** per `docs/hex_board_spec/README.md` (authoritative geometry/
@@ -52,18 +61,28 @@ npm run server       # M13: the online-play server (WebSocket relay + serves dis
 > `$env:Path = "C:\Program Files\nodejs;" + $env:Path` (Git Bash doesn't have it on PATH).
 
 ## Playing
-Run `npm run dev` and open http://localhost:5173. Select **Start Mission 1** — real terrain and
-setup, re-authored onto the new flat-top board substrate (single board, real `A01`-`S12` labels) —
-or one of the non-canonical test sandboxes — **Armor Sandbox** for vehicles, **Fire Support Sandbox**
-for mortars/smoke, **Hills Sandbox** for elevation, **Obstacles Sandbox** for Barbed Wire/Mines/Road
-Block, **Fortifications Sandbox** for Trenches/Bunkers/Hasty Defenses/Flamethrowers (incl. a German
-Pioneers Squad and a Soviet T-34), or **Hex Board Demo** (the flat-top substrate's own proving
-ground — a blank single board, or two boards abutted east-west to exercise the multi-board seam
-merge) — then select one of the current side's units and:
-- **Move / fire / close combat / load-unload onto a Vehicle** by clicking the board; if a hex
-  offers more than one option (e.g. move *into* an enemy hex vs attack it), a chooser pops up.
+Run `npm run dev` and open http://localhost:5173. The start screen is a three-panel menu: **Tests**
+(non-canonical sandbox/demo missions, click to start immediately), **Missions** (the real,
+hand-authored Missions — currently **Mission 1 "Partisans"**, **SoS Mission 4**, and **AtB Firefight
+9**; clicking one just selects it and shows its situation/map/forces at right), and a **Play** card
+underneath with **Local Hotseat** (starts the selected Mission) or **Play Online** (see below). The
+sandboxes cover one mechanic each: **Armor Sandbox** (vehicles), **Fire Support Sandbox**
+(mortars/smoke), **Hills Sandbox** (elevation), **Obstacles Sandbox** (Barbed Wire/Mines/Road Block),
+**Fortifications Sandbox** (Trenches/Bunkers/Hasty Defenses/Flamethrowers), **Setup Phase Sandbox**
+(the Pre-Mission Setup Pool), **Hidden Units Sandbox** (§11), **Cards Sandbox** (§8/§13.4-13.9 —
+one of each card category/type, incl. an Artillery Card to plan/resolve an OBA Strike), and **Hex
+Board Demo** (the flat-top substrate's own proving ground — a blank single board, or two boards
+abutted east-west). Select one of the current side's units and:
+- **Move / fire / close combat / load-unload onto a Vehicle / Hidden Move / Recon by Fire** by
+  clicking the board; if a hex offers more than one option (e.g. move *into* an enemy hex vs attack
+  it), a chooser pops up.
+- **Cards** (left sidebar, per side, once a Mission has a `cardConfig`): a plain-text hand list —
+  "Play" a card (selects a Unit first for a Green-cost one), or "Target…" an Artillery Card, then
+  click any Hex to plan an OBA Strike (resolves automatically one Round later).
 - **Reinforcements** (left sidebar, per side): once a wave's Round arrives, click **Enter now** to
   bring it onto the Map as a single Group Action.
+- **Pre-Mission Setup** (Missions authored with a Setup Pool): before Round 1, each side in turn
+  places its pool of Units onto any empty Hex, then real play begins.
 - **Hold Shift** to preview line-of-sight from the hex under the cursor.
 - **Ctrl+click** a stacked hex to pick a specific unit. **Group mode** (topbar) lets you multi-select
   Fresh units for a Group Move/Attack/Rally — Group Move offers both a quick formation-shift (six
@@ -72,6 +91,12 @@ merge) — then select one of the current side's units and:
 - The right sidebar shows the selected unit's actions (with hit-% previews), the terrain/units
   under the cursor, and the event log; the top bar has Pass / Stall / Undo / Redo / LOS / Group /
   mute / restart.
+
+**Authoring your own content** — from the start screen: the **Mission Editor** (map picker, Starting
+Forces incl. a Setup Pool and Hidden/Mines placement, Reinforcement waves incl. Hidden units, Victory
+Conditions, board rotation) and the **Map Editor** (paint terrain/roads/elevation, terrain art
+variants, an optional gameplay-art overlay image) both export real, self-contained TypeScript source
+files ready to drop into `src/data/`.
 
 `npm run play` / `npm run demo` drive the same engine through a **text** board in the terminal
 (a debug convenience — the real visual model is the SVG board).
@@ -104,20 +129,29 @@ v3 cutover (Spent Die/Check, Fresh/Spent + Stress, CAP floor 3, AR/DR combat, v3
 no-tie VP) ✅ · M5 Group Actions incl. Group Close Combat ✅ · M6 Vehicles + all of Special Units §16
 ✅ (movement, combat specifics, Transport/Towing, Turreted/SPG/Mobile-Vehicles/Open-Topped/APC/
 Trucks-Wagons/Field-Guns) · Mission 1 reinforcements (§4.12, map-edge/Group entry, manual per-hex
-placement) ✅ · M7 Mortars + Smoke ✅ (OBA deferred pending Cards) · M9 Hills/Elevation §12 ✅
+placement) ✅ · M7 Mortars + Smoke ✅ · M9 Hills/Elevation §12 ✅
 (move cost, elevation-aware LOS, Elevation Combat Bonus, Hills Sandbox test mission) ·
 M10 Fortifications and Obstacles §17 ✅ (Phase 1: Barbed Wire, Mines — always visible, Road Block;
 Phase 2: Trenches, Bunkers, Hasty Defenses, §17.11/17.12 destroying one by Attack; Fortifications
 Sandbox test mission) · M11 Flamethrowers + Pioneers §18 ✅ (Flamethrower attack profile on Fire/Close
-Combat, Pioneer Mines-immunity + Range-1 Fire Smoke) · **Hex board migration** ✅ (pointy-top →
-flat-top, `docs/hex_board_spec/README.md`; real board-edge half/quarter-hexes, `A01`-`S12` labels,
-board number, multi-board seam merging; Mission 1 and all five non-canonical sandboxes fully
-re-authored onto it — rotation not yet built, deferred until a mission needs it) — see `CLAUDE.md` §B
-· **M13 Online Multiplayer ✅ steps 1-4** (deliberately built ahead of M12/Cards — Cards need real
-per-client secret info that only online play provides; Node + WebSocket server, room codes, hotseat
-completely untouched, functional-minimum UI, **deployed and live on Render**) — see `CLAUDE.md` §8's
-M13 entry; next: a real visual design + opponent-approved Undo (M13 step 5) → M12 cards (incl. OBA)
-→ M8 hidden units.
+Combat, Pioneer Mines-immunity + Range-1 Fire Smoke) · **M8 Hidden Units §11** ✅ (built on explicit
+user request, reversing the earlier online-only deferral — reveal triggers, Hidden Move, Recon by
+Fire; render-layer-only for hotseat, devtools-defeatable and accepted as such; Hidden Units Sandbox
+test mission) — see `CLAUDE.md` §F · **Hex board migration** ✅ (pointy-top → flat-top,
+`docs/hex_board_spec/README.md`; real board-edge half/quarter-hexes, `A01`-`S12` labels, board
+number, multi-board seam merging, **per-board 0°/90°/-90°/180° rotation with multi-board
+abutment**; every mission/sandbox re-authored onto it) — see `CLAUDE.md` §B · **Mission Editor** ✅
+and **Map Editor** ✅ (in-app authoring, no more hand-written data files — map picker/terrain
+painting, Starting Forces incl. Pre-Mission Setup Pool, Reinforcements, Victory Conditions, real
+TypeScript export/reload) — see `CLAUDE.md` §C/§D · **Pre-Mission Setup phase** ✅ (Mission-
+configurable pool placement before Round 1) — see `CLAUDE.md` §E · **M13 Online Multiplayer ✅ steps
+1-4** (Node + WebSocket server, room codes, hotseat completely untouched, functional-minimum UI,
+**deployed and live on Render**) — see `CLAUDE.md` §8's M13 entry · **M12 Battle/Weapon/Veteran
+Cards §8 + Off-Board Artillery §13.4-13.9** ✅ (shipped after M13 steps 1-4, on user request — real
+deck/draw/discard/cost-paying mechanics + real OBA Drift/blast resolution, framework-only per-card
+bespoke effects, a minimal plain-text live hand panel; Cards Sandbox test mission) — see
+`CLAUDE.md` §G. **Every v3 rules module is now built** — the only work left in the whole
+v3/M-numbered roadmap is M13's own follow-ups: a real visual design + opponent-approved Undo.
 See `CLAUDE.md` §8 for the full milestone roadmap.
 
 A **rules-conformance audit** (`npm run conformance`) self-plays several full games and re-derives
