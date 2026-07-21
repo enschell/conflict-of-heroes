@@ -10,9 +10,10 @@
  */
 import { useEffect, useRef, useState } from 'react';
 import { attackContext, directionTo, distance, effectiveStats, fortificationAt, legalActionsForUnit, legalEntryHexes, legalSetupHexes, moveCost, neighbor, neighbors, parseHexId, idOf, planVehicleMove, templateOf, visibleHexesFrom } from '../engine';
-import type { Action, Facing, FortificationKind, Unit } from '../engine/types';
+import type { Action, Facing, FortificationKind, SideId, Unit } from '../engine/types';
 import { useGame } from '../state/store';
 import { artForHex } from '../data/hexArt';
+import { NATIONS } from '../data/nations';
 import { fireOdds, isHopelessShot, pct } from './odds';
 import {
   EDGE_CORNERS,
@@ -29,6 +30,7 @@ import {
   polygonCentroid,
   polygonTopY,
 } from './hexgeo';
+import { playObaStrike } from './sound';
 import { HEX_STROKE, ROAD_STROKE, TERRAIN_FILL, WALL_STROKE } from './theme';
 import { UnitCounter } from './UnitCounter';
 import { UnitPicker } from './UnitPicker';
@@ -62,6 +64,69 @@ export function Board() {
   const setHover = useGame((s) => s.setHover);
   const hexClick = useGame((s) => s.hexClick);
   const closePicker = useGame((s) => s.closePicker);
+  const muted = useGame((s) => s.muted);
+  const turnBanner = useGame((s) => s.turnBanner);
+
+  // §13.6-13.9 OBA Strike landing: an explosion animation + incoming-shell/
+  // boom sound + a callout above the board, triggered by watching `game.log`
+  // for a newly-appended 'oba' entry carrying `hexIds` (the blast radius) —
+  // see `cards.ts`'s `applyResolvedObaStrike`. Watching the log directly
+  // (rather than hooking into `store.ts`'s `applyReduceResult`, which only
+  // fires for the LOCAL dispatch) means this works the same way for hotseat
+  // and an online STATE broadcast alike, since both grow the same
+  // `state.log`. Seeded to the CURRENT log length on mount (not 0) so
+  // loading a saved mid-game state doesn't replay every past Strike still
+  // sitting in its history.
+  //
+  // A round transition ALWAYS also opens `TurnBanner.tsx`'s blocking "Start
+  // of turn N" modal (`GameState.round` only ever advances via `startRound`,
+  // which is also the only place an OBA Strike resolves) — firing the
+  // sound/animation immediately would play out entirely UNDER that opaque
+  // backdrop, unseen and easy to miss (confirmed live: the sound was heard
+  // but the explosion never visible). So detection and playback are two
+  // separate effects: the first queues every newly-seen Strike's blast data
+  // (never dropped); the second drains that queue only once `turnBanner` is
+  // no longer blocking the view (the player has clicked OK), one Strike at a
+  // time with a stagger if more than one is queued.
+  const lastObaLogLenRef = useRef(game?.log.length ?? 0);
+  const pendingObaStrikesRef = useRef<{ hexIds: string[]; side: SideId }[]>([]);
+  const [obaBlast, setObaBlast] = useState<{ hexIds: string[]; key: number } | null>(null);
+  const [obaCallout, setObaCallout] = useState<{ side: SideId; key: number } | null>(null);
+
+  useEffect(() => {
+    const log = game?.log;
+    if (!log) return;
+    const prevLen = lastObaLogLenRef.current;
+    lastObaLogLenRef.current = log.length;
+    if (log.length <= prevLen) return; // shrank (undo) or unchanged
+    for (const e of log.slice(prevLen)) {
+      if (e.type === 'oba' && e.hexIds?.length && e.side) {
+        pendingObaStrikesRef.current.push({ hexIds: e.hexIds, side: e.side });
+      }
+    }
+  }, [game?.log]);
+
+  useEffect(() => {
+    if (turnBanner) return undefined; // still showing "Start of turn N" — wait for the player's OK
+    const queued = pendingObaStrikesRef.current;
+    if (queued.length === 0) return undefined;
+    pendingObaStrikesRef.current = [];
+    const timers: ReturnType<typeof setTimeout>[] = [];
+    const STAGGER_MS = 1700; // keeps back-to-back Strikes from visually/audibly colliding
+    queued.forEach(({ hexIds, side }, i) => {
+      timers.push(
+        setTimeout(() => {
+          playObaStrike(muted);
+          const key = Date.now();
+          setObaBlast({ hexIds, key });
+          setObaCallout({ side, key });
+          timers.push(setTimeout(() => setObaBlast(null), 1400));
+          timers.push(setTimeout(() => setObaCallout(null), 2400));
+        }, i * STAGGER_MS),
+      );
+    });
+    return () => timers.forEach(clearTimeout);
+  }, [turnBanner, muted]);
 
   // Ctrl+wheel zooms (centered on the cursor); plain wheel pans the map
   // vertically instead. `zoom`/`pan` directly drive the <svg>'s own
@@ -489,6 +554,18 @@ export function Board() {
 
   return (
     <>
+      {obaCallout &&
+        (() => {
+          // Never show a bare Side letter (same convention as TurnFlash.tsx/
+          // VictoryScreen.tsx) — resolve the real nation name(s) instead.
+          const nation = game.players[obaCallout.side].nations.map((n) => NATIONS[n]?.name ?? n).join(', ');
+          const possessive = nation.endsWith('s') ? `${nation}’` : `${nation}’s`;
+          return (
+            <div className="oba-callout" key={obaCallout.key}>
+              💥 {possessive} Off-Board Artillery Strike is resolving… (§13.6-13.9)
+            </div>
+          );
+        })()}
       <svg
         ref={svgRef}
         className="board"
@@ -923,6 +1000,36 @@ export function Board() {
               })()}
             </g>
           )}
+
+          {/* §13.6-13.9 OBA Strike landing: a brief explosion burst over every
+              Hex in the blast radius — rendered last of all so it visually
+              covers the Hex it's bombing. SMIL <animate> (not CSS keyframes)
+              since this is a one-shot burst per Hex, remounted fresh (key
+              includes obaBlast.key) each time a new Strike lands, including
+              back-to-back Strikes in the same Round. */}
+          {obaBlast &&
+            obaBlast.hexIds
+              .filter((id) => game.hexes[id])
+              .map((id) => {
+                const c = hexCenter(id);
+                return (
+                  <g key={`oba-blast-${id}-${obaBlast.key}`} pointerEvents="none" transform={hexRotationTransform(id)}>
+                    <circle cx={c.x} cy={c.y} r={4} fill="#ffd166" opacity={0.95}>
+                      <animate attributeName="r" from={4} to={HEX_SIZE * 1.05} dur="0.45s" fill="freeze" />
+                      <animate attributeName="opacity" from={0.95} to={0} dur="0.45s" fill="freeze" />
+                    </circle>
+                    <circle cx={c.x} cy={c.y} r={6} fill="none" stroke="#ff7b3d" strokeWidth={5} opacity={0.9}>
+                      <animate attributeName="r" from={6} to={HEX_SIZE * 1.35} dur="0.6s" begin="0.05s" fill="freeze" />
+                      <animate attributeName="stroke-width" from={5} to={0} dur="0.6s" begin="0.05s" fill="freeze" />
+                      <animate attributeName="opacity" from={0.9} to={0} dur="0.6s" begin="0.05s" fill="freeze" />
+                    </circle>
+                    <circle cx={c.x} cy={c.y} r={2} fill="#5a5a5a" opacity={0.65}>
+                      <animate attributeName="r" from={2} to={HEX_SIZE * 0.95} dur="1.1s" begin="0.15s" fill="freeze" />
+                      <animate attributeName="opacity" from={0.6} to={0} dur="1.1s" begin="0.15s" fill="freeze" />
+                    </circle>
+                  </g>
+                );
+              })}
         </g>
       </svg>
 

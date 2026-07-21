@@ -115,6 +115,50 @@ export function playMove(kind: UnitKind, muted: boolean): void {
   }
 }
 
+/** A falling-shell whistle: a tone sweeping from high to low pitch. */
+function whistle(a: AudioContext, start: number, dur: number, gain: number): void {
+  const o = a.createOscillator();
+  o.type = 'sine';
+  o.frequency.setValueAtTime(1500, start);
+  o.frequency.exponentialRampToValueAtTime(280, start + dur);
+  const g = a.createGain();
+  g.gain.setValueAtTime(0.0001, start);
+  g.gain.linearRampToValueAtTime(gain, start + dur * 0.15);
+  g.gain.linearRampToValueAtTime(gain * 0.8, start + dur * 0.85);
+  g.gain.exponentialRampToValueAtTime(0.0001, start + dur);
+  o.connect(g);
+  g.connect(a.destination);
+  o.start(start);
+  o.stop(start + dur + 0.02);
+}
+
+/** A single explosive boom: a sub-bass thump + a broadband noise crack. */
+function boom(a: AudioContext, start: number, gain: number): void {
+  tone(a, start, 55, 0.55, gain, 'sine');
+  tone(a, start, 110, 0.3, gain * 0.5, 'triangle');
+  noise(a, start, 0.35, gain * 0.9, 700);
+  noise(a, start + 0.03, 0.5, gain * 0.4); // rumbling debris tail, no lowpass
+}
+
+/**
+ * Off-Board Artillery Strike landing (§13.6-13.9): one or more falling-shell
+ * whistles overlapping into a barrage of booms — matches `applyResolvedObaStrike`'s
+ * blast radius (a handful of Hexes hit "at once"), not a single Attack sound.
+ */
+export function playObaStrike(muted: boolean): void {
+  if (muted) return;
+  const a = audioCtx();
+  if (!a) return;
+  const now = a.currentTime;
+  const shellCount = 3;
+  for (let i = 0; i < shellCount; i++) {
+    const whistleStart = now + i * 0.08;
+    const whistleDur = 0.5 + Math.random() * 0.15;
+    whistle(a, whistleStart, whistleDur, 0.1);
+    boom(a, whistleStart + whistleDur, 0.35 - i * 0.05);
+  }
+}
+
 /** Weapon fire: rifle crack, MG burst, or cannon boom. */
 export function playFire(kind: UnitKind, muted: boolean): void {
   if (muted) return;

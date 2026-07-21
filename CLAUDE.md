@@ -635,11 +635,26 @@ from here on.
   played end-to-end — logged, discarded, Unit Stressed, Turn switched to the other side; an Artillery
   card armed, targeted at a Hex, and planned (logged, discarded, queued for Round 2) — and, after
   both sides Passed to end Round 1, Round 2's Pre-Round Sequence automatically resolved the Strike
-  (Drift Check succeeded, logged in full) exactly as designed. Full suite (617 tests) + typecheck +
+  (Drift Check succeeded, logged in full) exactly as designed. Full suite (617 tests, later 618 once
+  the sound/animation follow-up added its own fixture) + typecheck +
   build + conformance (0 violations) green throughout.
 - **CLAUDE.md's own former "do not read the PDF" instruction** (this file's opening paragraph) was
   explicitly overridden by the user for this one build and has been updated accordingly — see the
   opening paragraph's current wording for what's actually in force now.
+- **OBA strike landing got real sound + a board animation + a text callout**, on user request
+  (follow-up, same session): `GameEvent` gained a generic `hexIds?: HexId[]` presentation-hint field
+  (never read by `reduce` — pure UI hint), populated by `cards.ts`'s `applyResolvedObaStrike` with the
+  Strike's blast radius (marker Hex + its 6 neighbors, §13.8); `sound.ts` gained `playObaStrike`
+  (synthesized boom); `Board.tsx` renders a brief expanding-circle blast per affected Hex, plus a
+  "💥 {Nation}'s Off-Board Artillery Strike is resolving… (§13.6-13.9)" callout above the map.
+  **A real, live-caught timing bug**: OBA only resolves at Round start (§9.4 step 9), the exact same
+  `dispatch` that opens `TurnBanner.tsx` — a blocking, click-OK-to-dismiss modal with no auto-fade —
+  so the first version's sound/animation fired and fully finished *underneath* that opaque modal,
+  invisible. Fixed by queuing the blast (a ref-backed queue keyed off new `type: 'oba'` log entries)
+  and only firing it once `turnBanner` is dismissed, verified live via one atomic script asserting
+  zero blast/callout presence while the banner was up, then both appearing within ~40ms of clicking
+  OK. Full detail + the generalizable lesson (any log/state-diff-driven sound/animation must check
+  for a blocking modal before firing) in memory `conflict-of-heroes-cards-oba`.
 
 ---
 

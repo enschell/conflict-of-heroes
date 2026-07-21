@@ -162,4 +162,20 @@ describe('applyResolvedObaStrike (state mutation)', () => {
     // Either destroyed (removed) or carries a fresh Hit Marker — either way, the Hit was applied.
     expect(tgt === undefined || tgt.hitMarkers.length > 0).toBe(true);
   });
+
+  it('carries the blast radius as hexIds on the Drift Check summary line (a UI presentation hint, e.g. an explosion animation)', () => {
+    const s = gridScene();
+    addUnit(s, 'TGT', 'B', 0, 0, 0);
+    s.rng = { ...s.rng, state: 1 };
+    const resolution = resolveObaStrike(s, { side: 'A', cardId: 'W06', targetHexId: '0,0' });
+    expect(resolution.blastHexIds.length).toBeGreaterThan(0);
+    applyResolvedObaStrike(s, { side: 'A', cardId: 'W06', targetHexId: '0,0' }, resolution);
+    const driftLine = s.log.find((e) => e.type === 'oba' && e.text.includes('Drift Check'));
+    expect(driftLine?.hexIds).toEqual(resolution.blastHexIds);
+    // Per-Attack lines don't carry hexIds — only the one Strike-landed summary does,
+    // so the UI animates the whole blast once, not once per Unit hit.
+    const attackLine = s.log.find((e) => e.type === 'oba' && e.text.includes('OBA Attack on'));
+    expect(attackLine).toBeDefined();
+    expect(attackLine?.hexIds).toBeUndefined();
+  });
 });

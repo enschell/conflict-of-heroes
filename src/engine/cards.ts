@@ -279,6 +279,10 @@ export interface ObaStrikeResolution {
   driftCheck: DriftCheckResult;
   attacks: ObaAttackRoll[];
   rng: RngState;
+  /** The marker Hex + its 6 neighbors (§13.8) — a presentation hint carried
+   *  onto the "Strike lands" `GameEvent` so the UI can animate/sound the
+   *  whole blast at once, not per-Attack. */
+  blastHexIds: HexId[];
 }
 
 /**
@@ -314,7 +318,7 @@ export function resolveObaStrike(
     attacks.push(roll);
     rng = next;
   }
-  return { driftCheck, attacks, rng };
+  return { driftCheck, attacks, rng, blastHexIds };
 }
 
 /** Mirrors `reducer.ts`'s private `destroyUnit`, minus the §15.11 passenger-
@@ -351,7 +355,7 @@ export function applyResolvedObaStrike(
   strike: { side: SideId; cardId: CardId; targetHexId: HexId },
   resolution: ObaStrikeResolution,
 ): void {
-  const { driftCheck, attacks } = resolution;
+  const { driftCheck, attacks, blastHexIds } = resolution;
   const cardName = CARD_CATALOG[strike.cardId]?.name ?? strike.cardId;
   state.log.push({
     type: 'oba',
@@ -360,6 +364,9 @@ export function applyResolvedObaStrike(
     text: driftCheck.hit
       ? `Side ${strike.side} OBA Strike (${cardName}) targeting ${strike.targetHexId}: Drift Check ${driftCheck.dice1} vs ${driftCheck.checkNumber} -> on target`
       : `Side ${strike.side} OBA Strike (${cardName}) targeting ${strike.targetHexId}: Drift Check ${driftCheck.dice1} vs ${driftCheck.checkNumber} -> missed, drifts ${driftCheck.driftDistance} hex(es) to ${driftCheck.finalHexId}`,
+    // Presentation hint (§13.6-13.9's blast radius) so the UI can animate/
+    // sound the Strike landing across every affected Hex at once.
+    hexIds: blastHexIds,
   });
   state.rng = resolution.rng;
   for (const atk of attacks) {

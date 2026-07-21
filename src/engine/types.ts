@@ -585,6 +585,10 @@ export interface GameEvent {
   round: number;
   side?: SideId;
   text: string;
+  /** Hexes this event visually concerns (currently only §13.6-13.9's OBA
+   *  Strike-landed summary line, carrying its blast radius) — presentation
+   *  hint for the UI (e.g. an explosion animation), never read by `reduce`. */
+  hexIds?: HexId[];
 }
 
 // ---------------------------------------------------------------------------

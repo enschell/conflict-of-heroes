@@ -207,6 +207,38 @@ button.link {
   }
 }
 
+/* Callout above the map when an OBA Strike is resolving (§13.6-13.9,
+   Board.tsx) — normal document flow (not absolutely overlaid), so it sits
+   above the SVG rather than competing with .turn-flash's centered position. */
+.oba-callout {
+  text-align: center;
+  font-weight: 700;
+  font-size: 1.05rem;
+  color: #ffd166;
+  background: linear-gradient(180deg, #3a1f10, #241209);
+  border: 1px solid #ff7b3d;
+  border-radius: 8px;
+  padding: 0.45rem 1rem;
+  margin-bottom: 0.5rem;
+  animation: oba-callout-fade 2.4s ease-in-out forwards;
+}
+@keyframes oba-callout-fade {
+  0% {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+  10% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  80% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
 /* ---- panels ---- */
 .panel {
   background: var(--panel);
