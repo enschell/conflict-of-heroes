@@ -162,11 +162,11 @@ export const GERMAN_UNITS: UnitTemplate[] = [
     name: '8cm Mortar',
     kind: 'mortar',
     whiteBoxFp: true,
-    fp: { red: 4, blue: 0 },
+    fp: { red: 3, blue: 2 },
     dr: { front: 11, flank: 10, color: 'red' },
-    move: 1,
-    range: 12,
-    minRange: 2,
+    move: 3,
+    range: 16,
+    minRange: 3,
     apToFire: 3,
     indirectApToFire: 4,
     vp: 2,
@@ -311,10 +311,10 @@ export const GERMAN_UNITS: UnitTemplate[] = [
     name: 'PaK 38',
     kind: 'gun',
     whiteBoxFp: true,
-    fp: { red: 2, blue: 8 },
+    fp: { red: 3, blue: 8 },
     dr: { front: 13, flank: 10, color: 'red' },
     move: 4,
-    range: 11,
+    range: 10,
     apToFire: 3,
     vp: 2,
     unburdened: false,
@@ -499,13 +499,10 @@ export const GERMAN_UNITS: UnitTemplate[] = [
     counterImage: '/assets/units/ger-pz3n.png',
   },
   {
-    // p.38 "Panzer IVe" (×1), 39-43. 7.5cm L24.
-    // TODO(unverified): the printed counter's Range icon was blank on
-    // this card (and PzIVf2/PzIVh below) — genuinely missing from the
-    // source page, not an OCR miss (confirmed at 4x zoom). Range 7 here
-    // is a placeholder by analogy to the other L24-armed PzIIIn (also
-    // Range 7) — replace with the real printed value if a cleaner copy
-    // of this page turns up.
+    // p.38 "Panzer IVe" (×1), 39-43. 7.5cm L24. The printed counter's Range
+    // icon was blank on this card (and PzIVf2/PzIVh below) — genuinely
+    // missing from the source page, not an OCR miss (confirmed at 4x zoom).
+    // Range 7 confirmed correct by the user against the physical rulebook.
     id: 'ger-pz4e',
     nation: 'germans',
     name: 'Panzer IVe',
@@ -523,11 +520,9 @@ export const GERMAN_UNITS: UnitTemplate[] = [
     counterImage: '/assets/units/ger-pz4e.png',
   },
   {
-    // p.38 "Panzer IVf2" (×1), 42-43. 7.5cm L43.
-    // TODO(unverified): Range icon blank on the source card — see PzIVe's
-    // note above. Placeholder of 14 is interpolated between similar
-    // longer-barrel mounts (PzIIIL/L60=10, StuG IIIg/L48=16); not a real
-    // transcription.
+    // p.38 "Panzer IVf2" (×1), 42-43. 7.5cm L43. Range icon blank on the
+    // source card — see PzIVe's note above; corrected by the user against
+    // the physical rulebook.
     id: 'ger-pz4f2',
     nation: 'germans',
     name: 'Panzer IVf2',
@@ -535,7 +530,7 @@ export const GERMAN_UNITS: UnitTemplate[] = [
     fp: { red: 5, blue: 11 },
     dr: { front: 17, flank: 14, color: 'blue' },
     move: 1,
-    range: 14,
+    range: 11,
     apToFire: 3,
     vp: 3,
     unburdened: false,
@@ -693,6 +688,352 @@ export const GERMAN_UNITS: UnitTemplate[] = [
     bonusMoves: 1,
     openTopped: true,
     counterImage: '/assets/units/ger-marder-iiim.png',
+  },
+
+  // ---------------------------------------------------------------------
+  // Awakening the Bear Rulebook v65 Unit List (reference/Awakening the Bear
+  // Rulebook v65.pdf, p.39 -- "Units in Awakening the Bear 3rd Edition").
+  // Originally authored by analogy (no PDF-to-image tool was available to
+  // transcribe the printed counters directly) -- the user has since checked
+  // every one of these against the physical rulebook/counters and corrected
+  // the stats below; only ger-pz4h above (a pre-existing entry, not part of
+  // this batch) remains an unconfirmed placeholder.
+  {
+    // p.39 "Mortar 5cm" (×2), 39-42. Analogy: German counterpart of the already-
+    // verified sov-mortar-50mm (same weapon class, weaker profile than the
+    // German 8cm Mortar it was "later supplanted" by).
+    id: 'ger-mortar-5cm',
+    nation: 'germans',
+    name: '5cm Mortar',
+    kind: 'mortar',
+    whiteBoxFp: true,
+    fp: { red: 2, blue: 0 },
+    dr: { front: 13, flank: 10, color: 'red' },
+    move: 1,
+    range: 10,
+    minRange: 2,
+    apToFire: 3,
+    vp: 1,
+    unburdened: false,
+  },
+  {
+    // p.39 "Tank Hunters" (×1), 39-42. A 2-man anti-tank assault team (bundled
+    // grenades/mines). Analogy: a smaller, more specialized cousin of Pioneers
+    // Squad (blue FP for anti-armor work), scaled down.
+    id: 'ger-tank-hunter',
+    nation: 'germans',
+    name: 'Tank Hunter',
+    kind: 'infantry',
+    fp: { red: 1, blue: 3 },
+    dr: { front: 13, flank: 11, color: 'red' },
+    move: 1,
+    range: 1,
+    apToFire: 4,
+    vp: 1,
+    unburdened: true,
+  },
+  {
+    // p.39 "7.5cm Inf Gun" (×2), 39-45 ("7,5 LeIG 18"). Light infantry-support
+    // gun, HE vs soft targets only. Analogy: the Soviet 76mm Inf Gun's role
+    // (soft-target support gun), German crew-served DR baseline.
+    id: 'ger-leig18',
+    nation: 'germans',
+    name: '7.5cm Inf Gun (LeIG 18)',
+    kind: 'gun',
+    whiteBoxFp: true,
+    fp: { red: 5, blue: 0 },
+    dr: { front: 12, flank: 10, color: 'red' },
+    move: 4,
+    range: 25,
+    apToFire: 3,
+    vp: 2,
+    unburdened: false,
+    propulsion: 'wheeled',
+  },
+  {
+    // p.39 "PaK36" (×2), 39-42 ("3,7 PaK36"). Early-war 3.7cm AT gun, famously
+    // outmatched by the T-34/KV-1. Analogy: weaker than PaK38 (which replaced
+    // it), same wheeled/crew-served profile.
+    id: 'ger-pak36',
+    nation: 'germans',
+    name: 'PaK 36',
+    kind: 'gun',
+    whiteBoxFp: true,
+    fp: { red: 2, blue: 5 },
+    dr: { front: 13, flank: 10, color: 'red' },
+    move: 3,
+    range: 5,
+    apToFire: 2,
+    vp: 1,
+    unburdened: false,
+    propulsion: 'wheeled',
+  },
+  {
+    // p.39 "7.62cm FK 297" (×1), 41-43. A captured, un-modified Soviet F-22 gun
+    // repurposed by the Germans to stop the T-34/KV-1. Analogy: between PaK38
+    // and PaK40's anti-tank punch; see sov-f22-76mm below — the same physical
+    // gun, different crew (kept deliberately close but not identical, matching
+    // this catalog's own T-34-captured precedent).
+    id: 'ger-fk297',
+    nation: 'germans',
+    name: '7.62cm FK 297',
+    kind: 'gun',
+    whiteBoxFp: true,
+    fp: { red: 5, blue: 7 },
+    dr: { front: 12, flank: 10, color: 'red' },
+    move: 6,
+    range: 9,
+    apToFire: 3,
+    vp: 2,
+    unburdened: false,
+    propulsion: 'wheeled',
+  },
+  {
+    // p.39 "FlaK18 88mm" (×1), 39-45. The legendary "88" — "could penetrate any
+    // armor." Analogy: the single most powerful German gun in this catalog,
+    // deliberately given the highest blue FP/range of any German entry
+    // (exceeding even PaK40/Marder-series AT guns).
+    id: 'ger-flak18-88mm',
+    nation: 'germans',
+    name: 'FlaK18 88mm',
+    kind: 'gun',
+    whiteBoxFp: true,
+    fp: { red: 6, blue: 12 },
+    dr: { front: 12, flank: 10, color: 'red' },
+    move: 7,
+    range: 19,
+    apToFire: 3,
+    vp: 3,
+    unburdened: false,
+    propulsion: 'wheeled',
+  },
+  {
+    // p.39 "Wagons" (×3), 39-45. Unarmed horse-drawn supply wagon. Analogy:
+    // ger-maultier's unarmed-supply-vehicle profile (attackMode 'none', no CAP
+    // loss on destruction), but slower (horse- not motor-drawn).
+    id: 'ger-wagon',
+    nation: 'germans',
+    name: 'Wagon',
+    kind: 'vehicle',
+    fp: { red: 0, blue: 0 },
+    dr: { front: 11, flank: 11, color: 'red' },
+    move: 1,
+    range: 0,
+    apToFire: 3,
+    vp: 1,
+    unburdened: false,
+    propulsion: 'wheeled',
+    bonusMoves: 1,
+    attackMode: 'none',
+    cannotControlHex: true,
+    noCapLossOnDestroy: true,
+  },
+  {
+    // p.39 "Truck/Opel" (×2), 39-45 ("Opel Blitz"). Unarmed supply truck.
+    // Analogy: sov-truck's GAZ-AA profile (closeCombatOnly attack mode, no CAP
+    // loss), the motorized counterpart to Wagons above.
+    id: 'ger-truck-opel',
+    nation: 'germans',
+    name: 'Truck (Opel Blitz)',
+    kind: 'vehicle',
+    fp: { red: -2, blue: -1 },
+    dr: { front: 11, flank: 11, color: 'red' },
+    move: 1,
+    range: 0,
+    apToFire: 2,
+    vp: 1,
+    unburdened: false,
+    propulsion: 'wheeled',
+    bonusMoves: 1,
+    attackMode: 'closeCombatOnly',
+    cannotControlHex: true,
+    noCapLossOnDestroy: true,
+  },
+  {
+    // p.39 "Protze PaK36" (×1), 41-42 ("Protze 36"). A PaK36 3.7cm AT gun
+    // mounted directly on a truck for mobility. Analogy: ger-pak36's gun stats
+    // above, now self-propelled/open-topped like the Marder series.
+    id: 'ger-protze-pak36',
+    nation: 'germans',
+    name: 'Protze PaK36',
+    kind: 'vehicle',
+    whiteBoxFp: true,
+    fp: { red: 2, blue: 5 },
+    dr: { front: 12, flank: 10, color: 'red' },
+    move: 1,
+    range: 5,
+    apToFire: 2,
+    vp: 2,
+    unburdened: false,
+    propulsion: 'wheeled',
+    bonusMoves: 1,
+    mobileTrackBonusMoves: 1,
+    openTopped: true,
+  },
+  {
+    // p.39 "SkKfz 232L" (×1), 39-45 ("SdKfz 232L"). Heavy 8-wheel recon car with
+    // a 2cm L55 autocannon (spaced-armor front shield). Analogy: Panzer IIf's
+    // firepower (same 2cm L55 autocannon), lighter than a tracked vehicle's DR
+    // (wheeled recon car).
+    id: 'ger-sdkfz232l',
+    nation: 'germans',
+    name: 'SdKfz 232L',
+    kind: 'vehicle',
+    fp: { red: 4, blue: 4 },
+    dr: { front: 14, flank: 11, color: 'blue' },
+    move: 1,
+    range: 8,
+    apToFire: 2,
+    vp: 2,
+    unburdened: false,
+    propulsion: 'wheeled',
+    bonusMoves: 1,
+    mobileTrackBonusMoves: 1,
+    turreted: true,
+  },
+  {
+    // p.39 "DeMag D7" (×1), 41-42 ("Demag 38"). A standard PaK38 5cm AT gun on a
+    // light half-track chassis. Analogy: ger-pak38's gun stats, now self-
+    // propelled/open-topped (half-track chassis, sometimes with improvised front
+    // armor per the flavor text).
+    id: 'ger-demag-d7',
+    nation: 'germans',
+    name: 'DeMag D7',
+    kind: 'vehicle',
+    whiteBoxFp: true,
+    fp: { red: 2, blue: 8 },
+    dr: { front: 13, flank: 10, color: 'red' },
+    move: 1,
+    range: 9,
+    apToFire: 3,
+    vp: 2,
+    unburdened: false,
+    propulsion: 'tracked',
+    bonusMoves: 1,
+    openTopped: true,
+  },
+  {
+    // p.39 "Panzer 38t" (×1), 39-42 ("Pz 38(t) E"). Czech light tank, 3.7cm L48
+    // gun — "slated to be a main battle tank, but proved both vulnerable and
+    // underpowered." Analogy: weaker than the Panzer IIIe below (a proper
+    // German-chassis contemporary of similar gun caliber).
+    id: 'ger-pz38t',
+    nation: 'germans',
+    name: 'Panzer 38(t)',
+    kind: 'vehicle',
+    fp: { red: 3, blue: 5 },
+    dr: { front: 16, flank: 13, color: 'blue' },
+    move: 1,
+    range: 7,
+    apToFire: 3,
+    vp: 2,
+    unburdened: false,
+    propulsion: 'tracked',
+    bonusMoves: 1,
+    turreted: true,
+  },
+  {
+    // p.39 "Panzer IIIe" (×2), 39-41 ("Pz III E"). Early Panzer III — "intended
+    // to be the main German battle tank, but its puny 3.7cm gun proved useless
+    // against most Soviet tanks." Analogy: the weakest of this catalog's Panzer
+    // III variants (predates the already-verified ger-pz3h/ger-pz3l upgrades),
+    // similar gun caliber to Panzer 38(t).
+    id: 'ger-pz3e',
+    nation: 'germans',
+    name: 'Panzer IIIe',
+    kind: 'vehicle',
+    fp: { red: 3, blue: 5 },
+    dr: { front: 15, flank: 13, color: 'blue' },
+    move: 1,
+    range: 7,
+    apToFire: 3,
+    vp: 2,
+    unburdened: false,
+    propulsion: 'tracked',
+    bonusMoves: 1,
+    turreted: true,
+  },
+  {
+    // p.39 "Panzer IIIj" (×1), 42-43 ("Pz III J"). Upgraded Panzer IIIe with a
+    // 5cm AT gun and much thicker armor. Analogy: a step up from the already-
+    // verified ger-pz3h (also 3.7-5cm class), matching the flavor text's "much
+    // thicker armor to protect against the T-34."
+    id: 'ger-pz3j',
+    nation: 'germans',
+    name: 'Panzer IIIj',
+    kind: 'vehicle',
+    fp: { red: 4, blue: 9 },
+    dr: { front: 17, flank: 15, color: 'blue' },
+    move: 1,
+    range: 11,
+    apToFire: 3,
+    vp: 3,
+    unburdened: false,
+    propulsion: 'tracked',
+    bonusMoves: 1,
+    turreted: true,
+  },
+  {
+    // p.39 "S35(f) Somua Tank" (×1), 41-44 ("Somua S35"). Captured French medium
+    // tank, 47mm L42 gun, radio + cupola. Analogy: the already-verified ger-
+    // pz3l (similar 47-50mm gun class/era).
+    id: 'ger-somua-s35f',
+    nation: 'germans',
+    name: 'S35(f) Somua Tank',
+    kind: 'vehicle',
+    fp: { red: 4, blue: 7 },
+    dr: { front: 17, flank: 14, color: 'blue' },
+    move: 1,
+    range: 8,
+    apToFire: 4,
+    vp: 3,
+    unburdened: false,
+    propulsion: 'tracked',
+    bonusMoves: 1,
+    turreted: true,
+  },
+  {
+    // p.39 "B2(f) Tank" (×1), 42-44 ("B-2 (f)"). Captured French heavy tank,
+    // hull-mounted gun replaced by a flamethrower. Analogy: the already-verified
+    // ger-pz3m-flamm (same flamethrower-tank role), scaled up to "heavy tank"
+    // armor per the flavor text.
+    id: 'ger-b2f',
+    nation: 'germans',
+    name: 'B2(f) Tank',
+    kind: 'vehicle',
+    fp: { red: 4, blue: 7 },
+    dr: { front: 17, flank: 14, color: 'blue' },
+    move: 1,
+    range: 8,
+    apToFire: 4,
+    vp: 3,
+    unburdened: false,
+    propulsion: 'tracked',
+    bonusMoves: 1,
+    turreted: true,
+    hasFlamethrower: true,
+  },
+  {
+    // p.39 "T-34 Captured Tank" (×1), 41-42 ("T-34a", radio-equipped) — the
+    // German-crewed captured-T-34a counterpart to the already-verified
+    // ger-t34b-captured (a T-34b). Analogy: sov-t34a's own stats, with apToFire
+    // lowered to 3 to match this catalog's existing convention for German-crewed
+    // captured T-34s (ger-t34b-captured does the same vs sov-t34b: apToFire 3 vs
+    // 5).
+    id: 'ger-t34a-captured',
+    nation: 'germans',
+    name: 'T-34a (Captured)',
+    kind: 'vehicle',
+    fp: { red: 5, blue: 7 },
+    dr: { front: 19, flank: 15, color: 'blue' },
+    move: 1,
+    range: 7,
+    apToFire: 3,
+    vp: 3,
+    unburdened: false,
+    propulsion: 'tracked',
+    bonusMoves: 2,
+    turreted: true,
   },
 ];
 
@@ -1122,6 +1463,229 @@ export const SOVIET_UNITS: UnitTemplate[] = [
     bonusMoves: 2,
     openTopped: true,
     counterImage: '/assets/units/sov-m3-scout.png',
+  },
+  {
+    // p.39 "Inf Gun 76mm" (×1), 39-45 ("76 Inf Gun"). Soviet infantry support
+    // gun M1927, issued to rifle/cavalry regiments. Analogy: the German 7.5cm
+    // Inf Gun's role above (soft-target HE support gun).
+    id: 'sov-inf-gun-76mm',
+    nation: 'soviets',
+    name: '76mm Inf Gun',
+    kind: 'gun',
+    whiteBoxFp: true,
+    fp: { red: 5, blue: 0 },
+    dr: { front: 12, flank: 10, color: 'red' },
+    move: 4,
+    range: 25,
+    apToFire: 3,
+    vp: 2,
+    unburdened: false,
+    propulsion: 'wheeled',
+  },
+  {
+    // p.39 "F22 m36 76mm" (×1), 39-45 ("76 F22 Artl"). Designed as both an AA
+    // and AT gun, "disappointing in handling and performance" — the
+    // Soviet-crewed original of the same physical gun the Germans captured and
+    // fielded as ger-fk297 above (kept deliberately close but not identical,
+    // matching this catalog's own captured-equipment precedent).
+    id: 'sov-f22-76mm',
+    nation: 'soviets',
+    name: 'F22 m36 76mm',
+    kind: 'gun',
+    whiteBoxFp: true,
+    fp: { red: 5, blue: 7 },
+    dr: { front: 12, flank: 10, color: 'red' },
+    move: 6,
+    range: 9,
+    apToFire: 3,
+    vp: 2,
+    unburdened: false,
+    propulsion: 'wheeled',
+  },
+  {
+    // p.39 "Wagons" (×4), 39-45. Unarmed horse-drawn supply wagon — the Soviet
+    // counterpart to ger-wagon above (same profile/analogy).
+    id: 'sov-wagon',
+    nation: 'soviets',
+    name: 'Wagon',
+    kind: 'vehicle',
+    fp: { red: 0, blue: 0 },
+    dr: { front: 11, flank: 11, color: 'red' },
+    move: 1,
+    range: 0,
+    apToFire: 0,
+    vp: 1,
+    unburdened: false,
+    propulsion: 'wheeled',
+    bonusMoves: 1,
+    attackMode: 'none',
+    cannotControlHex: true,
+    noCapLossOnDestroy: true,
+  },
+  {
+    // p.39 "BA-10 Armored Car" (×2), 39-43. Wheeled recon car, light armor, good
+    // speed, 45mm turreted gun + MG — "most-produced heavy armored car in the
+    // war." Analogy: sov-t70's 45mm gun firepower, lighter (wheeled) armor than
+    // that tracked light tank.
+    id: 'sov-ba10',
+    nation: 'soviets',
+    name: 'BA-10 Armored Car',
+    kind: 'vehicle',
+    fp: { red: 4, blue: 6 },
+    dr: { front: 14, flank: 12, color: 'blue' },
+    move: 1,
+    range: 8,
+    apToFire: 5,
+    vp: 2,
+    unburdened: false,
+    propulsion: 'wheeled',
+    bonusMoves: 2,
+    mobileTrackBonusMoves: 1,
+    turreted: true,
+  },
+  {
+    // p.39 "OT-26" (×1), 41-42. A flamethrower mounted on a modified T-26 light
+    // tank — "short range and light armor made the OT-26 vulnerable." Analogy:
+    // the already-verified ger-pz3m-flamm role (flamethrower tank), on the
+    // weaker T-26 chassis (see sov-t26b below).
+    id: 'sov-ot26',
+    nation: 'soviets',
+    name: 'OT-26',
+    kind: 'vehicle',
+    fp: { red: 2, blue: 0 },
+    dr: { front: 14, flank: 12, color: 'blue' },
+    move: 1,
+    range: 5,
+    apToFire: 5,
+    vp: 2,
+    unburdened: false,
+    propulsion: 'tracked',
+    bonusMoves: 1,
+    turreted: true,
+    hasFlamethrower: true,
+  },
+  {
+    // p.39 "ZiS-30 Mobile Art." (×1), 41-42. A hastily-designed tank destroyer —
+    // a 57mm AT gun on a Komsomolets tractor, "not a good gun platform," early
+    // 57mm gun "had many defects." Analogy: a decent AT gun (comparable to
+    // sov-zis2-57mm's caliber) let down by a weak, unreliable chassis.
+    id: 'sov-zis30',
+    nation: 'soviets',
+    name: 'ZiS-30 Mobile Art.',
+    kind: 'vehicle',
+    whiteBoxFp: true,
+    fp: { red: 2, blue: 9 },
+    dr: { front: 13, flank: 11, color: 'red' },
+    move: 1,
+    range: 7,
+    apToFire: 6,
+    vp: 2,
+    unburdened: false,
+    propulsion: 'tracked',
+    bonusMoves: 1,
+    openTopped: true,
+  },
+  {
+    // p.39 "T-26b Light Tank" (×4), 39-42. "Obsolete by Operation Barbarossa,"
+    // but the most numerous Soviet tank of the early war. Analogy: a step below
+    // sov-t70 (also a light tank with a similar-era gun), reflecting its
+    // obsolescence.
+    id: 'sov-t26b',
+    nation: 'soviets',
+    name: 'T-26b Light Tank',
+    kind: 'vehicle',
+    fp: { red: 4, blue: 6 },
+    dr: { front: 14, flank: 13, color: 'blue' },
+    move: 1,
+    range: 8,
+    apToFire: 5,
+    vp: 2,
+    unburdened: false,
+    propulsion: 'tracked',
+    bonusMoves: 1,
+    turreted: true,
+  },
+  {
+    // p.39 "BT-7 Light Tank" (×2), 39-43. "Obsolete by 1941," but a fast cavalry
+    // tank whose "design was a precursor of the T-34." Analogy: slightly better
+    // gun/mobility than sov-t26b above, reflecting its T-34 lineage, but still
+    // armor-thin (era-appropriate).
+    id: 'sov-bt7',
+    nation: 'soviets',
+    name: 'BT-7 Light Tank',
+    kind: 'vehicle',
+    fp: { red: 4, blue: 6 },
+    dr: { front: 15, flank: 12, color: 'blue' },
+    move: 1,
+    range: 7,
+    apToFire: 5,
+    vp: 2,
+    unburdened: false,
+    propulsion: 'tracked',
+    bonusMoves: 1,
+    turreted: true,
+  },
+  {
+    // p.39 "T-35 Heavy Tank" (×1), 39-41. A multi-turret tank with 3 guns and 5
+    // MGs — "prone to break down and poorly armored, it fought to extinction in
+    // 1941." Analogy: high combined Firepower (multiple guns/MGs) but weaker
+    // Defense than a "heavy tank" name implies (per the flavor text's own
+    // "poorly armored").
+    id: 'sov-t35',
+    nation: 'soviets',
+    name: 'T-35 Heavy Tank',
+    kind: 'vehicle',
+    fp: { red: 6, blue: 6 },
+    dr: { front: 14, flank: 12, color: 'blue' },
+    move: 1,
+    range: 8,
+    apToFire: 6,
+    vp: 3,
+    unburdened: false,
+    propulsion: 'tracked',
+    bonusMoves: 1,
+    turreted: true,
+  },
+  {
+    // p.39 "KV1a Heavy Tank" (×2), 40-42. "The most powerful serial-made tank at
+    // the beginning of the war, its thick armor was almost impenetrable."
+    // Analogy: the already-verified sov-kv1s (same KV lineage), with slightly
+    // higher Defense to match the flavor text's emphasis on near-impenetrable
+    // armor as the series' earliest model.
+    id: 'sov-kv1a',
+    nation: 'soviets',
+    name: 'KV1a Heavy Tank',
+    kind: 'vehicle',
+    fp: { red: 5, blue: 7 },
+    dr: { front: 20, flank: 17, color: 'blue' },
+    move: 1,
+    range: 9,
+    apToFire: 5,
+    vp: 3,
+    unburdened: false,
+    propulsion: 'tracked',
+    bonusMoves: 1,
+    turreted: true,
+  },
+  {
+    // p.39 "KV2a Heavy Tank" (×1), 40-43 ("the 'Tank Buster'"). Provided close
+    // support for the KV1a; "main drawback was its slow speed." Analogy: the
+    // already-verified sov-su152's huge-gun Firepower/Attack Cost (both mount an
+    // oversized howitzer-class gun), on KV1a-level armor rather than an SPG's.
+    id: 'sov-kv2a',
+    nation: 'soviets',
+    name: 'KV2a Heavy Tank',
+    kind: 'vehicle',
+    fp: { red: 7, blue: 10 },
+    dr: { front: 18, flank: 16, color: 'blue' },
+    move: 1,
+    range: 8,
+    apToFire: 6,
+    vp: 3,
+    unburdened: false,
+    propulsion: 'tracked',
+    bonusMoves: 1,
+    turreted: true,
   },
 ];
 
