@@ -35,8 +35,8 @@ describe('close combat', () => {
     const ctx = closeCombatContext(s, s.units['a']!, s.units['e']!);
     expect(ctx.legal).toBe(true);
     expect(ctx.isFlank).toBe(true);
-    expect(ctx.baseFP).toBe(3 + 4);
-    expect(ctx.defenseValue).toBe(11); // flank DR 11 + 0 terrain
+    expect(ctx.ar).toBe(3 + 4); // AR = Firepower + close-combat +4
+    expect(ctx.dr).toBe(11); // flank DR 11 + 0 terrain
   });
 
   it('white-box (crew-served) FP is −2 in CC', () => {
@@ -47,7 +47,7 @@ describe('close combat', () => {
     addUnit(s, 'a', 'A', 0, 0, 0, 'mg');
     addUnit(s, 'e', 'B', 0, 0, 0, 'rifle');
 
-    expect(closeCombatContext(s, s.units['a']!, s.units['e']!).baseFP).toBe(5 - 2);
+    expect(closeCombatContext(s, s.units['a']!, s.units['e']!).ar).toBe(5 - 2);
   });
 
   it('resolves a CLOSE_COMBAT action through the reducer', () => {
@@ -57,8 +57,7 @@ describe('close combat', () => {
     addUnit(s, 'a', 'A', 0, 0, 0, 'rifle');
     addUnit(s, 'e', 'B', 0, 0, 0, 'rifle');
 
-    const activated = reduce(s, { type: 'ACTIVATE_UNIT', unitId: 'a' }).state;
-    const res = reduce(activated, { type: 'CLOSE_COMBAT', attackerId: 'a', targetId: 'e' });
+    const res = reduce(s, { type: 'CLOSE_COMBAT', attackerId: 'a', targetId: 'e' });
     expect(res.events.some((e) => e.type === 'cc')).toBe(true);
   });
 
@@ -74,8 +73,7 @@ describe('close combat', () => {
     expect(acts.some((x) => x.type === 'MOVE' && x.toHexId === '1,0')).toBe(true);
     expect(acts.some((x) => x.type === 'FIRE' && x.targetId === 'e')).toBe(true);
 
-    const activated = reduce(s, { type: 'ACTIVATE_UNIT', unitId: 'a' }).state;
-    const moved = reduce(activated, { type: 'MOVE', unitId: 'a', toHexId: '1,0' });
+    const moved = reduce(s, { type: 'MOVE', unitId: 'a', toHexId: '1,0' });
     expect(moved.state.units['a']?.hexId).toBe('1,0'); // moved into the enemy hex
   });
 });

@@ -1,0 +1,1120 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet data-dc-atomics>
+  <style>
+    html, body { margin: 0; padding: 0; background: #1b1d16; }
+    input, textarea, select { font-family: inherit; }
+    a { color: #c9a04a; }
+    a:hover { color: #e0c07a; }
+  </style>
+</helmet>
+<div style="display: flex; width: 100%; min-height: 100vh; background: #1b1d16; font-family: ui-monospace, 'SF Mono', Menlo, monospace; color: #d9d4bd;" data-screen-label="Mission Editor">
+
+  <!-- ================= NAV ================= -->
+  <div style="width: 224px; flex-shrink: 0; background: #15170f; border-right: 1px solid #3a3d2e; display: flex; flex-direction: column; padding: 22px 0; position: sticky; top: 0; height: 100vh; box-sizing: border-box;">
+    <div style="padding: 0 22px 18px; border-bottom: 1px solid #2a2c20; margin-bottom: 10px;">
+      <div style="font-size: 11px; font-weight: 700; letter-spacing: 0.14em; color: #c9a04a; text-transform: uppercase;">Mission Editor</div>
+      <div style="margin-top: 10px; font-size: 13px; font-weight: 600; color: #e5e0c9; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">{{ missionTitle }}</div>
+      <div style="margin-top: 4px; font-size: 10px; letter-spacing: 0.08em; color: #6e6c56; text-transform: uppercase;">[ draft // unsaved ]</div>
+    </div>
+    <div style="display: flex; flex-direction: column; padding: 6px 10px; gap: 2px;">
+      <sc-for list="{{ navItems }}" as="nav" hint-placeholder-count="6">
+        <div style="{{ nav.rowStyle }}" onClick="{{ nav.onClick }}">
+          <span>{{ nav.label }}</span>
+          <sc-if value="{{ nav.hasBadge }}" hint-placeholder-val="{{ false }}">
+            <span style="font-size: 9px; font-weight: 700; letter-spacing: 0.06em; padding: 2px 6px; background: #2a2c20; color: #8b8871;">{{ nav.badge }}</span>
+          </sc-if>
+        </div>
+      </sc-for>
+    </div>
+    <div style="margin-top: auto; padding: 14px 22px 0; font-size: 10px; color: #4a4938; letter-spacing: 0.06em;">v0.1 // LOCAL DRAFT</div>
+  </div>
+
+  <!-- ================= MAIN ================= -->
+  <div style="flex: 1; display: flex; flex-direction: column; min-width: 0;">
+    <div style="display: flex; align-items: center; justify-content: space-between; padding: 18px 30px; border-bottom: 1px solid #3a3d2e; background: #1f2116; position: sticky; top: 0; z-index: 2;">
+      <span style="font-size: 11px; letter-spacing: 0.12em; color: #8b8871; text-transform: uppercase; font-weight: 700;">// SECTION: {{ sectionLabel }}</span>
+      <button type="button" onClick="{{ onExport }}" style="background: #c9a04a; color: #1b1d16; border: none; padding: 10px 20px; font-size: 12px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; cursor: pointer; font-family: inherit;">[ Export Mission ]</button>
+    </div>
+
+    <div style="flex: 1; padding: 28px 30px 60px; overflow: auto; box-sizing: border-box;">
+
+      <!-- =============== MISSION INFO =============== -->
+      <sc-if value="{{ isInfo }}" hint-placeholder-val="{{ true }}">
+        <div style="display: flex; flex-direction: column; gap: 22px; max-width: 1400px;">
+          <div style="display: flex; flex-direction: column; gap: 6px;">
+            <span style="font-size: 10.5px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: #8b8871;">Title</span>
+            <input type="text" value="{{ info.title }}" onChange="{{ info.onTitleChange }}" style="padding: 12px 14px; background: #22261c; border: 1px solid #3a3d2e; font-size: 17px; font-weight: 700; color: #eee0bb; letter-spacing: 0.02em; box-sizing: border-box;" />
+          </div>
+          <div style="display: flex; flex-direction: column; gap: 6px;">
+            <span style="font-size: 10.5px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: #8b8871;">General Situation</span>
+            <textarea value="{{ info.situation }}" onChange="{{ info.onSituationChange }}" style="padding: 12px 14px; background: #22261c; border: 1px solid #3a3d2e; font-size: 12.5px; line-height: 1.65; color: #c7c2a5; min-height: 90px; resize: vertical; box-sizing: border-box;"></textarea>
+          </div>
+
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
+            <!-- SIDE A -->
+            <div style="display: flex; flex-direction: column; gap: 14px; padding: 16px; background: #1f2116; border: 1px solid #3a3d2e;">
+              <div style="display: flex; align-items: center; gap: 10px;">
+                <span style="width: 12px; height: 12px; background: #8a9a8a; display: inline-block;"></span>
+                <span style="font-size: 13px; font-weight: 700; color: #eee0bb; letter-spacing: 0.04em;">SIDE A</span>
+                <sc-if value="{{ info.sideA.hasInitiative }}" hint-placeholder-val="{{ false }}">
+                  <span style="margin-left: auto; font-size: 9.5px; letter-spacing: 0.06em; color: #8a9a8a; text-transform: uppercase; padding: 3px 8px; border: 1px solid #48513f;">Initiative R1</span>
+                </sc-if>
+              </div>
+              <div style="display: flex; gap: 10px;">
+                <div style="flex: 1; display: flex; align-items: center; justify-content: space-between; padding: 7px 10px; background: #22261c; border: 1px solid #3a3d2e;">
+                  <span style="font-size: 9.5px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: #8b8871;">CAPs</span>
+                  <input type="number" value="{{ info.sideA.caps }}" onChange="{{ info.sideA.onCapsChange }}" style="width: 44px; background: transparent; border: none; color: #c9a04a; font: 700 15px ui-monospace, monospace; text-align: right;" />
+                </div>
+                <div style="flex: 1; display: flex; align-items: center; justify-content: space-between; padding: 7px 10px; background: #22261c; border: 1px solid #3a3d2e;">
+                  <span style="font-size: 9.5px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: #8b8871;">VP</span>
+                  <input type="number" value="{{ info.sideA.vp }}" onChange="{{ info.sideA.onVpChange }}" style="width: 44px; background: transparent; border: none; color: #c9a04a; font: 700 15px ui-monospace, monospace; text-align: right;" />
+                </div>
+              </div>
+              <div style="display: flex; flex-direction: column; gap: 6px;">
+                <span style="font-size: 9.5px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: #8b8871;">Nation(s)</span>
+                <div style="display: flex; gap: 6px; flex-wrap: wrap; align-items: center;">
+                  <sc-for list="{{ info.sideA.nations }}" as="chip" hint-placeholder-count="1">
+                    <span style="display: flex; align-items: center; gap: 6px; padding: 5px 6px 5px 10px; background: #262918; border: 1px solid #48513f; font-size: 12px;">{{ chip.label }}<button type="button" onClick="{{ chip.onRemove }}" style="background: none; border: none; color: #8b8871; cursor: pointer; font-size: 13px; padding: 0; line-height: 1;">×</button></span>
+                  </sc-for>
+                  <select value="" onChange="{{ info.sideA.onAddNation }}" style="padding: 5px 8px; background: transparent; border: 1px dashed #55533f; color: #8b8871; font-size: 11px;">
+                    <option value="">+ ADD NATION</option>
+                    <sc-for list="{{ info.sideA.nationOptions }}" as="opt" hint-placeholder-count="3">
+                      <option value="{{ opt.value }}">{{ opt.label }}</option>
+                    </sc-for>
+                  </select>
+                </div>
+              </div>
+              <div style="display: flex; flex-direction: column; gap: 6px;">
+                <span style="font-size: 9.5px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: #8b8871;">Side Orders</span>
+                <input type="text" value="{{ info.sideA.orders }}" onChange="{{ info.sideA.onOrdersChange }}" style="padding: 10px 12px; background: #22261c; border: 1px solid #3a3d2e; font-size: 12px; color: #c7c2a5; box-sizing: border-box;" />
+              </div>
+              <div style="display: flex; flex-direction: column; gap: 6px;">
+                <span style="font-size: 9.5px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: #8b8871;">Mission Instructions</span>
+                <textarea value="{{ info.sideA.instructions }}" onChange="{{ info.sideA.onInstructionsChange }}" style="padding: 10px 12px; background: #22261c; border: 1px solid #3a3d2e; font-size: 12px; line-height: 1.6; color: #c7c2a5; min-height: 64px; resize: vertical; box-sizing: border-box;"></textarea>
+              </div>
+            </div>
+            <!-- SIDE B -->
+            <div style="display: flex; flex-direction: column; gap: 14px; padding: 16px; background: #1f2116; border: 1px solid #3a3d2e;">
+              <div style="display: flex; align-items: center; gap: 10px;">
+                <span style="width: 12px; height: 12px; background: #b4553c; display: inline-block;"></span>
+                <span style="font-size: 13px; font-weight: 700; color: #eee0bb; letter-spacing: 0.04em;">SIDE B</span>
+                <sc-if value="{{ info.sideB.hasInitiative }}" hint-placeholder-val="{{ false }}">
+                  <span style="margin-left: auto; font-size: 9.5px; letter-spacing: 0.06em; color: #b4553c; text-transform: uppercase; padding: 3px 8px; border: 1px solid #5a3a30;">Initiative R1</span>
+                </sc-if>
+              </div>
+              <div style="display: flex; gap: 10px;">
+                <div style="flex: 1; display: flex; align-items: center; justify-content: space-between; padding: 7px 10px; background: #22261c; border: 1px solid #3a3d2e;">
+                  <span style="font-size: 9.5px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: #8b8871;">CAPs</span>
+                  <input type="number" value="{{ info.sideB.caps }}" onChange="{{ info.sideB.onCapsChange }}" style="width: 44px; background: transparent; border: none; color: #c9a04a; font: 700 15px ui-monospace, monospace; text-align: right;" />
+                </div>
+                <div style="flex: 1; display: flex; align-items: center; justify-content: space-between; padding: 7px 10px; background: #22261c; border: 1px solid #3a3d2e;">
+                  <span style="font-size: 9.5px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: #8b8871;">VP</span>
+                  <input type="number" value="{{ info.sideB.vp }}" onChange="{{ info.sideB.onVpChange }}" style="width: 44px; background: transparent; border: none; color: #c9a04a; font: 700 15px ui-monospace, monospace; text-align: right;" />
+                </div>
+              </div>
+              <div style="display: flex; flex-direction: column; gap: 6px;">
+                <span style="font-size: 9.5px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: #8b8871;">Nation(s)</span>
+                <div style="display: flex; gap: 6px; flex-wrap: wrap; align-items: center;">
+                  <sc-for list="{{ info.sideB.nations }}" as="chip" hint-placeholder-count="1">
+                    <span style="display: flex; align-items: center; gap: 6px; padding: 5px 6px 5px 10px; background: #2a2018; border: 1px solid #533d33; font-size: 12px;">{{ chip.label }}<button type="button" onClick="{{ chip.onRemove }}" style="background: none; border: none; color: #8b8871; cursor: pointer; font-size: 13px; padding: 0; line-height: 1;">×</button></span>
+                  </sc-for>
+                  <select value="" onChange="{{ info.sideB.onAddNation }}" style="padding: 5px 8px; background: transparent; border: 1px dashed #55533f; color: #8b8871; font-size: 11px;">
+                    <option value="">+ ADD NATION</option>
+                    <sc-for list="{{ info.sideB.nationOptions }}" as="opt" hint-placeholder-count="3">
+                      <option value="{{ opt.value }}">{{ opt.label }}</option>
+                    </sc-for>
+                  </select>
+                </div>
+              </div>
+              <div style="display: flex; flex-direction: column; gap: 6px;">
+                <span style="font-size: 9.5px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: #8b8871;">Side Orders</span>
+                <input type="text" value="{{ info.sideB.orders }}" onChange="{{ info.sideB.onOrdersChange }}" style="padding: 10px 12px; background: #22261c; border: 1px solid #3a3d2e; font-size: 12px; color: #c7c2a5; box-sizing: border-box;" />
+              </div>
+              <div style="display: flex; flex-direction: column; gap: 6px;">
+                <span style="font-size: 9.5px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: #8b8871;">Mission Instructions</span>
+                <textarea value="{{ info.sideB.instructions }}" onChange="{{ info.sideB.onInstructionsChange }}" style="padding: 10px 12px; background: #22261c; border: 1px solid #3a3d2e; font-size: 12px; line-height: 1.6; color: #c7c2a5; min-height: 64px; resize: vertical; box-sizing: border-box;"></textarea>
+              </div>
+            </div>
+          </div>
+
+          <div style="display: flex; gap: 20px; align-items: stretch;">
+            <div style="flex: 1; padding: 16px; background: #1f2116; border: 1px solid #3a3d2e; display: flex; flex-direction: column; gap: 8px;">
+              <span style="font-size: 9.5px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: #8b8871;">Rounds Total</span>
+              <input type="number" value="{{ info.roundsTotal }}" onChange="{{ info.onRoundsChange }}" style="width: 80px; background: transparent; border: none; color: #eee0bb; font: 700 26px ui-monospace, monospace;" />
+            </div>
+            <div style="flex: 2; padding: 16px; background: #1f2116; border: 1px solid #3a3d2e; display: flex; flex-direction: column; gap: 10px;">
+              <span style="font-size: 9.5px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: #8b8871;">Initiative // Round 1 only</span>
+              <div style="display: flex; gap: 10px;">
+                <div onClick="{{ info.onInitiativeA }}" style="{{ info.initiativeAStyle }}"><span style="{{ info.initiativeADotStyle }}"></span>Side A · Germans</div>
+                <div onClick="{{ info.onInitiativeB }}" style="{{ info.initiativeBStyle }}"><span style="{{ info.initiativeBDotStyle }}"></span>Side B · Soviets</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </sc-if>
+
+      <!-- =============== MAP =============== -->
+      <sc-if value="{{ isMap }}" hint-placeholder-val="{{ false }}">
+        <div style="display: flex; flex-direction: column; gap: 18px;">
+          <div style="display: flex; align-items: center; gap: 14px;">
+            <span style="font-size: 9.5px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: #8b8871;">Map</span>
+            <select value="{{ map.mapId }}" onChange="{{ map.onMapChange }}" style="padding: 8px 12px; background: #22261c; border: 1px solid #3a3d2e; color: #eee0bb; font-size: 12.5px;">
+              <sc-for list="{{ map.mapOptions }}" as="m" hint-placeholder-count="3">
+                <option value="{{ m.id }}">{{ m.name }}</option>
+              </sc-for>
+            </select>
+            <span style="font-size: 10.5px; color: #6e6c56; font-style: italic;">Preview simplified — the real board renders here at runtime.</span>
+          </div>
+
+          <div style="display: flex; gap: 20px; align-items: flex-start;">
+            <div style="flex: 1; min-width: 0; background: #1f2116; border: 1px solid #3a3d2e; padding: 10px; display: flex; align-items: center; justify-content: center;">
+              <svg viewBox="{{ map.viewBox }}" style="width: 100%; max-height: 560px;">
+                <sc-for list="{{ map.hexes }}" as="hx" hint-placeholder-count="80">
+                  <g onClick="{{ hx.onClick }}" style="cursor: pointer;">
+                    <polygon points="{{ hx.points }}" fill="{{ hx.fill }}" stroke="#3a3d2e" stroke-width="1"></polygon>
+                    <text x="{{ hx.cx }}" y="{{ hx.topY }}" text-anchor="middle" dominant-baseline="central" font-size="7" fill="#5c5a48" font-family="ui-monospace, monospace">{{ hx.label }}</text>
+                    <sc-if value="{{ hx.hasBadge }}" hint-placeholder-val="{{ false }}">
+                      <circle cx="{{ hx.cx }}" cy="{{ hx.cy }}" r="13" fill="{{ hx.badgeBg }}"></circle>
+                      <text x="{{ hx.cx }}" y="{{ hx.cy }}" text-anchor="middle" dominant-baseline="central" font-size="6" font-weight="700" fill="#1b1d16" font-family="ui-monospace, monospace">{{ hx.badgeText }}</text>
+                    </sc-if>
+                  </g>
+                </sc-for>
+              </svg>
+            </div>
+            <div style="width: 270px; flex-shrink: 0; display: flex; flex-direction: column; gap: 14px;">
+              <div style="display: flex; flex-direction: column; gap: 6px;">
+                <span style="font-size: 9.5px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: #8b8871;">Paint Tool</span>
+                <div style="display: flex; flex-direction: column; gap: 4px;">
+                  <sc-for list="{{ map.toolButtons }}" as="t" hint-placeholder-count="6">
+                    <button type="button" onClick="{{ t.onClick }}" style="{{ t.style }}">{{ t.label }}</button>
+                  </sc-for>
+                </div>
+              </div>
+              <sc-if value="{{ map.showToolSide }}" hint-placeholder-val="{{ false }}">
+                <div style="display: flex; flex-direction: column; gap: 6px;">
+                  <span style="font-size: 9.5px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: #8b8871;">Owning Side</span>
+                  <div style="display: flex; gap: 8px;">
+                    <div onClick="{{ map.onToolSideA }}" style="{{ map.toolSideAStyle }}">Side A</div>
+                    <div onClick="{{ map.onToolSideB }}" style="{{ map.toolSideBStyle }}">Side B</div>
+                  </div>
+                </div>
+              </sc-if>
+              <sc-if value="{{ map.showBunkerFacing }}" hint-placeholder-val="{{ false }}">
+                <div style="display: flex; flex-direction: column; gap: 6px;">
+                  <span style="font-size: 9.5px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: #8b8871;">Bunker Facing</span>
+                  <select value="{{ map.bunkerFacing }}" onChange="{{ map.onBunkerFacingChange }}" style="padding: 8px 10px; background: #22261c; border: 1px solid #3a3d2e; color: #eee0bb; font-size: 12.5px;">
+                    <sc-for list="{{ map.facingOptions }}" as="f" hint-placeholder-count="6">
+                      <option value="{{ f.value }}">{{ f.label }}</option>
+                    </sc-for>
+                  </select>
+                </div>
+              </sc-if>
+              <div style="display: flex; flex-direction: column; gap: 6px;">
+                <span style="font-size: 9.5px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: #8b8871;">Placed ({{ map.placedCount }})</span>
+                <div style="display: flex; flex-direction: column; gap: 4px; max-height: 220px; overflow: auto;">
+                  <sc-for list="{{ map.placedList }}" as="pl" hint-placeholder-count="0">
+                    <div style="display: flex; align-items: center; justify-content: space-between; gap: 6px; padding: 6px 8px; background: #22261c; border: 1px solid #3a3d2e; font-size: 10.5px;">
+                      <span>{{ pl.hex }} — {{ pl.detail }}</span>
+                      <button type="button" onClick="{{ pl.onRemove }}" style="background: none; border: none; color: #8b8871; cursor: pointer; font-size: 13px;">×</button>
+                    </div>
+                  </sc-for>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </sc-if>
+
+      <!-- =============== STARTING FORCES =============== -->
+      <sc-if value="{{ isForces }}" hint-placeholder-val="{{ false }}">
+        <div style="display: flex; flex-direction: column; gap: 18px;">
+          <div style="display: flex; gap: 20px; align-items: flex-start;">
+            <div style="width: 300px; flex-shrink: 0; display: flex; flex-direction: column; gap: 12px;">
+              <input type="text" placeholder="Search units…" value="{{ forces.search }}" onChange="{{ forces.onSearchChange }}" style="padding: 9px 12px; background: #22261c; border: 1px solid #3a3d2e; color: #d9d4bd; font-size: 12px; box-sizing: border-box;" />
+              <select value="{{ forces.nationFilter }}" onChange="{{ forces.onNationFilterChange }}" style="padding: 8px 10px; background: #22261c; border: 1px solid #3a3d2e; color: #d9d4bd; font-size: 12px;">
+                <sc-for list="{{ forces.nationOptions }}" as="opt" hint-placeholder-count="4">
+                  <option value="{{ opt.value }}">{{ opt.label }}</option>
+                </sc-for>
+              </select>
+              <div style="display: flex; flex-direction: column; gap: 6px; max-height: 300px; overflow: auto;">
+                <sc-for list="{{ forces.cards }}" as="c" hint-placeholder-count="6">
+                  <div onClick="{{ c.onClick }}" style="padding: 8px 10px; cursor: pointer; border-left: 3px solid {{ c.color }};">
+                    <div style="display: flex; align-items: baseline; gap: 8px;">
+                      <span style="font-size: 12.5px; font-weight: 700; color: #eee0bb;">{{ c.name }}</span>
+                      <span style="font-size: 9.5px; color: #6e6c56; text-transform: uppercase;">{{ c.nation }}</span>
+                    </div>
+                    <div style="font-size: 10px; color: #8b8871; margin-top: 3px;">{{ c.statLine }}</div>
+                  </div>
+                </sc-for>
+              </div>
+              <div style="display: flex; flex-direction: column; gap: 8px; padding: 12px; background: #1f2116; border: 1px solid #3a3d2e;">
+                <span style="font-size: 9.5px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: #8b8871;">Placement</span>
+                <div style="font-size: 11px; color: {{ forces.armedLabelColor }};">{{ forces.armedLabel }}</div>
+                <div style="display: flex; gap: 8px;">
+                  <div onClick="{{ forces.onArmedSideA }}" style="{{ forces.armedSideAStyle }}">Side A</div>
+                  <div onClick="{{ forces.onArmedSideB }}" style="{{ forces.armedSideBStyle }}">Side B</div>
+                </div>
+                <select value="{{ forces.armedFacing }}" onChange="{{ forces.onArmedFacingChange }}" style="padding: 7px 10px; background: #22261c; border: 1px solid #3a3d2e; color: #eee0bb; font-size: 12px;">
+                  <sc-for list="{{ forces.facingOptions }}" as="f" hint-placeholder-count="6">
+                    <option value="{{ f.value }}">Facing: {{ f.label }}</option>
+                  </sc-for>
+                </select>
+              </div>
+            </div>
+            <div style="flex: 1; min-width: 0; background: #1f2116; border: 1px solid #3a3d2e; padding: 10px; display: flex; align-items: center; justify-content: center;">
+              <svg viewBox="{{ forces.viewBox }}" style="width: 100%; max-height: 560px;">
+                <sc-for list="{{ forces.hexes }}" as="hx" hint-placeholder-count="80">
+                  <g onClick="{{ hx.onClick }}" style="cursor: pointer;">
+                    <polygon points="{{ hx.points }}" fill="{{ hx.fill }}" stroke="#3a3d2e" stroke-width="1"></polygon>
+                    <text x="{{ hx.cx }}" y="{{ hx.topY }}" text-anchor="middle" dominant-baseline="central" font-size="7" fill="#5c5a48" font-family="ui-monospace, monospace">{{ hx.label }}</text>
+                    <sc-if value="{{ hx.hasBadge }}" hint-placeholder-val="{{ false }}">
+                      <circle cx="{{ hx.cx }}" cy="{{ hx.cy }}" r="13" fill="{{ hx.badgeBg }}"></circle>
+                      <text x="{{ hx.cx }}" y="{{ hx.cy }}" text-anchor="middle" dominant-baseline="central" font-size="6" font-weight="700" fill="#1b1d16" font-family="ui-monospace, monospace">{{ hx.badgeText }}</text>
+                    </sc-if>
+                  </g>
+                </sc-for>
+              </svg>
+            </div>
+          </div>
+
+          <div style="display: flex; flex-direction: column; gap: 6px;">
+            <span style="font-size: 9.5px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: #8b8871;">Placed Starting Units ({{ forces.placedRows.length }})</span>
+            <div style="display: flex; flex-direction: column; border: 1px solid #3a3d2e;">
+              <div style="display: grid; grid-template-columns: 90px 1fr 70px 120px 40px; gap: 8px; padding: 8px 12px; background: #15170f; font-size: 9.5px; letter-spacing: 0.06em; text-transform: uppercase; color: #6e6c56;">
+                <span>Side</span><span>Unit</span><span>Hex</span><span>Facing</span><span></span>
+              </div>
+              <sc-for list="{{ forces.placedRows }}" as="row" hint-placeholder-count="0">
+                <div style="display: grid; grid-template-columns: 90px 1fr 70px 120px 40px; gap: 8px; padding: 8px 12px; border-top: 1px solid #262918; align-items: center; font-size: 12px;">
+                  <span style="color: {{ row.sideColor }};">{{ row.sideLabel }}</span>
+                  <span>{{ row.unitName }}</span>
+                  <span style="color: #c9a04a;">{{ row.hex }}</span>
+                  <select value="{{ row.facing }}" onChange="{{ row.onFacingChange }}" style="padding: 4px 6px; background: #22261c; border: 1px solid #3a3d2e; color: #d9d4bd; font-size: 11px;">
+                    <sc-for list="{{ row.facingOptions }}" as="f" hint-placeholder-count="6">
+                      <option value="{{ f.value }}">{{ f.label }}</option>
+                    </sc-for>
+                  </select>
+                  <button type="button" onClick="{{ row.onRemove }}" style="background: none; border: none; color: #8b8871; cursor: pointer; font-size: 14px;">×</button>
+                </div>
+              </sc-for>
+            </div>
+          </div>
+        </div>
+      </sc-if>
+
+      <!-- =============== REINFORCEMENTS =============== -->
+      <sc-if value="{{ isReinf }}" hint-placeholder-val="{{ false }}">
+        <div style="display: flex; flex-direction: column; gap: 18px;">
+          <div style="display: flex; gap: 8px;">
+            <div onClick="{{ reinforcements.onSideA }}" style="{{ reinforcements.sideAStyle }}">Side A · Germans</div>
+            <div onClick="{{ reinforcements.onSideB }}" style="{{ reinforcements.sideBStyle }}">Side B · Soviets</div>
+          </div>
+
+          <sc-for list="{{ reinforcements.waves }}" as="w" hint-placeholder-count="0">
+            <div style="border: 1px solid #3a3d2e; background: #1f2116;">
+              <div style="display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 14px;">
+                <div>
+                  <div style="font-size: 13px; font-weight: 700; color: #eee0bb;">{{ w.name }}</div>
+                  <div style="font-size: 10.5px; color: #8b8871; margin-top: 2px;">{{ w.summaryLabel }}</div>
+                </div>
+                <div style="display: flex; gap: 8px;">
+                  <button type="button" onClick="{{ w.onToggleExpand }}" style="padding: 6px 12px; background: transparent; border: 1px solid #3a3d2e; color: #a09c81; font-size: 10.5px; letter-spacing: 0.04em; text-transform: uppercase; cursor: pointer; font-family: inherit;">{{ w.expandLabel }}</button>
+                  <button type="button" onClick="{{ w.onRemove }}" style="padding: 6px 12px; background: transparent; border: 1px solid #5a3a30; color: #b4553c; font-size: 10.5px; letter-spacing: 0.04em; text-transform: uppercase; cursor: pointer; font-family: inherit;">Remove</button>
+                </div>
+              </div>
+
+              <sc-if value="{{ w.expanded }}" hint-placeholder-val="{{ false }}">
+                <div style="padding: 16px; border-top: 1px solid #3a3d2e; display: flex; flex-direction: column; gap: 16px;">
+                  <div style="display: grid; grid-template-columns: 1fr 140px; gap: 14px;">
+                    <div style="display: flex; flex-direction: column; gap: 6px;">
+                      <span style="font-size: 9.5px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: #8b8871;">Name / ID</span>
+                      <input type="text" value="{{ w.name }}" onChange="{{ w.onNameChange }}" style="padding: 8px 10px; background: #22261c; border: 1px solid #3a3d2e; color: #d9d4bd; font-size: 12.5px; box-sizing: border-box;" />
+                    </div>
+                    <div style="display: flex; flex-direction: column; gap: 6px;">
+                      <span style="font-size: 9.5px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: #8b8871;">Earliest Round</span>
+                      <input type="number" value="{{ w.earliestRound }}" onChange="{{ w.onRoundChange }}" style="padding: 8px 10px; background: #22261c; border: 1px solid #3a3d2e; color: #eee0bb; font-size: 12.5px; box-sizing: border-box;" />
+                    </div>
+                  </div>
+                  <div style="display: flex; flex-direction: column; gap: 6px;">
+                    <span style="font-size: 9.5px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: #8b8871;">Entry Description</span>
+                    <input type="text" placeholder="e.g. Road hex R07" value="{{ w.description }}" onChange="{{ w.onDescChange }}" style="padding: 8px 10px; background: #22261c; border: 1px solid #3a3d2e; color: #d9d4bd; font-size: 12.5px; box-sizing: border-box;" />
+                  </div>
+
+                  <div style="display: flex; gap: 20px; align-items: flex-start;">
+                    <div style="flex: 1; min-width: 0;">
+                      <span style="font-size: 9.5px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: #8b8871;">Entry Hexes — click to toggle</span>
+                      <div style="margin-top: 6px; background: #22261c; border: 1px solid #3a3d2e; padding: 8px; display: flex; align-items: center; justify-content: center;">
+                        <svg viewBox="{{ reinforcements.viewBox }}" style="width: 100%; max-height: 340px;">
+                          <sc-for list="{{ w.hexes }}" as="hx" hint-placeholder-count="80">
+                            <g onClick="{{ hx.onClick }}" style="cursor: pointer;">
+                              <polygon points="{{ hx.points }}" fill="{{ hx.fill }}" stroke="#3a3d2e" stroke-width="1"></polygon>
+                              <text x="{{ hx.cx }}" y="{{ hx.topY }}" text-anchor="middle" dominant-baseline="central" font-size="7" fill="#5c5a48" font-family="ui-monospace, monospace">{{ hx.label }}</text>
+                            </g>
+                          </sc-for>
+                        </svg>
+                      </div>
+                      <div style="margin-top: 6px; font-size: 10.5px; color: #8b8871;">Selected: {{ w.entryHexLabel }}</div>
+                    </div>
+                    <div style="width: 300px; flex-shrink: 0; display: flex; flex-direction: column; gap: 10px;">
+                      <span style="font-size: 9.5px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: #8b8871;">Add Units</span>
+                      <input type="text" placeholder="Search units…" value="{{ reinforcements.search }}" onChange="{{ reinforcements.onSearchChange }}" style="padding: 8px 10px; background: #22261c; border: 1px solid #3a3d2e; color: #d9d4bd; font-size: 12px; box-sizing: border-box;" />
+                      <div style="display: flex; gap: 8px;">
+                        <select value="{{ reinforcements.nationFilter }}" onChange="{{ reinforcements.onNationFilterChange }}" style="flex: 1; padding: 6px 8px; background: #22261c; border: 1px solid #3a3d2e; color: #d9d4bd; font-size: 11px;">
+                          <sc-for list="{{ reinforcements.nationOptions }}" as="opt" hint-placeholder-count="4">
+                            <option value="{{ opt.value }}">{{ opt.label }}</option>
+                          </sc-for>
+                        </select>
+                        <select value="{{ reinforcements.draftFacing }}" onChange="{{ reinforcements.onDraftFacingChange }}" style="flex: 1; padding: 6px 8px; background: #22261c; border: 1px solid #3a3d2e; color: #d9d4bd; font-size: 11px;">
+                          <sc-for list="{{ reinforcements.facingOptions }}" as="f" hint-placeholder-count="6">
+                            <option value="{{ f.value }}">Facing: {{ f.label }}</option>
+                          </sc-for>
+                        </select>
+                      </div>
+                      <div style="display: flex; flex-direction: column; gap: 5px; max-height: 220px; overflow: auto;">
+                        <sc-for list="{{ w.cards }}" as="c" hint-placeholder-count="6">
+                          <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 7px 9px; border-left: 3px solid {{ c.color }}; background: #22261c;">
+                            <div>
+                              <div style="font-size: 11.5px; font-weight: 700; color: #eee0bb;">{{ c.name }}</div>
+                              <div style="font-size: 9px; color: #6e6c56;">{{ c.statLine }}</div>
+                            </div>
+                            <button type="button" onClick="{{ c.onClick }}" style="padding: 4px 8px; background: #262918; border: 1px solid #48513f; color: #c9a04a; font-size: 10px; cursor: pointer; font-family: inherit;">+ Add</button>
+                          </div>
+                        </sc-for>
+                      </div>
+                      <div style="display: flex; flex-direction: column; gap: 4px; border-top: 1px solid #3a3d2e; padding-top: 8px;">
+                        <span style="font-size: 9.5px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: #8b8871;">In this wave ({{ w.unitsRows.length }})</span>
+                        <sc-for list="{{ w.unitsRows }}" as="ur" hint-placeholder-count="0">
+                          <div style="display: flex; align-items: center; justify-content: space-between; padding: 5px 8px; background: #22261c; font-size: 11px;">
+                            <span>{{ ur.label }}</span>
+                            <button type="button" onClick="{{ ur.onRemove }}" style="background: none; border: none; color: #8b8871; cursor: pointer; font-size: 13px;">×</button>
+                          </div>
+                        </sc-for>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </sc-if>
+            </div>
+          </sc-for>
+
+          <button type="button" onClick="{{ reinforcements.onAddWave }}" style="align-self: flex-start; padding: 10px 18px; background: transparent; border: 1px dashed #55533f; color: #a09c81; font-size: 12px; letter-spacing: 0.04em; text-transform: uppercase; cursor: pointer; font-family: inherit;">+ Add Wave — {{ reinforcements.activeSideLabel }}</button>
+        </div>
+      </sc-if>
+
+      <!-- =============== VICTORY CONDITIONS =============== -->
+      <sc-if value="{{ isVictory }}" hint-placeholder-val="{{ false }}">
+        <div style="display: flex; flex-direction: column; gap: 18px; max-width: 1100px;">
+          <div style="display: flex; gap: 20px;">
+            <div style="flex: 1; padding: 14px 16px; background: #1f2116; border: 1px solid #3a3d2e; display: flex; align-items: center; justify-content: space-between;">
+              <span style="font-size: 10px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: #8b8871;">VP per enemy unit destroyed — Side A</span>
+              <input type="number" value="{{ victory.vpPerKillA }}" onChange="{{ victory.onVpPerKillAChange }}" style="width: 50px; background: #22261c; border: 1px solid #3a3d2e; color: #c9a04a; font: 700 14px ui-monospace, monospace; text-align: right; padding: 4px 6px;" />
+            </div>
+            <div style="flex: 1; padding: 14px 16px; background: #1f2116; border: 1px solid #3a3d2e; display: flex; align-items: center; justify-content: space-between;">
+              <span style="font-size: 10px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: #8b8871;">VP per enemy unit destroyed — Side B</span>
+              <input type="number" value="{{ victory.vpPerKillB }}" onChange="{{ victory.onVpPerKillBChange }}" style="width: 50px; background: #22261c; border: 1px solid #3a3d2e; color: #c9a04a; font: 700 14px ui-monospace, monospace; text-align: right; padding: 4px 6px;" />
+            </div>
+          </div>
+          <div style="font-size: 10px; color: #6e6c56; font-style: italic; margin-top: -8px;">Leave 0 to fall back to each unit's own printed VP value.</div>
+
+          <div style="display: flex; flex-direction: column; gap: 10px;">
+            <span style="font-size: 9.5px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: #8b8871;">Victory Hexes</span>
+
+            <div style="display: flex; gap: 8px; align-items: center; padding: 10px; background: #1f2116; border: 1px dashed #48513f;">
+              <input type="text" placeholder="Hex, e.g. H07" value="{{ victory.draftHex }}" onChange="{{ victory.onDraftHexChange }}" style="width: 110px; padding: 7px 9px; background: #22261c; border: 1px solid #3a3d2e; color: #d9d4bd; font-size: 12px; box-sizing: border-box;" />
+              <input type="number" value="{{ victory.draftVp }}" onChange="{{ victory.onDraftVpChange }}" style="width: 60px; padding: 7px 9px; background: #22261c; border: 1px solid #3a3d2e; color: #eee0bb; font-size: 12px; box-sizing: border-box;" />
+              <select value="{{ victory.draftControl }}" onChange="{{ victory.onDraftControlChange }}" style="padding: 7px 9px; background: #22261c; border: 1px solid #3a3d2e; color: #d9d4bd; font-size: 12px;">
+                <sc-for list="{{ victory.controlOptions }}" as="opt" hint-placeholder-count="3">
+                  <option value="{{ opt.value }}">{{ opt.label }}</option>
+                </sc-for>
+              </select>
+              <button type="button" onClick="{{ victory.onAdd }}" style="padding: 7px 14px; background: #262918; border: 1px solid #48513f; color: #c9a04a; font-size: 11px; letter-spacing: 0.04em; text-transform: uppercase; cursor: pointer; font-family: inherit;">+ Add Victory Hex</button>
+            </div>
+
+            <sc-for list="{{ victory.rows }}" as="v" hint-placeholder-count="2">
+              <div style="border: 1px solid #3a3d2e; background: #1f2116;">
+                <div style="display: flex; align-items: center; gap: 14px; padding: 10px 14px;">
+                  <span style="font-size: 14px; font-weight: 700; color: #c9a04a; width: 60px;">{{ v.hex }}</span>
+                  <div style="display: flex; align-items: center; gap: 6px;">
+                    <span style="font-size: 9.5px; color: #8b8871; text-transform: uppercase;">VP</span>
+                    <input type="number" value="{{ v.vp }}" onChange="{{ v.onVpChange }}" style="width: 50px; padding: 5px 7px; background: #22261c; border: 1px solid #3a3d2e; color: #eee0bb; font-size: 12px;" />
+                  </div>
+                  <div style="display: flex; align-items: center; gap: 6px;">
+                    <span style="font-size: 9.5px; color: #8b8871; text-transform: uppercase;">Initial control</span>
+                    <select value="{{ v.control }}" onChange="{{ v.onControlChange }}" style="padding: 5px 7px; background: #22261c; border: 1px solid #3a3d2e; color: #d9d4bd; font-size: 12px;">
+                      <sc-for list="{{ victory.controlOptions }}" as="opt" hint-placeholder-count="3">
+                        <option value="{{ opt.value }}">{{ opt.label }}</option>
+                      </sc-for>
+                    </select>
+                  </div>
+                  <button type="button" onClick="{{ v.onToggleVaries }}" style="margin-left: auto; padding: 5px 10px; background: transparent; border: 1px solid #3a3d2e; color: #a09c81; font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.04em; cursor: pointer; font-family: inherit;">{{ v.variesLabel }}</button>
+                  <button type="button" onClick="{{ v.onRemove }}" style="background: none; border: none; color: #8b8871; cursor: pointer; font-size: 14px;">×</button>
+                </div>
+                <sc-if value="{{ v.varies }}" hint-placeholder-val="{{ false }}">
+                  <div style="padding: 10px 14px; border-top: 1px solid #3a3d2e; display: flex; flex-direction: column; gap: 6px;">
+                    <span style="font-size: 9.5px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: #8b8871;">Per-round overrides (default {{ v.vp }} VP every other round)</span>
+                    <sc-for list="{{ v.overrides }}" as="ov" hint-placeholder-count="0">
+                      <div style="display: flex; align-items: center; gap: 8px;">
+                        <span style="font-size: 10.5px; color: #8b8871;">Round</span>
+                        <input type="number" value="{{ ov.round }}" onChange="{{ ov.onRoundChange }}" style="width: 50px; padding: 5px 7px; background: #22261c; border: 1px solid #3a3d2e; color: #d9d4bd; font-size: 11.5px;" />
+                        <span style="font-size: 10.5px; color: #8b8871;">→ VP</span>
+                        <input type="number" value="{{ ov.vp }}" onChange="{{ ov.onVpChange }}" style="width: 50px; padding: 5px 7px; background: #22261c; border: 1px solid #3a3d2e; color: #eee0bb; font-size: 11.5px;" />
+                        <button type="button" onClick="{{ ov.onRemove }}" style="background: none; border: none; color: #8b8871; cursor: pointer; font-size: 13px;">×</button>
+                      </div>
+                    </sc-for>
+                    <button type="button" onClick="{{ v.onAddOverride }}" style="align-self: flex-start; margin-top: 2px; padding: 5px 10px; background: transparent; border: 1px dashed #55533f; color: #a09c81; font-size: 10.5px; cursor: pointer; font-family: inherit;">+ Add round override</button>
+                  </div>
+                </sc-if>
+              </div>
+            </sc-for>
+          </div>
+        </div>
+      </sc-if>
+
+      <!-- =============== ADVANCED / FUTURE =============== -->
+      <sc-if value="{{ isAdvanced }}" hint-placeholder-val="{{ false }}">
+        <div style="display: flex; flex-direction: column; gap: 20px; max-width: 1300px;">
+          <div style="padding: 12px 16px; background: #2a2410; border: 1px solid #55491f; color: #d8b25c; font-size: 12px; letter-spacing: 0.04em; text-transform: uppercase; font-weight: 700;">⚠ Coming later — not yet functional in the game engine</div>
+
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
+            <div style="padding: 16px; background: #1f2116; border: 1px solid #3a3d2e; display: flex; flex-direction: column; gap: 10px;">
+              <span style="font-size: 10.5px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: #8b8871;">Battle Cards — Side A</span>
+              <div style="display: flex; gap: 14px;">
+                <div style="flex: 1; display: flex; align-items: center; justify-content: space-between; padding: 7px 10px; background: #22261c; border: 1px solid #3a3d2e;"><span style="font-size: 9.5px; color: #8b8871;">Round 1 draw</span><input type="number" value="{{ advanced.battleCardsA.r1 }}" onChange="{{ advanced.battleCardsA.onR1Change }}" style="width: 40px; background: transparent; border: none; color: #eee0bb; font: 700 13px ui-monospace, monospace; text-align: right;" /></div>
+                <div style="flex: 1; display: flex; align-items: center; justify-content: space-between; padding: 7px 10px; background: #22261c; border: 1px solid #3a3d2e;"><span style="font-size: 9.5px; color: #8b8871;">Each round after</span><input type="number" value="{{ advanced.battleCardsA.after }}" onChange="{{ advanced.battleCardsA.onAfterChange }}" style="width: 40px; background: transparent; border: none; color: #eee0bb; font: 700 13px ui-monospace, monospace; text-align: right;" /></div>
+              </div>
+            </div>
+            <div style="padding: 16px; background: #1f2116; border: 1px solid #3a3d2e; display: flex; flex-direction: column; gap: 10px;">
+              <span style="font-size: 10.5px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: #8b8871;">Battle Cards — Side B</span>
+              <div style="display: flex; gap: 14px;">
+                <div style="flex: 1; display: flex; align-items: center; justify-content: space-between; padding: 7px 10px; background: #22261c; border: 1px solid #3a3d2e;"><span style="font-size: 9.5px; color: #8b8871;">Round 1 draw</span><input type="number" value="{{ advanced.battleCardsB.r1 }}" onChange="{{ advanced.battleCardsB.onR1Change }}" style="width: 40px; background: transparent; border: none; color: #eee0bb; font: 700 13px ui-monospace, monospace; text-align: right;" /></div>
+                <div style="flex: 1; display: flex; align-items: center; justify-content: space-between; padding: 7px 10px; background: #22261c; border: 1px solid #3a3d2e;"><span style="font-size: 9.5px; color: #8b8871;">Each round after</span><input type="number" value="{{ advanced.battleCardsB.after }}" onChange="{{ advanced.battleCardsB.onAfterChange }}" style="width: 40px; background: transparent; border: none; color: #eee0bb; font: 700 13px ui-monospace, monospace; text-align: right;" /></div>
+              </div>
+            </div>
+          </div>
+
+          <div style="padding: 16px; background: #1f2116; border: 1px solid #3a3d2e; display: flex; flex-direction: column; gap: 8px;">
+            <span style="font-size: 10.5px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: #8b8871;">Hidden Units</span>
+            <sc-if value="{{ advanced.hasHidden }}" hint-placeholder-val="{{ false }}">
+              <div style="display: flex; flex-direction: column; gap: 4px; max-height: 200px; overflow: auto;">
+                <sc-for list="{{ advanced.hiddenRows }}" as="hr" hint-placeholder-count="0">
+                  <label style="display: flex; align-items: center; gap: 8px; padding: 5px 8px; font-size: 12px; cursor: pointer;">
+                    <input type="checkbox" checked="{{ hr.checked }}" onChange="{{ hr.onToggle }}" />
+                    {{ hr.label }}
+                  </label>
+                </sc-for>
+              </div>
+            </sc-if>
+            <sc-if value="{{ advanced.hasHidden }}" hint-placeholder-val="{{ true }}">
+            </sc-if>
+            <span style="font-size: 10.5px; color: #6e6c56; font-style: italic;">{{ advanced.hiddenEmptyLabel }}</span>
+          </div>
+
+          <div style="padding: 16px; background: #1f2116; border: 1px solid #3a3d2e; display: flex; flex-direction: column; gap: 12px;">
+            <span style="font-size: 10.5px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: #8b8871;">Off-Board Artillery (OBA)</span>
+            <div style="display: flex; flex-direction: column; gap: 6px;">
+              <span style="font-size: 9.5px; color: #8b8871;">Rounds OBA may be used at all</span>
+              <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+                <sc-for list="{{ advanced.roundsList }}" as="r" hint-placeholder-count="5">
+                  <label style="display: flex; align-items: center; gap: 5px; padding: 4px 8px; background: #22261c; border: 1px solid #3a3d2e; font-size: 11px; cursor: pointer;">
+                    <input type="checkbox" checked="{{ r.checked }}" onChange="{{ r.onToggle }}" /> R{{ r.r }}
+                  </label>
+                </sc-for>
+              </div>
+            </div>
+            <div style="display: flex; flex-direction: column; gap: 6px;">
+              <span style="font-size: 9.5px; color: #8b8871;">Planned strikes — planning round and resolution round are two separate numbers (resolves = planned + 1)</span>
+              <sc-for list="{{ advanced.obaStrikes }}" as="o" hint-placeholder-count="0">
+                <div style="display: flex; align-items: center; gap: 10px; padding: 6px 0;">
+                  <span style="font-size: 10.5px; color: #8b8871;">Planned round</span>
+                  <input type="number" value="{{ o.planned }}" onChange="{{ o.onPlannedChange }}" style="width: 50px; padding: 5px 7px; background: #22261c; border: 1px solid #3a3d2e; color: #eee0bb; font-size: 11.5px;" />
+                  <span style="font-size: 10.5px; color: #8b8871;">→ resolves round</span>
+                  <span style="font-size: 12px; font-weight: 700; color: #c9a04a;">{{ o.resolves }}</span>
+                  <button type="button" onClick="{{ o.onRemove }}" style="background: none; border: none; color: #8b8871; cursor: pointer; font-size: 13px;">×</button>
+                </div>
+              </sc-for>
+              <button type="button" onClick="{{ advanced.onAddStrike }}" style="align-self: flex-start; padding: 6px 12px; background: transparent; border: 1px dashed #55533f; color: #a09c81; font-size: 11px; cursor: pointer; font-family: inherit;">+ Add strike</button>
+            </div>
+          </div>
+
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
+            <div style="padding: 16px; background: #1f2116; border: 1px solid #3a3d2e; display: flex; align-items: center; justify-content: space-between;">
+              <div>
+                <div style="font-size: 10.5px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: #8b8871;">Air Support — Side A</div>
+                <div style="font-size: 9.5px; color: #6e6c56; font-style: italic; margin-top: 2px;">(provisional)</div>
+              </div>
+              <input type="number" placeholder="round" value="{{ advanced.airSupportA }}" onChange="{{ advanced.onAirSupportAChange }}" style="width: 60px; padding: 6px 8px; background: #22261c; border: 1px solid #3a3d2e; color: #eee0bb; font-size: 12px;" />
+            </div>
+            <div style="padding: 16px; background: #1f2116; border: 1px solid #3a3d2e; display: flex; align-items: center; justify-content: space-between;">
+              <div>
+                <div style="font-size: 10.5px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: #8b8871;">Air Support — Side B</div>
+                <div style="font-size: 9.5px; color: #6e6c56; font-style: italic; margin-top: 2px;">(provisional)</div>
+              </div>
+              <input type="number" placeholder="round" value="{{ advanced.airSupportB }}" onChange="{{ advanced.onAirSupportBChange }}" style="width: 60px; padding: 6px 8px; background: #22261c; border: 1px solid #3a3d2e; color: #eee0bb; font-size: 12px;" />
+            </div>
+          </div>
+
+          <div style="padding: 16px; background: #1f2116; border: 1px solid #3a3d2e; display: flex; flex-direction: column; gap: 12px;">
+            <span style="font-size: 10.5px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: #8b8871;">Map Table</span>
+            <sc-for list="{{ advanced.mapTableRows }}" as="mt" hint-placeholder-count="1">
+              <div style="display: flex; align-items: center; gap: 10px;">
+                <select value="{{ mt.mapId }}" onChange="{{ mt.onMapChange }}" style="flex: 1; padding: 6px 8px; background: #22261c; border: 1px solid #3a3d2e; color: #d9d4bd; font-size: 12px;">
+                  <sc-for list="{{ mt.mapOptions }}" as="m" hint-placeholder-count="3">
+                    <option value="{{ m.id }}">{{ m.name }}</option>
+                  </sc-for>
+                </select>
+                <select value="{{ mt.rotation }}" onChange="{{ mt.onRotationChange }}" style="flex: 1; padding: 6px 8px; background: #22261c; border: 1px solid #3a3d2e; color: #d9d4bd; font-size: 12px;">
+                  <sc-for list="{{ mt.rotationOptions }}" as="ro" hint-placeholder-count="3">
+                    <option value="{{ ro.value }}">{{ ro.label }}</option>
+                  </sc-for>
+                </select>
+                <button type="button" onClick="{{ mt.onRemove }}" style="background: none; border: none; color: #8b8871; cursor: pointer; font-size: 14px;">×</button>
+              </div>
+            </sc-for>
+            <button type="button" onClick="{{ advanced.onAddMapRow }}" style="align-self: flex-start; padding: 6px 12px; background: transparent; border: 1px dashed #55533f; color: #a09c81; font-size: 11px; cursor: pointer; font-family: inherit;">+ Add map to table</button>
+            <div style="border-top: 1px solid #3a3d2e; padding-top: 10px; display: flex; flex-direction: column; gap: 6px;">
+              <span style="font-size: 9.5px; color: #8b8871;">Terrain overlays layered on base map(s)</span>
+              <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+                <sc-for list="{{ advanced.overlayRows }}" as="ov" hint-placeholder-count="3">
+                  <label style="display: flex; align-items: center; gap: 5px; padding: 4px 8px; background: #22261c; border: 1px solid #3a3d2e; font-size: 11px; cursor: pointer;">
+                    <input type="checkbox" checked="{{ ov.checked }}" onChange="{{ ov.onToggle }}" /> {{ ov.name }}
+                  </label>
+                </sc-for>
+              </div>
+            </div>
+          </div>
+        </div>
+      </sc-if>
+
+    </div>
+  </div>
+</div>
+
+</x-dc>
+<script type="text/x-dc" data-dc-script>
+class Component extends DCLogic {
+  state = {
+    section: 'info',
+    info: {
+      title: "The Courier's Satchel",
+      situation: "Shortly before Operation Citadel, a Soviet probe intercepts a courier carrying a satchel with German deployment orders. An elite platoon of Panzer Grenadiers is dispatched to retrieve it before Soviet Intelligence can translate and pass it on.",
+      sideA: { nations: ['Germans'], orders: "Retrieve the Document Satchel before Soviet Intelligence can translate and pass on your deployment orders.", instructions: "Satchel and Documents are represented by a Control Marker. Germans immediately gain control when they move into the Satchel's hex. It may be moved by any unit.", caps: 6, vp: 0 },
+      sideB: { nations: ['Soviets'], orders: "Deliver the German Document Satchel to the Regional HQ Stone Building (H07 and H08).", instructions: "The Soviets immediately lose control of the Satchel when a German unit moves into its hex.", caps: 6, vp: 1 },
+      roundsTotal: 5,
+      initiative: 'A',
+    },
+    map: {
+      mapId: 'map7',
+      tool: 'wire',
+      toolSide: 'A',
+      bunkerFacing: 0,
+      obstacles: {},
+      fortifications: {},
+    },
+    forces: {
+      placed: [],
+      search: '',
+      nationFilter: 'all',
+      armedUnitId: null,
+      armedSide: 'A',
+      armedFacing: 0,
+    },
+    reinforcements: {
+      activeSide: 'A',
+      waves: { A: [], B: [] },
+      expandedWaveId: null,
+      search: '',
+      nationFilter: 'all',
+      draftFacing: 0,
+    },
+    victory: {
+      hexes: [
+        { id: 'v1', hex: 'H07', vp: 1, control: 'B' },
+        { id: 'v2', hex: 'H08', vp: 1, control: 'B' },
+      ],
+      vpPerKillA: 1,
+      vpPerKillB: 1,
+      draftHex: '', draftVp: 1, draftControl: 'neutral',
+    },
+    advanced: {
+      battleCards: { A: { r1: 2, after: 1 }, B: { r1: 2, after: 1 } },
+      hiddenIds: [],
+      obaRounds: [],
+      obaStrikes: [],
+      airSupport: { A: '', B: '' },
+      mapTable: [{ id: 'mt1', mapId: 'map7', rotation: '0' }],
+      overlays: [],
+    },
+  };
+
+  NATIONS = ['Germans', 'Americans', 'British', 'Soviets', 'Italians', 'Finns', 'Romanians', 'Hungarians'];
+  NATION_COLOR = { Germans: '#8a9a8a', Soviets: '#b4553c', Americans: '#8a7fae', British: '#7d95a8', Italians: '#a8955a', Finns: '#7a9db0', Romanians: '#9a8a6a', Hungarians: '#a08a7a' };
+  FACINGS = ['E', 'SE', 'SW', 'W', 'NW', 'NE'];
+  MAPS = [
+    { id: 'map3', name: 'Map 3 — Crossroads Village' },
+    { id: 'map7', name: 'Map 7 — Riverside Ford' },
+    { id: 'map12', name: 'Map 12 — Woodline Ridge' },
+  ];
+  OVERLAYS = ['Mud Season', 'Winter Snow', 'Night'];
+  OBSTACLES = [{ id: 'wire', label: 'Barbed Wire' }, { id: 'mines', label: 'Mines' }, { id: 'roadblock', label: 'Road Block' }];
+  FORTS = [{ id: 'trench', label: 'Trench' }, { id: 'bunker', label: 'Bunker' }];
+
+  catalog() {
+    return [
+      { id: 'ger-rifle41', nation: 'Germans', name: "Rifle Squad '41", kind: 'infantry', fp: { red: 2, blue: 0 }, dr: { front: 12, flank: 11 }, move: 1, range: 5, vp: 1 },
+      { id: 'ger-mg34', nation: 'Germans', name: 'MG34 Team', kind: 'support', fp: { red: 4, blue: 0 }, dr: { front: 9, flank: 8 }, move: 1, range: 6, vp: 1 },
+      { id: 'ger-sniper', nation: 'Germans', name: 'Sniper Team', kind: 'support', fp: { red: 1, blue: 0 }, dr: { front: 8, flank: 7 }, move: 1, range: 8, vp: 2 },
+      { id: 'ger-mortar81', nation: 'Germans', name: '81mm Mortar Team', kind: 'support', fp: { red: 3, blue: 0 }, dr: { front: 8, flank: 7 }, move: 1, range: 12, vp: 2 },
+      { id: 'ger-panzeriv', nation: 'Germans', name: 'Panzer IV Tank', kind: 'vehicle', fp: { red: 6, blue: 2 }, dr: { front: 14, flank: 10 }, move: 4, range: 9, vp: 3 },
+      { id: 'sov-rifle43', nation: 'Soviets', name: "Rifle Squad '43", kind: 'infantry', fp: { red: 2, blue: 0 }, dr: { front: 11, flank: 10 }, move: 1, range: 5, vp: 1 },
+      { id: 'sov-maxim', nation: 'Soviets', name: 'Maxim MMG Team', kind: 'support', fp: { red: 4, blue: 0 }, dr: { front: 8, flank: 7 }, move: 1, range: 6, vp: 1 },
+      { id: 'sov-sniper', nation: 'Soviets', name: 'Sniper Team', kind: 'support', fp: { red: 1, blue: 0 }, dr: { front: 7, flank: 6 }, move: 1, range: 8, vp: 2 },
+      { id: 'sov-mortar82', nation: 'Soviets', name: '82mm Mortar Team', kind: 'support', fp: { red: 3, blue: 0 }, dr: { front: 7, flank: 6 }, move: 1, range: 12, vp: 2 },
+      { id: 'sov-t34', nation: 'Soviets', name: 'T-34 Tank', kind: 'vehicle', fp: { red: 5, blue: 2 }, dr: { front: 13, flank: 9 }, move: 4, range: 9, vp: 3 },
+      { id: 'us-rifle', nation: 'Americans', name: 'Rifle Squad', kind: 'infantry', fp: { red: 2, blue: 0 }, dr: { front: 11, flank: 10 }, move: 1, range: 5, vp: 1 },
+      { id: 'us-bar', nation: 'Americans', name: 'BAR Team', kind: 'support', fp: { red: 3, blue: 0 }, dr: { front: 9, flank: 8 }, move: 1, range: 5, vp: 1 },
+      { id: 'us-mortar60', nation: 'Americans', name: '60mm Mortar Team', kind: 'support', fp: { red: 2, blue: 0 }, dr: { front: 8, flank: 7 }, move: 1, range: 10, vp: 2 },
+      { id: 'us-sherman', nation: 'Americans', name: 'Sherman Tank', kind: 'vehicle', fp: { red: 5, blue: 2 }, dr: { front: 13, flank: 9 }, move: 4, range: 9, vp: 3 },
+    ];
+  }
+
+  unitById(id) { return this.catalog().find(u => u.id === id); }
+
+  hexGeom() {
+    if (this._geom) return this._geom;
+    const R = 27, h = Math.sqrt(3) * R, cols = 10, rows = 8, pad = 24;
+    const letters = 'ABCDEFGHIJ';
+    const list = [];
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    for (let c = 0; c < cols; c++) {
+      for (let r = 0; r < rows; r++) {
+        const cx = pad + R + c * 1.5 * R;
+        const cy = pad + h / 2 + r * h + (c % 2 ? h / 2 : 0);
+        const pts = [[cx + R, cy], [cx + R / 2, cy + h / 2], [cx - R / 2, cy + h / 2], [cx - R, cy], [cx - R / 2, cy - h / 2], [cx + R / 2, cy - h / 2]];
+        pts.forEach(p => { minX = Math.min(minX, p[0]); minY = Math.min(minY, p[1]); maxX = Math.max(maxX, p[0]); maxY = Math.max(maxY, p[1]); });
+        const key = letters[c] + String(r + 1).padStart(2, '0');
+        list.push({ key, cx, cy, topY: cy - h / 2 + 11, pointsStr: pts.map(p => p[0].toFixed(1) + ',' + p[1].toFixed(1)).join(' ') });
+      }
+    }
+    this._geom = { list, viewBox: (minX - 12) + ' ' + (minY - 12) + ' ' + (maxX - minX + 24) + ' ' + (maxY - minY + 24) };
+    return this._geom;
+  }
+
+  setSection(sec) { this.setState({ section: sec }); }
+  setInfo(patch) { this.setState(s => ({ info: { ...s.info, ...patch } })); }
+  setSideA(patch) { this.setState(s => ({ info: { ...s.info, sideA: { ...s.info.sideA, ...patch } } })); }
+  setSideB(patch) { this.setState(s => ({ info: { ...s.info, sideB: { ...s.info.sideB, ...patch } } })); }
+  addNation(side, nation) {
+    if (!nation) return;
+    const key = side === 'A' ? 'sideA' : 'sideB';
+    this.setState(s => {
+      const cur = s.info[key].nations;
+      if (cur.includes(nation)) return s;
+      return { info: { ...s.info, [key]: { ...s.info[key], nations: [...cur, nation] } } };
+    });
+  }
+  removeNation(side, nation) {
+    const key = side === 'A' ? 'sideA' : 'sideB';
+    this.setState(s => ({ info: { ...s.info, [key]: { ...s.info[key], nations: s.info[key].nations.filter(n => n !== nation) } } }));
+  }
+
+  setMap(patch) { this.setState(s => ({ map: { ...s.map, ...patch } })); }
+  paintMapHex(key) {
+    this.setState(s => {
+      const tool = s.map.tool;
+      const obstacles = { ...s.map.obstacles };
+      const forts = { ...s.map.fortifications };
+      if (tool === 'clear') { delete obstacles[key]; delete forts[key]; }
+      else if (tool === 'wire' || tool === 'mines' || tool === 'roadblock') { delete forts[key]; obstacles[key] = { type: tool, side: s.map.toolSide }; }
+      else if (tool === 'trench' || tool === 'bunker') { delete obstacles[key]; forts[key] = { type: tool, facing: tool === 'bunker' ? s.map.bunkerFacing : null }; }
+      return { map: { ...s.map, obstacles, fortifications: forts } };
+    });
+  }
+  removeObstacle(key) { this.setState(s => { const o = { ...s.map.obstacles }; delete o[key]; return { map: { ...s.map, obstacles: o } }; }); }
+  removeFort(key) { this.setState(s => { const o = { ...s.map.fortifications }; delete o[key]; return { map: { ...s.map, fortifications: o } }; }); }
+
+  setForces(patch) { this.setState(s => ({ forces: { ...s.forces, ...patch } })); }
+  armUnit(id) { this.setForces({ armedUnitId: id }); }
+  placeAtHex(key) {
+    this.setState(s => {
+      if (!s.forces.armedUnitId) return s;
+      const entry = { id: 'p' + Date.now() + Math.random().toString(36).slice(2, 6), side: s.forces.armedSide, unitId: s.forces.armedUnitId, hex: key, facing: s.forces.armedFacing };
+      return { forces: { ...s.forces, placed: [...s.forces.placed, entry] } };
+    });
+  }
+  removePlaced(id) { this.setState(s => ({ forces: { ...s.forces, placed: s.forces.placed.filter(p => p.id !== id) } })); }
+  updatePlacedFacing(id, facing) { this.setState(s => ({ forces: { ...s.forces, placed: s.forces.placed.map(p => p.id === id ? { ...p, facing } : p) } })); }
+
+  setReinf(patch) { this.setState(s => ({ reinforcements: { ...s.reinforcements, ...patch } })); }
+  addWave(side) {
+    this.setState(s => {
+      const n = s.reinforcements.waves[side].length + 1;
+      const wave = { id: 'w' + Date.now(), name: 'Wave ' + n, earliestRound: 2, description: '', entryHexes: [], units: [] };
+      return { reinforcements: { ...s.reinforcements, activeSide: side, waves: { ...s.reinforcements.waves, [side]: [...s.reinforcements.waves[side], wave] }, expandedWaveId: wave.id } };
+    });
+  }
+  removeWave(side, id) {
+    this.setState(s => ({ reinforcements: { ...s.reinforcements, waves: { ...s.reinforcements.waves, [side]: s.reinforcements.waves[side].filter(w => w.id !== id) }, expandedWaveId: s.reinforcements.expandedWaveId === id ? null : s.reinforcements.expandedWaveId } }));
+  }
+  toggleExpandWave(id) { this.setState(s => ({ reinforcements: { ...s.reinforcements, expandedWaveId: s.reinforcements.expandedWaveId === id ? null : id } })); }
+  updateWave(side, id, patch) {
+    this.setState(s => ({ reinforcements: { ...s.reinforcements, waves: { ...s.reinforcements.waves, [side]: s.reinforcements.waves[side].map(w => w.id === id ? { ...w, ...patch } : w) } } }));
+  }
+  toggleWaveHex(side, id, key) {
+    this.setState(s => ({
+      reinforcements: {
+        ...s.reinforcements,
+        waves: {
+          ...s.reinforcements.waves,
+          [side]: s.reinforcements.waves[side].map(w => {
+            if (w.id !== id) return w;
+            const has = w.entryHexes.includes(key);
+            return { ...w, entryHexes: has ? w.entryHexes.filter(h => h !== key) : [...w.entryHexes, key] };
+          }),
+        },
+      },
+    }));
+  }
+  addUnitToWave(side, id, unitId, facing) {
+    this.setState(s => ({ reinforcements: { ...s.reinforcements, waves: { ...s.reinforcements.waves, [side]: s.reinforcements.waves[side].map(w => w.id === id ? { ...w, units: [...w.units, { unitId, facing }] } : w) } } }));
+  }
+  removeUnitFromWave(side, id, idx) {
+    this.setState(s => ({ reinforcements: { ...s.reinforcements, waves: { ...s.reinforcements.waves, [side]: s.reinforcements.waves[side].map(w => w.id === id ? { ...w, units: w.units.filter((_, i) => i !== idx) } : w) } } }));
+  }
+
+  setVictory(patch) { this.setState(s => ({ victory: { ...s.victory, ...patch } })); }
+  addVictoryHex() {
+    this.setState(s => {
+      const hex = (s.victory.draftHex || '').trim().toUpperCase();
+      if (!hex) return s;
+      const entry = { id: 'v' + Date.now(), hex, vp: s.victory.draftVp || 0, control: s.victory.draftControl };
+      return { victory: { ...s.victory, hexes: [...s.victory.hexes, entry], draftHex: '', draftVp: 1, draftControl: 'neutral' } };
+    });
+  }
+  removeVictoryHex(id) { this.setState(s => ({ victory: { ...s.victory, hexes: s.victory.hexes.filter(v => v.id !== id) } })); }
+  updateVictoryHex(id, patch) { this.setState(s => ({ victory: { ...s.victory, hexes: s.victory.hexes.map(v => v.id === id ? { ...v, ...patch } : v) } })); }
+  toggleVictoryVaries(id) {
+    this.setState(s => ({ victory: { ...s.victory, hexes: s.victory.hexes.map(v => v.id === id ? { ...v, overrides: v.overrides ? undefined : [] } : v) } }));
+  }
+  addVictoryOverride(id) {
+    this.setState(s => ({ victory: { ...s.victory, hexes: s.victory.hexes.map(v => v.id === id ? { ...v, overrides: [...(v.overrides || []), { round: 2, vp: v.vp }] } : v) } }));
+  }
+  updateVictoryOverride(id, idx, patch) {
+    this.setState(s => ({ victory: { ...s.victory, hexes: s.victory.hexes.map(v => v.id === id ? { ...v, overrides: v.overrides.map((o, i) => i === idx ? { ...o, ...patch } : o) } : v) } }));
+  }
+  removeVictoryOverride(id, idx) {
+    this.setState(s => ({ victory: { ...s.victory, hexes: s.victory.hexes.map(v => v.id === id ? { ...v, overrides: v.overrides.filter((_, i) => i !== idx) } : v) } }));
+  }
+
+  setAdvanced(patch) { this.setState(s => ({ advanced: { ...s.advanced, ...patch } })); }
+  setBattleCards(side, patch) { this.setState(s => ({ advanced: { ...s.advanced, battleCards: { ...s.advanced.battleCards, [side]: { ...s.advanced.battleCards[side], ...patch } } } })); }
+  toggleHidden(key) { this.setState(s => ({ advanced: { ...s.advanced, hiddenIds: s.advanced.hiddenIds.includes(key) ? s.advanced.hiddenIds.filter(k => k !== key) : [...s.advanced.hiddenIds, key] } })); }
+  toggleObaRound(r) { this.setState(s => ({ advanced: { ...s.advanced, obaRounds: s.advanced.obaRounds.includes(r) ? s.advanced.obaRounds.filter(x => x !== r) : [...s.advanced.obaRounds, r] } })); }
+  addObaStrike() { this.setState(s => ({ advanced: { ...s.advanced, obaStrikes: [...s.advanced.obaStrikes, { id: 'oba' + Date.now(), planned: 2 }] } })); }
+  updateObaStrike(id, planned) { this.setState(s => ({ advanced: { ...s.advanced, obaStrikes: s.advanced.obaStrikes.map(o => o.id === id ? { ...o, planned } : o) } })); }
+  removeObaStrike(id) { this.setState(s => ({ advanced: { ...s.advanced, obaStrikes: s.advanced.obaStrikes.filter(o => o.id !== id) } })); }
+  setAirSupport(side, val) { this.setState(s => ({ advanced: { ...s.advanced, airSupport: { ...s.advanced.airSupport, [side]: val } } })); }
+  addMapTableRow() { this.setState(s => ({ advanced: { ...s.advanced, mapTable: [...s.advanced.mapTable, { id: 'mt' + Date.now(), mapId: this.MAPS[0].id, rotation: '0' }] } })); }
+  updateMapTableRow(id, patch) { this.setState(s => ({ advanced: { ...s.advanced, mapTable: s.advanced.mapTable.map(m => m.id === id ? { ...m, ...patch } : m) } })); }
+  removeMapTableRow(id) { this.setState(s => ({ advanced: { ...s.advanced, mapTable: s.advanced.mapTable.filter(m => m.id !== id) } })); }
+  toggleOverlay(name) { this.setState(s => ({ advanced: { ...s.advanced, overlays: s.advanced.overlays.includes(name) ? s.advanced.overlays.filter(n => n !== name) : [...s.advanced.overlays, name] } })); }
+
+  exportMission() {
+    const s = this.state;
+    const data = {
+      meta: { exportedAt: new Date().toISOString(), version: '0.1' },
+      missionInfo: s.info,
+      map: { mapId: s.map.mapId, obstacles: s.map.obstacles, fortifications: s.map.fortifications },
+      startingForces: s.forces.placed,
+      reinforcements: s.reinforcements.waves,
+      victoryConditions: { hexes: s.victory.hexes, vpPerKillA: s.victory.vpPerKillA, vpPerKillB: s.victory.vpPerKillB },
+      advanced: s.advanced,
+    };
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    const slug = (s.info.title || 'mission').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
+    a.href = url; a.download = (slug || 'mission') + '.json';
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+
+  filteredCatalog(search, nationFilter) {
+    const q = (search || '').toLowerCase();
+    return this.catalog().filter(u => (nationFilter === 'all' || u.nation === nationFilter) && (!q || u.name.toLowerCase().includes(q)));
+  }
+
+  mapHexList() {
+    const geom = this.hexGeom();
+    const { obstacles, fortifications } = this.state.map;
+    const OB = { wire: 'WIRE', mines: 'MINE', roadblock: 'RDBLK' };
+    const FT = { trench: 'TRNCH', bunker: 'BNKR' };
+    return geom.list.map(hx => {
+      const ob = obstacles[hx.key];
+      const ft = fortifications[hx.key];
+      let badgeText = '', badgeBg = '';
+      const sideColor = (sd) => sd === 'A' ? '#8a9a8a' : '#b4553c';
+      if (ft) { badgeText = FT[ft.type] + (ft.type === 'bunker' ? ' ' + this.FACINGS[ft.facing] : ''); badgeBg = '#c9a04a'; }
+      else if (ob) { badgeText = OB[ob.type]; badgeBg = sideColor(ob.side); }
+      return { key: hx.key, points: hx.pointsStr, cx: hx.cx, cy: hx.cy, topY: hx.topY, label: hx.key, hasBadge: !!badgeText, badgeText, badgeBg, fill: (ft || ob) ? '#262918' : '#22261c', onClick: () => this.paintMapHex(hx.key) };
+    });
+  }
+
+  forcesHexList() {
+    const geom = this.hexGeom();
+    const { placed } = this.state.forces;
+    return geom.list.map(hx => {
+      const here = placed.filter(p => p.hex === hx.key);
+      let badgeText = '', badgeBg = '';
+      if (here.length) {
+        const u = this.unitById(here[0].unitId);
+        badgeText = (u ? u.name.slice(0, 3).toUpperCase() : '?') + (here.length > 1 ? ' +' + (here.length - 1) : '');
+        badgeBg = here[0].side === 'A' ? '#8a9a8a' : '#b4553c';
+      }
+      return { key: hx.key, points: hx.pointsStr, cx: hx.cx, cy: hx.cy, topY: hx.topY, label: hx.key, hasBadge: !!badgeText, badgeText, badgeBg, fill: here.length ? '#262918' : '#22261c', onClick: () => this.placeAtHex(hx.key) };
+    });
+  }
+
+  reinfHexListFor(wave, side) {
+    const geom = this.hexGeom();
+    return geom.list.map(hx => {
+      const selected = wave ? wave.entryHexes.includes(hx.key) : false;
+      return { key: hx.key, points: hx.pointsStr, cx: hx.cx, cy: hx.cy, topY: hx.topY, label: hx.key, fill: selected ? '#c9a04a' : '#22261c', onClick: wave ? (() => this.toggleWaveHex(side, wave.id, hx.key)) : null };
+    });
+  }
+
+  renderVals() {
+    const s = this.state;
+    const SECTION_LABELS = { info: 'Mission Info', map: 'Map', forces: 'Starting Forces', reinf: 'Reinforcements', victory: 'Victory Conditions', advanced: 'Advanced / Future' };
+
+    const navDefs = [
+      { key: 'info', label: '01 · Mission Info' },
+      { key: 'map', label: '02 · Map' },
+      { key: 'forces', label: '03 · Starting Forces' },
+      { key: 'reinf', label: '04 · Reinforcements' },
+      { key: 'victory', label: '05 · Victory Conditions' },
+    ];
+    const navItems = navDefs.map(n => ({
+      key: n.key, label: n.label, hasBadge: false, badge: '',
+      rowStyle: 'display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 12px;cursor:pointer;font-size:12.5px;text-transform:uppercase;letter-spacing:0.04em;' +
+        (s.section === n.key ? 'background:#262918;border-left:2px solid #c9a04a;color:#eee0bb;font-weight:700;' : 'border-left:2px solid transparent;color:#a09c81;'),
+      onClick: () => this.setSection(n.key),
+    }));
+    navItems.push({
+      key: 'advanced', label: '06 · Advanced', hasBadge: true, badge: 'SOON',
+      rowStyle: 'display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 12px;cursor:pointer;font-size:12.5px;text-transform:uppercase;letter-spacing:0.04em;' +
+        (s.section === 'advanced' ? 'background:#262918;border-left:2px solid #c9a04a;color:#eee0bb;font-weight:700;' : 'border-left:2px solid transparent;color:#5c5a48;'),
+      onClick: () => this.setSection('advanced'),
+    });
+
+    const availableNations = (used) => this.NATIONS.filter(n => !used.includes(n));
+    const nationChip = (side, n) => ({ label: n, onRemove: () => this.removeNation(side, n) });
+
+    const info = {
+      title: s.info.title,
+      onTitleChange: (e) => this.setInfo({ title: e.target.value }),
+      situation: s.info.situation,
+      onSituationChange: (e) => this.setInfo({ situation: e.target.value }),
+      roundsTotal: s.info.roundsTotal,
+      onRoundsChange: (e) => this.setInfo({ roundsTotal: parseInt(e.target.value) || 1 }),
+      onInitiativeA: () => this.setInfo({ initiative: 'A' }),
+      onInitiativeB: () => this.setInfo({ initiative: 'B' }),
+      initiativeAStyle: 'display:flex;align-items:center;gap:8px;padding:9px 14px;cursor:pointer;font-size:12.5px;' + (s.info.initiative === 'A' ? 'background:#262918;border:1px solid #8a9a8a;color:#eee0bb;' : 'border:1px solid #3a3d2e;color:#8b8871;'),
+      initiativeBStyle: 'display:flex;align-items:center;gap:8px;padding:9px 14px;cursor:pointer;font-size:12.5px;' + (s.info.initiative === 'B' ? 'background:#2a2018;border:1px solid #b4553c;color:#eee0bb;' : 'border:1px solid #3a3d2e;color:#8b8871;'),
+      initiativeADotStyle: 'width:8px;height:8px;display:inline-block;' + (s.info.initiative === 'A' ? 'background:#8a9a8a;' : 'border:1px solid #55533f;'),
+      initiativeBDotStyle: 'width:8px;height:8px;display:inline-block;' + (s.info.initiative === 'B' ? 'background:#b4553c;' : 'border:1px solid #55533f;'),
+      sideA: {
+        hasInitiative: s.info.initiative === 'A',
+        caps: s.info.sideA.caps, onCapsChange: (e) => this.setSideA({ caps: parseInt(e.target.value) || 0 }),
+        vp: s.info.sideA.vp, onVpChange: (e) => this.setSideA({ vp: parseInt(e.target.value) || 0 }),
+        nations: s.info.sideA.nations.map(n => nationChip('A', n)),
+        nationOptions: availableNations(s.info.sideA.nations).map(n => ({ value: n, label: n })),
+        onAddNation: (e) => { this.addNation('A', e.target.value); },
+        orders: s.info.sideA.orders, onOrdersChange: (e) => this.setSideA({ orders: e.target.value }),
+        instructions: s.info.sideA.instructions, onInstructionsChange: (e) => this.setSideA({ instructions: e.target.value }),
+      },
+      sideB: {
+        hasInitiative: s.info.initiative === 'B',
+        caps: s.info.sideB.caps, onCapsChange: (e) => this.setSideB({ caps: parseInt(e.target.value) || 0 }),
+        vp: s.info.sideB.vp, onVpChange: (e) => this.setSideB({ vp: parseInt(e.target.value) || 0 }),
+        nations: s.info.sideB.nations.map(n => nationChip('B', n)),
+        nationOptions: availableNations(s.info.sideB.nations).map(n => ({ value: n, label: n })),
+        onAddNation: (e) => { this.addNation('B', e.target.value); },
+        orders: s.info.sideB.orders, onOrdersChange: (e) => this.setSideB({ orders: e.target.value }),
+        instructions: s.info.sideB.instructions, onInstructionsChange: (e) => this.setSideB({ instructions: e.target.value }),
+      },
+    };
+
+    const TOOL_DEFS = [
+      { id: 'wire', label: 'Barbed Wire' }, { id: 'mines', label: 'Mines' }, { id: 'roadblock', label: 'Road Block' },
+      { id: 'trench', label: 'Trench' }, { id: 'bunker', label: 'Bunker' }, { id: 'clear', label: 'Clear / Erase' },
+    ];
+    const toolButtons = TOOL_DEFS.map(t => ({
+      id: t.id, label: t.label,
+      style: 'padding:8px 10px;text-align:left;font-size:11.5px;cursor:pointer;font-family:inherit;border:1px solid ' + (s.map.tool === t.id ? '#c9a04a' : '#3a3d2e') + ';background:' + (s.map.tool === t.id ? '#262918' : 'transparent') + ';color:' + (s.map.tool === t.id ? '#eee0bb' : '#a09c81') + ';',
+      onClick: () => this.setMap({ tool: t.id }),
+    }));
+    const obstaclePlaced = Object.keys(s.map.obstacles).map(k => ({ key: k + '-ob', hex: k, detail: this.OBSTACLES.find(o => o.id === s.map.obstacles[k].type).label + ' (Side ' + s.map.obstacles[k].side + ')', onRemove: () => this.removeObstacle(k) }));
+    const fortPlaced = Object.keys(s.map.fortifications).map(k => { const f = s.map.fortifications[k]; return { key: k + '-ft', hex: k, detail: this.FORTS.find(o => o.id === f.type).label + (f.type === 'bunker' ? ' facing ' + this.FACINGS[f.facing] : ''), onRemove: () => this.removeFort(k) }; });
+    const map = {
+      mapOptions: this.MAPS, mapId: s.map.mapId, onMapChange: (e) => this.setMap({ mapId: e.target.value }),
+      toolButtons,
+      showToolSide: s.map.tool === 'wire' || s.map.tool === 'mines' || s.map.tool === 'roadblock',
+      toolSideAStyle: 'flex:1;padding:8px 10px;text-align:center;cursor:pointer;font-size:12px;border:1px solid ' + (s.map.toolSide === 'A' ? '#8a9a8a' : '#3a3d2e') + ';background:' + (s.map.toolSide === 'A' ? '#262918' : 'transparent') + ';color:' + (s.map.toolSide === 'A' ? '#eee0bb' : '#8b8871') + ';',
+      toolSideBStyle: 'flex:1;padding:8px 10px;text-align:center;cursor:pointer;font-size:12px;border:1px solid ' + (s.map.toolSide === 'B' ? '#b4553c' : '#3a3d2e') + ';background:' + (s.map.toolSide === 'B' ? '#2a2018' : 'transparent') + ';color:' + (s.map.toolSide === 'B' ? '#eee0bb' : '#8b8871') + ';',
+      onToolSideA: () => this.setMap({ toolSide: 'A' }), onToolSideB: () => this.setMap({ toolSide: 'B' }),
+      showBunkerFacing: s.map.tool === 'bunker',
+      bunkerFacing: s.map.bunkerFacing, onBunkerFacingChange: (e) => this.setMap({ bunkerFacing: parseInt(e.target.value) }),
+      facingOptions: this.FACINGS.map((f, i) => ({ value: i, label: f })),
+      hexes: this.mapHexList(), viewBox: this.hexGeom().viewBox,
+      placedList: [...obstaclePlaced, ...fortPlaced],
+      placedCount: obstaclePlaced.length + fortPlaced.length,
+    };
+
+    const catalogCards = (search, nationFilter, activeId, onCardClick) => this.filteredCatalog(search, nationFilter).map(u => ({
+      id: u.id, name: u.name, nation: u.nation, color: this.NATION_COLOR[u.nation],
+      statLine: 'FP ' + u.fp.red + (u.fp.blue ? '/' + u.fp.blue : '') + '  ·  DR ' + u.dr.front + '/' + u.dr.flank + '  ·  MV ' + u.move + '  ·  RNG ' + u.range + '  ·  VP ' + u.vp,
+      active: activeId === u.id, onClick: () => onCardClick(u.id),
+    }));
+
+    const armedUnit = s.forces.armedUnitId ? this.unitById(s.forces.armedUnitId) : null;
+    const forces = {
+      search: s.forces.search, onSearchChange: (e) => this.setForces({ search: e.target.value }),
+      nationOptions: [{ value: 'all', label: 'All nations' }, ...['Germans', 'Soviets', 'Americans'].map(n => ({ value: n, label: n }))],
+      nationFilter: s.forces.nationFilter, onNationFilterChange: (e) => this.setForces({ nationFilter: e.target.value }),
+      cards: catalogCards(s.forces.search, s.forces.nationFilter, s.forces.armedUnitId, (id) => this.armUnit(id)).map(c => ({
+        ...c,
+        style: 'padding:8px 10px;cursor:pointer;border-left:3px solid ' + c.color + ';' + (c.active ? 'background:#262918;' : ''),
+      })),
+      armedLabel: armedUnit ? ('Armed: ' + armedUnit.name + ' — click a hex to place') : 'Click a unit above to arm it',
+      armedLabelColor: armedUnit ? '#c9a04a' : '#6e6c56',
+      armedSideAStyle: 'flex:1;padding:8px 10px;text-align:center;cursor:pointer;font-size:12px;border:1px solid ' + (s.forces.armedSide === 'A' ? '#8a9a8a' : '#3a3d2e') + ';background:' + (s.forces.armedSide === 'A' ? '#262918' : 'transparent') + ';color:' + (s.forces.armedSide === 'A' ? '#eee0bb' : '#8b8871') + ';',
+      armedSideBStyle: 'flex:1;padding:8px 10px;text-align:center;cursor:pointer;font-size:12px;border:1px solid ' + (s.forces.armedSide === 'B' ? '#b4553c' : '#3a3d2e') + ';background:' + (s.forces.armedSide === 'B' ? '#2a2018' : 'transparent') + ';color:' + (s.forces.armedSide === 'B' ? '#eee0bb' : '#8b8871') + ';',
+      onArmedSideA: () => this.setForces({ armedSide: 'A' }), onArmedSideB: () => this.setForces({ armedSide: 'B' }),
+      facingOptions: this.FACINGS.map((f, i) => ({ value: i, label: f })),
+      armedFacing: s.forces.armedFacing, onArmedFacingChange: (e) => this.setForces({ armedFacing: parseInt(e.target.value) }),
+      hexes: this.forcesHexList(), viewBox: this.hexGeom().viewBox,
+      placedRows: s.forces.placed.map(p => {
+        const u = this.unitById(p.unitId);
+        return {
+          id: p.id, sideLabel: 'Side ' + p.side, sideColor: p.side === 'A' ? '#8a9a8a' : '#b4553c',
+          unitName: u ? u.name : p.unitId, hex: p.hex, facing: p.facing,
+          facingOptions: this.FACINGS.map((f, i) => ({ value: i, label: f })),
+          onFacingChange: (e) => this.updatePlacedFacing(p.id, parseInt(e.target.value)),
+          onRemove: () => this.removePlaced(p.id),
+        };
+      }),
+    };
+
+    const wavesFor = (side) => s.reinforcements.waves[side].map(w => {
+      const expanded = s.reinforcements.expandedWaveId === w.id;
+      return {
+        id: w.id, name: w.name, onNameChange: (e) => this.updateWave(side, w.id, { name: e.target.value }),
+        earliestRound: w.earliestRound, onRoundChange: (e) => this.updateWave(side, w.id, { earliestRound: parseInt(e.target.value) || 1 }),
+        description: w.description, onDescChange: (e) => this.updateWave(side, w.id, { description: e.target.value }),
+        expanded, expandLabel: expanded ? 'Collapse' : 'Edit', onToggleExpand: () => this.toggleExpandWave(w.id),
+        onRemove: () => this.removeWave(side, w.id),
+        summaryLabel: 'Enters round ' + w.earliestRound + '+  ·  ' + w.entryHexes.length + ' entry hex(es)  ·  ' + w.units.length + ' unit(s)',
+        entryHexLabel: w.entryHexes.length ? w.entryHexes.join(', ') : '(none selected)',
+        unitsRows: w.units.map((u, idx) => {
+          const unit = this.unitById(u.unitId);
+          return { idx, label: (unit ? unit.name : u.unitId) + ' — facing ' + this.FACINGS[u.facing], onRemove: () => this.removeUnitFromWave(side, w.id, idx) };
+        }),
+        cards: expanded ? catalogCards(s.reinforcements.search, s.reinforcements.nationFilter, null, (unitId) => this.addUnitToWave(side, w.id, unitId, s.reinforcements.draftFacing)) : [],
+        hexes: expanded ? this.reinfHexListFor(w, side) : [],
+      };
+    });
+    const reinforcements = {
+      sideAStyle: 'padding:9px 18px;cursor:pointer;font-size:12.5px;font-weight:700;letter-spacing:0.04em;text-transform:uppercase;border:1px solid ' + (s.reinforcements.activeSide === 'A' ? '#8a9a8a' : '#3a3d2e') + ';background:' + (s.reinforcements.activeSide === 'A' ? '#262918' : 'transparent') + ';color:' + (s.reinforcements.activeSide === 'A' ? '#eee0bb' : '#8b8871') + ';',
+      sideBStyle: 'padding:9px 18px;cursor:pointer;font-size:12.5px;font-weight:700;letter-spacing:0.04em;text-transform:uppercase;border:1px solid ' + (s.reinforcements.activeSide === 'B' ? '#b4553c' : '#3a3d2e') + ';background:' + (s.reinforcements.activeSide === 'B' ? '#2a2018' : 'transparent') + ';color:' + (s.reinforcements.activeSide === 'B' ? '#eee0bb' : '#8b8871') + ';',
+      onSideA: () => this.setReinf({ activeSide: 'A' }), onSideB: () => this.setReinf({ activeSide: 'B' }),
+      activeSideLabel: 'Side ' + s.reinforcements.activeSide,
+      waves: wavesFor(s.reinforcements.activeSide), onAddWave: () => this.addWave(s.reinforcements.activeSide),
+      search: s.reinforcements.search, onSearchChange: (e) => this.setReinf({ search: e.target.value }),
+      nationOptions: [{ value: 'all', label: 'All nations' }, ...['Germans', 'Soviets', 'Americans'].map(n => ({ value: n, label: n }))],
+      nationFilter: s.reinforcements.nationFilter, onNationFilterChange: (e) => this.setReinf({ nationFilter: e.target.value }),
+      facingOptions: this.FACINGS.map((f, i) => ({ value: i, label: f })),
+      draftFacing: s.reinforcements.draftFacing, onDraftFacingChange: (e) => this.setReinf({ draftFacing: parseInt(e.target.value) }),
+      viewBox: this.hexGeom().viewBox,
+    };
+
+    const controlOptions = [{ value: 'neutral', label: 'Neutral' }, { value: 'A', label: 'Side A' }, { value: 'B', label: 'Side B' }];
+    const victory = {
+      vpPerKillA: s.victory.vpPerKillA, onVpPerKillAChange: (e) => this.setVictory({ vpPerKillA: parseInt(e.target.value) || 0 }),
+      vpPerKillB: s.victory.vpPerKillB, onVpPerKillBChange: (e) => this.setVictory({ vpPerKillB: parseInt(e.target.value) || 0 }),
+      controlOptions,
+      rows: s.victory.hexes.map(v => ({
+        id: v.id, hex: v.hex, vp: v.vp, onVpChange: (e) => this.updateVictoryHex(v.id, { vp: parseInt(e.target.value) || 0 }),
+        control: v.control, onControlChange: (e) => this.updateVictoryHex(v.id, { control: e.target.value }),
+        varies: !!v.overrides, variesLabel: v.overrides ? 'Varies per round ✓' : 'Same every round',
+        onToggleVaries: () => this.toggleVictoryVaries(v.id),
+        overrides: (v.overrides || []).map((o, idx) => ({
+          idx, round: o.round, vp: o.vp,
+          onRoundChange: (e) => this.updateVictoryOverride(v.id, idx, { round: parseInt(e.target.value) || 1 }),
+          onVpChange: (e) => this.updateVictoryOverride(v.id, idx, { vp: parseInt(e.target.value) || 0 }),
+          onRemove: () => this.removeVictoryOverride(v.id, idx),
+        })),
+        onAddOverride: () => this.addVictoryOverride(v.id), onRemove: () => this.removeVictoryHex(v.id),
+      })),
+      draftHex: s.victory.draftHex, onDraftHexChange: (e) => this.setVictory({ draftHex: e.target.value }),
+      draftVp: s.victory.draftVp, onDraftVpChange: (e) => this.setVictory({ draftVp: parseInt(e.target.value) || 0 }),
+      draftControl: s.victory.draftControl, onDraftControlChange: (e) => this.setVictory({ draftControl: e.target.value }),
+      onAdd: () => this.addVictoryHex(),
+    };
+
+    const hiddenRows = [];
+    s.forces.placed.forEach(p => {
+      const u = this.unitById(p.unitId);
+      const key = 'f:' + p.id;
+      hiddenRows.push({ key, label: (u ? u.name : p.unitId) + ' — Side ' + p.side + ' · ' + p.hex, checked: s.advanced.hiddenIds.includes(key), onToggle: () => this.toggleHidden(key) });
+    });
+    ['A', 'B'].forEach(side => {
+      s.reinforcements.waves[side].forEach(w => {
+        w.units.forEach((u, idx) => {
+          const unit = this.unitById(u.unitId);
+          const key = 'r:' + side + ':' + w.id + ':' + idx;
+          hiddenRows.push({ key, label: (unit ? unit.name : u.unitId) + ' — Side ' + side + ' · ' + w.name, checked: s.advanced.hiddenIds.includes(key), onToggle: () => this.toggleHidden(key) });
+        });
+      });
+    });
+    const roundsList = [];
+    for (let r = 1; r <= (s.info.roundsTotal || 1); r++) roundsList.push({ r, checked: s.advanced.obaRounds.includes(r), onToggle: () => this.toggleObaRound(r) });
+    const advanced = {
+      battleCardsA: { r1: s.advanced.battleCards.A.r1, onR1Change: (e) => this.setBattleCards('A', { r1: parseInt(e.target.value) || 0 }), after: s.advanced.battleCards.A.after, onAfterChange: (e) => this.setBattleCards('A', { after: parseInt(e.target.value) || 0 }) },
+      battleCardsB: { r1: s.advanced.battleCards.B.r1, onR1Change: (e) => this.setBattleCards('B', { r1: parseInt(e.target.value) || 0 }), after: s.advanced.battleCards.B.after, onAfterChange: (e) => this.setBattleCards('B', { after: parseInt(e.target.value) || 0 }) },
+      hiddenRows, hasHidden: hiddenRows.length > 0, hiddenEmptyLabel: hiddenRows.length > 0 ? '' : 'No placed or reinforcement units yet.',
+      roundsList,
+      obaStrikes: s.advanced.obaStrikes.map(o => ({ id: o.id, planned: o.planned, resolves: o.planned + 1, onPlannedChange: (e) => this.updateObaStrike(o.id, parseInt(e.target.value) || 1), onRemove: () => this.removeObaStrike(o.id) })),
+      onAddStrike: () => this.addObaStrike(),
+      airSupportA: s.advanced.airSupport.A, onAirSupportAChange: (e) => this.setAirSupport('A', e.target.value),
+      airSupportB: s.advanced.airSupport.B, onAirSupportBChange: (e) => this.setAirSupport('B', e.target.value),
+      mapTableRows: s.advanced.mapTable.map(m => ({
+        id: m.id, mapId: m.mapId, mapOptions: this.MAPS, onMapChange: (e) => this.updateMapTableRow(m.id, { mapId: e.target.value }),
+        rotation: m.rotation,
+        rotationOptions: [{ value: '0', label: 'No rotation' }, { value: '90', label: 'Rotate 90° right' }, { value: '-90', label: 'Rotate 90° left' }],
+        onRotationChange: (e) => this.updateMapTableRow(m.id, { rotation: e.target.value }),
+        onRemove: () => this.removeMapTableRow(m.id),
+      })),
+      onAddMapRow: () => this.addMapTableRow(),
+      overlayRows: this.OVERLAYS.map(name => ({ name, checked: s.advanced.overlays.includes(name), onToggle: () => this.toggleOverlay(name) })),
+    };
+
+    return {
+      section: s.section, sectionLabel: SECTION_LABELS[s.section] || s.section,
+      isInfo: s.section === 'info', isMap: s.section === 'map', isForces: s.section === 'forces',
+      isReinf: s.section === 'reinf', isVictory: s.section === 'victory', isAdvanced: s.section === 'advanced',
+      navItems, onExport: () => this.exportMission(), missionTitle: s.info.title,
+      info, map, forces, reinforcements, victory, advanced,
+    };
+  }
+}
+
+</script>
+</body>
+</html>

@@ -9,20 +9,21 @@
  * needed — this is the programmatic mapping the art flows through.
  */
 import type { Hex, HexId, TerrainId } from '../engine/types';
+import { terrainArtVariantUrl } from './terrainArtVariants';
 
 /** Master switch: set to false to fall back to flat terrain colors. */
 export const USE_HEX_ART = true;
 
 /** Default artwork per terrain type (our own original tiles). */
 export const TERRAIN_ART: Record<TerrainId, string> = {
-  open: '/assets/terrain/open.svg',
-  road: '/assets/terrain/road.svg',
+  open: '/assets/terrain/open.png',
+  road: '/assets/terrain/road.png',
   plowed: '/assets/terrain/plowed.svg',
   water: '/assets/terrain/water.svg',
-  woodsLight: '/assets/terrain/woodsLight.svg',
-  woodsHeavy: '/assets/terrain/woodsHeavy.svg',
-  buildingWood: '/assets/terrain/buildingWood.svg',
-  buildingStone: '/assets/terrain/buildingStone.svg',
+  woodsLight: '/assets/terrain/lightwoodsv2.png',
+  woodsHeavy: '/assets/terrain/woodsHeavyv2.png',
+  buildingWood: '/assets/terrain/buildingWood.png',
+  buildingStone: '/assets/terrain/buildingStone.png',
 };
 
 /**
@@ -32,8 +33,13 @@ export const TERRAIN_ART: Record<TerrainId, string> = {
  */
 export const HEX_ART_OVERRIDES: Record<HexId, string> = {};
 
-/** Resolve the art URL for a hex: per-hex override wins, else terrain default. */
+/**
+ * Resolve the art URL for a hex: a Map-Editor-authored `hex.art` variant wins
+ * first (see `data/terrainArtVariants.ts`), then a hand-pinned per-hex
+ * override, then the plain terrain default.
+ */
 export function artForHex(hex: Hex): string | null {
   if (!USE_HEX_ART) return null;
-  return HEX_ART_OVERRIDES[hex.id] ?? TERRAIN_ART[hex.terrain] ?? null;
+  const variant = hex.art ? terrainArtVariantUrl(hex.art) : undefined;
+  return variant ?? HEX_ART_OVERRIDES[hex.id] ?? TERRAIN_ART[hex.terrain] ?? null;
 }

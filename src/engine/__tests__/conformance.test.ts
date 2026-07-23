@@ -8,12 +8,12 @@ import { describe, expect, it } from 'vitest';
 import { reduce } from '../reducer';
 import { legalActions } from '../actions';
 import { initGame } from '../state';
-import { otherSide } from '../victory';
-import { FIREFIGHT_1 } from '../../data/firefights/firefight1';
+import { otherSide, vpForRound, vpPerKillFor } from '../victory';
+import { MISSION_1 } from '../../data/missions/mission1';
 import type { Action, GameState } from '../types';
 
 const ORDER: Action['type'][] = [
-  'CLOSE_COMBAT', 'FIRE', 'MOVE', 'ACTIVATE_UNIT', 'RALLY', 'PIVOT', 'MARK_SPENT', 'STALL', 'PASS',
+  'ENTER', 'CLOSE_COMBAT', 'FIRE', 'MOVE', 'RALLY', 'PIVOT', 'STALL', 'PASS',
 ];
 
 function pick(state: GameState): Action {
@@ -26,7 +26,7 @@ function pick(state: GameState): Action {
 }
 
 function play(seed: number) {
-  let state = initGame({ ...FIREFIGHT_1, seed });
+  let state = initGame({ ...MISSION_1, seed });
   let steps = 0;
   while (state.phase === 'playing' && steps < 6000) {
     const pre = state;
@@ -37,24 +37,33 @@ function play(seed: number) {
     expect(res.events.length === 1 && res.events[0]?.type === 'illegal').toBe(false);
     const post = res.state;
 
-    expect(post.players.A.ap).toBeGreaterThanOrEqual(0);
-    expect(post.players.B.ap).toBeGreaterThanOrEqual(0);
     expect(post.players.A.capCurrent).toBeGreaterThanOrEqual(0);
     expect(post.players.B.capCurrent).toBeGreaterThanOrEqual(0);
     for (const u of Object.values(post.units)) expect(u.hitMarkers.length).toBeLessThanOrEqual(1);
 
-    // VP changes only from kills during play (§2.5.1).
+    // VP changes from kills (§9.1) plus end-of-Round control awards (§9.0).
     const destroyed = Object.keys(pre.units).filter((id) => !post.units[id]);
     let vpToA = 0;
     let vpToB = 0;
     for (const id of destroyed) {
       const u = pre.units[id]!;
-      const vp = pre.templates[u.templateId]!.vp;
-      if (otherSide(u.side) === 'A') vpToA += vp;
+      const opp = otherSide(u.side);
+      const vp = vpPerKillFor(pre.victory, opp) ?? pre.templates[u.templateId]!.vp;
+      if (opp === 'A') vpToA += vp;
       else vpToB += vp;
+    }
+    const roundEnded = action.type === 'PASS' && (post.round > pre.round || post.phase === 'gameOver');
+    if (roundEnded) {
+      for (const vh of post.victory.victoryHexes) {
+        const ctrl = post.hexes[vh.hexId]?.features.control;
+        const vp = vpForRound(vh, pre.round);
+        if (ctrl === 'A') vpToA += vp;
+        else if (ctrl === 'B') vpToB += vp;
+      }
     }
     expect(post.players.A.vp - pre.players.A.vp).toBe(vpToA);
     expect(post.players.B.vp - pre.players.B.vp).toBe(vpToB);
+    expect(post.vpMarker).not.toBe(0); // §9.2 no-tie: always a leader
 
     // A unit sharing a hex with an enemy may not fire OUT of it (§7.7.3).
     for (const u of Object.values(pre.units)) {

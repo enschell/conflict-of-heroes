@@ -23,7 +23,7 @@ export const TERRAIN: Record<TerrainId, TerrainDef> = {
     blocksLOS: true,
     isCover: true,
   },
-  plowed: { id: 'plowed', name: 'Plowed Field', apCost: 0, dm: 0, blocksLOS: false, isCover: false },
+  plowed: { id: 'plowed', name: 'Plowed Field', apCost: 0, dm: 0, blocksLOS: true, isCover: true },
   water: {
     id: 'water',
     name: 'Water',

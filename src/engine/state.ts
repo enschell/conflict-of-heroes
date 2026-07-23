@@ -1,8 +1,9 @@
 /**
  * Game state construction and (de)serialization.
  */
-import { makeFootHitPile } from '../data/hitMarkers';
-import { makeRng } from './rng';
+import { makeArmoredHitPile, makeFootHitPile } from '../data/hitMarkers';
+import { buildBattleDeck } from './cards';
+import { makeRng, shuffle } from './rng';
 import { startRound } from './turn';
 import type {
   FirefightDef,
@@ -10,12 +11,15 @@ import type {
   Hex,
   HitPile,
   PlayerState,
+  ReinforcementUnit,
+  SetupPoolUnit,
   SideId,
   Unit,
   UnitTemplate,
 } from './types';
 
-function buildHex(def: FirefightDef['hexes'][number]): Hex {
+/** Authored `MapHexDef` -> runtime `Hex` (also reused by the Mission Editor's board preview). */
+export function buildHex(def: FirefightDef['hexes'][number]): Hex {
   const walls = new Array(6).fill(false) as boolean[];
   for (const w of def.walls ?? []) walls[w] = true;
   const parts = def.id.split(',');
@@ -23,11 +27,18 @@ function buildHex(def: FirefightDef['hexes'][number]): Hex {
     id: def.id,
     coord: { q: Number(parts[0]), r: Number(parts[1]) },
     label: def.label,
+    boardNumber: def.boardNumber,
+    mapNumber: def.mapNumber,
+    edgeCut: def.edgeCut,
     terrain: def.terrain,
+    art: def.art,
     elevation: def.elevation ?? 0,
     walls,
     road: def.road ?? false,
-    features: {},
+    features: {
+      obstacle: def.obstacle ? { ...def.obstacle, destroyed: false } : undefined,
+      fortification: def.fortification ? { ...def.fortification, destroyed: false } : undefined,
+    },
   };
 }
 
@@ -38,10 +49,10 @@ function buildPlayer(side: SideId, def: FirefightDef): PlayerState {
     capStart: def.caps[side],
     capCurrent: def.caps[side],
     unitLosses: 0,
-    vp: 0,
-    hand: [],
-    activatedUnitId: null,
-    ap: 0,
+    vp: def.startVp?.[side] ?? 0, // §9.2 starting VP (e.g. Mission 1: Soviets 1)
+    // §8.2/§8.3: Weapon/Veteran cards this side starts the Mission already
+    // holding (Mission-issued, not drawn — only Battle Cards are drawn per-Round).
+    hand: [...(def.cardConfig?.initialHand?.[side] ?? [])],
     passed: false,
   };
 }
@@ -61,36 +72,128 @@ export function initGame(def: FirefightDef): GameState {
       hexId: p.hexId,
       facing: p.facing,
       status: 'fresh',
+      stressed: false,
       hitMarkers: [],
       assignedWeaponCards: [],
+      // Data-only for now (see Unit.hidden) — carried through, never rendered.
+      hidden: p.hidden || undefined,
     };
   }
 
   const templates: Record<string, UnitTemplate> = {};
   for (const t of def.templates) templates[t.id] = t;
 
+  // §4.12: Units that begin off the Map, waiting for their Mission-specified
+  // Round/entry Hexes.
+  const reinforcements: ReinforcementUnit[] = [];
+  for (const wave of def.reinforcements ?? []) {
+    for (const u of wave.units) {
+      reinforcements.push({
+        id: u.id,
+        side: wave.side,
+        nation: templates[u.templateId]?.nation ?? wave.side,
+        templateId: u.templateId,
+        facing: u.facing,
+        waveId: wave.id,
+        earliestRound: wave.earliestRound,
+        entryHexIds: wave.entryHexIds,
+        entryDescription: wave.entryDescription,
+        hidden: u.hidden || undefined,
+      });
+    }
+  }
+
+  // Pre-Mission Setup phase (Mission-configurable): a pool of Units each side
+  // places onto any empty Hex before Round 1 — empty for every Mission that
+  // doesn't use this, in which case setup is skipped entirely (unchanged
+  // behavior from before this feature existed).
+  const setupPool: SetupPoolUnit[] = (def.setupForces ?? []).map((u) => ({
+    id: u.id,
+    side: u.side,
+    nation: templates[u.templateId]?.nation ?? u.side,
+    templateId: u.templateId,
+    facing: u.facing,
+    hidden: u.hidden || undefined,
+    // A Mines token (§17.10) — placed as a hidden hex obstacle, not a Unit.
+    mine: u.mine,
+  }));
+
   const footPile: HitPile = makeFootHitPile();
 
+  const firstInitiativeSide: SideId = def.firstInitiative ?? 'A';
+  const players = { A: buildPlayer('A', def), B: buildPlayer('B', def) };
+  // No-tie marker (§9.2): start from the starting-VP difference; if even, the
+  // side WITHOUT Round-1 Initiative holds the opening 1-VP advantage.
+  const startNet = players.A.vp - players.B.vp;
+  const vpMarker = startNet !== 0 ? startNet : firstInitiativeSide === 'A' ? -1 : 1;
+
+  // §8.1: the Mission's single, shared, seeded Battle Card Draw Deck — built
+  // and shuffled here (before `state.rng` is fixed) so the shuffle itself is
+  // part of the deterministic seed, same as every other roll.
+  let rng = makeRng(def.seed);
+  let cardDeck: GameState['cardDeck'];
+  if (def.cardConfig) {
+    const unshuffled = buildBattleDeck(def.cardConfig.battleCardIds);
+    const shuffled = shuffle(rng, unshuffled);
+    rng = shuffled.rng;
+    cardDeck = { drawPile: shuffled.value, discardPile: [] };
+  }
+
   const state: GameState = {
-    rng: makeRng(def.seed),
+    rng,
     phase: 'setup',
     round: 1,
     roundsTotal: def.roundsTotal,
-    initiativeSide: 'A',
-    currentSide: 'A',
+    initiativeSide: firstInitiativeSide,
+    firstInitiativeSide,
+    vpMarker,
+    currentSide: firstInitiativeSide,
     consecutivePasses: 0,
-    players: { A: buildPlayer('A', def), B: buildPlayer('B', def) },
+    players,
     units,
     templates,
     hexes,
-    // Vehicle markers are a later module; reuse the foot pile shape for now.
-    hitPiles: { foot: footPile, vehicle: makeFootHitPile() },
-    firefightId: def.id,
-    victory: { victoryHexes: def.victoryHexes },
+    // Soft Target (foot) and Armored Target (vehicle) draw piles (§7.5, §15.13).
+    hitPiles: { foot: footPile, vehicle: makeArmoredHitPile() },
+    reinforcements,
+    exitZones: def.exitZones ?? [],
+    missionId: def.id,
+    mapOverlays: def.mapOverlays ?? {},
+    mapRotations: def.mapRotations ?? {},
+    setupPool,
+    // The authored "goes first" side, UNLESS it has nothing to place (then
+    // skip straight to whichever side actually has pool Units) — a side with
+    // an empty pool has no legal SETUP_PLACE at all, so it can never be left
+    // "current" with nothing to do.
+    setupSide: (() => {
+      const first = def.setupFirstSide ?? 'A';
+      if (setupPool.some((u) => u.side === first)) return first;
+      const other: SideId = first === 'A' ? 'B' : 'A';
+      return setupPool.some((u) => u.side === other) ? other : undefined;
+    })(),
+    setupInstructions: def.setupInstructions,
+    victory: {
+      victoryHexes: def.victoryHexes,
+      vpPerKill: def.vpPerKill,
+      unitKillVp: def.unitKillVp,
+      vpPerSurvivor: def.vpPerSurvivor,
+    },
     log: [],
+    cardDeck,
+    drawPerRound: def.cardConfig?.drawPerRound,
+    obaAllowedRounds: def.cardConfig?.obaAllowedRounds,
+    missionCardText: def.missionCardText,
   };
 
-  // Set victory-hex control to the initial sole occupier, then start round 1.
+  // Set victory-hex control: the Mission-authored starting owner is the
+  // default, then the initial sole occupier (§9.1) overrides it if a Unit is
+  // actually present — then start round 1.
+  for (const vh of state.victory.victoryHexes) {
+    if (vh.control) {
+      const hex = state.hexes[vh.hexId];
+      if (hex) hex.features.control = vh.control;
+    }
+  }
   for (const vh of state.victory.victoryHexes) {
     const occ = Object.values(state.units).filter((u) => u.hexId === vh.hexId);
     const sides = new Set(occ.map((u) => u.side));
@@ -100,7 +203,10 @@ export function initGame(def: FirefightDef): GameState {
     }
   }
 
-  startRound(state);
+  // A Mission with a real setup phase leaves `phase: 'setup'`/`setupSide` in
+  // place instead — `reducer.ts`'s `doSetupPlace` calls `startRound` itself
+  // once both sides have finished placing their pool.
+  if (!state.setupSide) startRound(state);
   return state;
 }
 

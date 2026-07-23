@@ -4,7 +4,7 @@
  * A unit holds at most one hit marker; a second hit destroys it. Effective
  * stats = template stats modified by the current hit marker.
  */
-import { FOOT_HIT_MARKERS } from '../data/hitMarkers';
+import { HIT_MARKERS } from '../data/hitMarkers';
 import { randInt } from './rng';
 import type {
   DRColor,
@@ -51,7 +51,7 @@ export function effectiveStats(state: GameState, unit: Unit): EffectiveStats {
   };
 
   for (const hitType of unit.hitMarkers) {
-    const def = FOOT_HIT_MARKERS[hitType];
+    const def = HIT_MARKERS[hitType];
     eff.fp.red += def.fpRedDelta ?? 0;
     eff.fp.blue += def.fpBlueDelta ?? 0;
     eff.dr.front += def.frontDrDelta ?? 0;
@@ -99,4 +99,49 @@ export function drawHit(
 /** Return a unit's hit marker(s) back to the foot pile. */
 export function returnHitToPile(pile: HitPile, type: HitType): HitPile {
   return { ...pile, [type]: pile[type] + 1 };
+}
+
+/**
+ * What a Hit does to `target` (§7.4/§7.5): destroyed outright (critical, or it
+ * already carried a marker), destroyed by drawing a "killOnDraw" marker (e.g.
+ * Destroyed/aDestroyed itself), or marked with the drawn Hit Marker. Pure — the
+ * caller applies the pile/RNG/log side effects. Shared by the reducer (which
+ * commits it) and the dice-roller UI (which previews it before committing,
+ * from the exact same deterministic RNG state, so the two can never disagree).
+ */
+export type HitOutcome =
+  | { kind: 'destroyed-immediate' }
+  | { kind: 'destroyed-drawn'; hitType: HitType }
+  | { kind: 'marked'; hitType: HitType };
+
+export interface ResolvedHit {
+  rng: RngState;
+  /** The pile after the draw (only set when a draw actually happened). */
+  pile?: HitPile;
+  armored: boolean;
+  outcome: HitOutcome;
+}
+
+export function resolveHit(
+  state: GameState,
+  target: Unit,
+  critical: boolean,
+  fpColor: DRColor,
+  rng: RngState,
+): ResolvedHit {
+  const armored = fpColor === 'blue';
+  if (critical || target.hitMarkers.length > 0) {
+    return { rng, armored, outcome: { kind: 'destroyed-immediate' } };
+  }
+  const pile0 = armored ? state.hitPiles.vehicle : state.hitPiles.foot;
+  const draw = drawHit(rng, pile0);
+  const def = HIT_MARKERS[draw.type];
+  return {
+    rng: draw.rng,
+    pile: draw.pile,
+    armored,
+    outcome: def.killOnDraw
+      ? { kind: 'destroyed-drawn', hitType: draw.type }
+      : { kind: 'marked', hitType: draw.type },
+  };
 }

@@ -1,20 +1,27 @@
 /**
- * Axial hex-grid math (pointy-top). Pure, no state.
+ * Axial hex-grid math (flat-top — see docs/hex_board_spec/README.md, the
+ * authoritative board geometry). Pure, no state.
  *
  * Facing is an index 0..5 into AXIAL_DIRECTIONS. A unit's facing points toward
  * one of its six neighbours; the front arc is that neighbour's direction plus
  * the two adjacent directions (a 180° forward arc — rulebook §5.1, §6.1).
+ *
+ * The six axial neighbour deltas below are orientation-agnostic (the same
+ * six vectors work for either a pointy-top or flat-top rendering — only the
+ * pixel projection in `axialToPixel` encodes which one). Direction labels in
+ * the comments are the *flat-top* compass reading (a flat-top hex has no
+ * direct E/W neighbour — its two horizontal edges are N/S).
  */
 import type { Axial, Facing, HexId } from './types';
 
-/** Pointy-top neighbour offsets, indexed 0..5. */
+/** Flat-top neighbour offsets, indexed 0..5. */
 export const AXIAL_DIRECTIONS: readonly Axial[] = [
-  { q: 1, r: 0 }, // 0  E
+  { q: 1, r: 0 }, // 0  SE
   { q: 1, r: -1 }, // 1  NE
-  { q: 0, r: -1 }, // 2  NW
-  { q: -1, r: 0 }, // 3  W
+  { q: 0, r: -1 }, // 2  N
+  { q: -1, r: 0 }, // 3  NW
   { q: -1, r: 1 }, // 4  SW
-  { q: 0, r: 1 }, // 5  SE
+  { q: 0, r: 1 }, // 5  S
 ];
 
 export function hexId(q: number, r: number): HexId {
@@ -88,9 +95,9 @@ export interface Pixel {
   y: number;
 }
 
-/** Pointy-top axial → pixel (unit size). Used for arc-of-fire geometry. */
+/** Flat-top axial → pixel (unit size; R=1). Used for board rendering and arc-of-fire geometry. */
 export function axialToPixel(a: Axial): Pixel {
-  return { x: Math.sqrt(3) * (a.q + a.r / 2), y: 1.5 * a.r };
+  return { x: 1.5 * a.q, y: Math.sqrt(3) * (a.r + a.q / 2) };
 }
 
 // --- line drawing (for LOS) ------------------------------------------------

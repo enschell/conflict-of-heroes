@@ -28,5 +28,5 @@
       "@ui/*": ["src/ui/*"]
     }
   },
-  "include": ["src"]
+  "include": ["src", "server"]
 }

@@ -48,3 +48,39 @@ export function roll2d6(rng: RngState): {
   const b = rollD6(a.rng);
   return { value: a.value + b.value, dice: [a.value, b.value], rng: b.rng };
 }
+
+/**
+ * The Spent Die (v3 §2.5): a weighted d10 whose ten faces carry the values
+ * [1, 1, 2, 3, 3, 4, 5, 5, 6, 7]. Each face is equally likely; the weighting
+ * comes from repeated values, which is what makes the Spent-chance curve land
+ * on the 20/30/50/60/80/90/100% table in `rules/03`.
+ */
+export const SPENT_DIE_FACES: readonly number[] = [
+  1, 1, 2, 3, 3, 4, 5, 5, 6, 7,
+];
+
+/** Roll the weighted Spent Die: pick one of the ten faces uniformly (§2.5). */
+export function rollSpentDie(rng: RngState): { value: number; rng: RngState } {
+  const { value: index, rng: next } = randInt(
+    rng,
+    0,
+    SPENT_DIE_FACES.length - 1,
+  );
+  return { value: SPENT_DIE_FACES[index]!, rng: next };
+}
+
+/**
+ * Fisher-Yates shuffle over the seeded RNG (§8.1: the Battle Card Draw Deck is
+ * shuffled once at Mission start). Pure — returns a new array, never mutates
+ * `arr`, and returns the advanced RNG alongside it like every other roll here.
+ */
+export function shuffle<T>(rng: RngState, arr: readonly T[]): { value: T[]; rng: RngState } {
+  const out = [...arr];
+  let cur = rng;
+  for (let i = out.length - 1; i > 0; i--) {
+    const { value: j, rng: next } = randInt(cur, 0, i);
+    cur = next;
+    [out[i], out[j]] = [out[j]!, out[i]!];
+  }
+  return { value: out, rng: cur };
+}

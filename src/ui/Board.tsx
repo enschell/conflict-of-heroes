@@ -1,43 +1,206 @@
 /**
- * The SVG hex board — the real visual model (true pointy-top hexagons). Renders
- * per-hex artwork clipped into the hexagon, terrain/roads/walls/objectives, the
- * selected unit's legal move/fire highlights, the LOS overlay (hold Shift to see
- * LOS from the hovered hex), and all unit counters (stacked units fanned out).
- * Hovering a targetable enemy shows a fire-odds popup; Ctrl+click a stacked hex
- * opens a unit picker. Clicks/hover route through the store.
+ * The SVG hex board — the real visual model (flat-top hexagons, per
+ * docs/hex_board_spec/README.md). Renders per-hex artwork clipped into the
+ * hexagon, terrain/roads/walls/objectives, board-edge half/quarter-hexes and
+ * coordinate labels/board numbers, the selected unit's legal move/fire
+ * highlights, the LOS overlay (hold Shift to see LOS from the hovered hex),
+ * and all unit counters (stacked units fanned out). Hovering a targetable
+ * enemy shows a fire-odds popup; Ctrl+click a stacked hex opens a unit
+ * picker. Clicks/hover route through the store.
  */
-import { attackContext, legalActionsForUnit, neighbor, parseHexId, idOf, visibleHexesFrom } from '../engine';
-import type { Facing, Unit } from '../engine/types';
+import { useEffect, useRef, useState } from 'react';
+import { attackContext, directionTo, distance, effectiveStats, fortificationAt, legalActionsForUnit, legalEntryHexes, legalSetupHexes, moveCost, neighbor, neighbors, parseHexId, idOf, planVehicleMove, templateOf, visibleHexesFrom } from '../engine';
+import type { Action, Facing, FortificationKind, SideId, Unit } from '../engine/types';
 import { useGame } from '../state/store';
 import { artForHex } from '../data/hexArt';
-import { fireOdds, pct } from './odds';
+import { NATIONS } from '../data/nations';
+import { fireOdds, isHopelessShot, pct } from './odds';
 import {
   EDGE_CORNERS,
   HEX_SIZE,
+  clipHexPolygon,
+  computeDisplayRotationCluster,
   computeLayout,
+  computeMapOverlayGroups,
+  fringeHexes,
   hexCenter,
   hexCorners,
+  playableBounds,
   pointsAttr,
+  polygonCentroid,
+  polygonTopY,
 } from './hexgeo';
+import { playObaStrike } from './sound';
 import { HEX_STROKE, ROAD_STROKE, TERRAIN_FILL, WALL_STROKE } from './theme';
 import { UnitCounter } from './UnitCounter';
 import { UnitPicker } from './UnitPicker';
 
+/** Rotate point `p` by `deg` degrees around `pivot` — plain 2D math (not an SVG transform). */
+function rotateAround(p: { x: number; y: number }, pivot: { x: number; y: number }, deg: number): { x: number; y: number } {
+  const rad = (deg * Math.PI) / 180;
+  const cos = Math.cos(rad);
+  const sin = Math.sin(rad);
+  const dx = p.x - pivot.x;
+  const dy = p.y - pivot.y;
+  return { x: pivot.x + dx * cos - dy * sin, y: pivot.y + dx * sin + dy * cos };
+}
+
 export function Board() {
   const game = useGame((s) => s.game);
   const selectedUnitId = useGame((s) => s.selectedUnitId);
+  const groupSel = useGame((s) => s.groupSel);
+  const groupMoveQueue = useGame((s) => s.groupMoveQueue);
+  const movePath = useGame((s) => s.movePath);
+  const placingReinforcementQueue = useGame((s) => s.placingReinforcementQueue);
+  const placingReinforcementFacing = useGame((s) => s.placingReinforcementFacing);
+  const placingReinforcementDone = useGame((s) => s.placingReinforcementDone);
+  const armedSetupUnitId = useGame((s) => s.armedSetupUnitId);
   const losMode = useGame((s) => s.losMode);
   const losSource = useGame((s) => s.losSource);
   const shiftHeld = useGame((s) => s.shiftHeld);
+  const pivotPicker = useGame((s) => s.pivotPicker);
   const hover = useGame((s) => s.hover);
   const picker = useGame((s) => s.picker);
   const setHover = useGame((s) => s.setHover);
   const hexClick = useGame((s) => s.hexClick);
   const closePicker = useGame((s) => s.closePicker);
+  const muted = useGame((s) => s.muted);
+  const turnBanner = useGame((s) => s.turnBanner);
+
+  // §13.6-13.9 OBA Strike landing: an explosion animation + incoming-shell/
+  // boom sound + a callout above the board, triggered by watching `game.log`
+  // for a newly-appended 'oba' entry carrying `hexIds` (the blast radius) —
+  // see `cards.ts`'s `applyResolvedObaStrike`. Watching the log directly
+  // (rather than hooking into `store.ts`'s `applyReduceResult`, which only
+  // fires for the LOCAL dispatch) means this works the same way for hotseat
+  // and an online STATE broadcast alike, since both grow the same
+  // `state.log`. Seeded to the CURRENT log length on mount (not 0) so
+  // loading a saved mid-game state doesn't replay every past Strike still
+  // sitting in its history.
+  //
+  // A round transition ALWAYS also opens `TurnBanner.tsx`'s blocking "Start
+  // of turn N" modal (`GameState.round` only ever advances via `startRound`,
+  // which is also the only place an OBA Strike resolves) — firing the
+  // sound/animation immediately would play out entirely UNDER that opaque
+  // backdrop, unseen and easy to miss (confirmed live: the sound was heard
+  // but the explosion never visible). So detection and playback are two
+  // separate effects: the first queues every newly-seen Strike's blast data
+  // (never dropped); the second drains that queue only once `turnBanner` is
+  // no longer blocking the view (the player has clicked OK), one Strike at a
+  // time with a stagger if more than one is queued.
+  const lastObaLogLenRef = useRef(game?.log.length ?? 0);
+  const pendingObaStrikesRef = useRef<{ hexIds: string[]; side: SideId }[]>([]);
+  const [obaBlast, setObaBlast] = useState<{ hexIds: string[]; key: number } | null>(null);
+  const [obaCallout, setObaCallout] = useState<{ side: SideId; key: number } | null>(null);
+
+  useEffect(() => {
+    const log = game?.log;
+    if (!log) return;
+    const prevLen = lastObaLogLenRef.current;
+    lastObaLogLenRef.current = log.length;
+    if (log.length <= prevLen) return; // shrank (undo) or unchanged
+    for (const e of log.slice(prevLen)) {
+      if (e.type === 'oba' && e.hexIds?.length && e.side) {
+        pendingObaStrikesRef.current.push({ hexIds: e.hexIds, side: e.side });
+      }
+    }
+  }, [game?.log]);
+
+  useEffect(() => {
+    if (turnBanner) return undefined; // still showing "Start of turn N" — wait for the player's OK
+    const queued = pendingObaStrikesRef.current;
+    if (queued.length === 0) return undefined;
+    pendingObaStrikesRef.current = [];
+    const timers: ReturnType<typeof setTimeout>[] = [];
+    const STAGGER_MS = 1700; // keeps back-to-back Strikes from visually/audibly colliding
+    queued.forEach(({ hexIds, side }, i) => {
+      timers.push(
+        setTimeout(() => {
+          playObaStrike(muted);
+          const key = Date.now();
+          setObaBlast({ hexIds, key });
+          setObaCallout({ side, key });
+          timers.push(setTimeout(() => setObaBlast(null), 1400));
+          timers.push(setTimeout(() => setObaCallout(null), 2400));
+        }, i * STAGGER_MS),
+      );
+    });
+    return () => timers.forEach(clearTimeout);
+  }, [turnBanner, muted]);
+
+  // Ctrl+wheel zooms (centered on the cursor); plain wheel pans the map
+  // vertically instead. `zoom`/`pan` directly drive the <svg>'s own
+  // `viewBox` below (zoom=1, pan={0,0} is exactly today's fixed viewBox — a
+  // no-op for anyone who never scrolls). A plain `onWheel` JSX prop can't
+  // reliably `preventDefault()` (React attaches wheel listeners as passive
+  // by default), so this attaches a real, non-passive native listener once
+  // via a ref instead — `preventDefault()` on every wheel event, before the
+  // Ctrl branch, also suppresses the browser's own native Ctrl+wheel
+  // page-zoom, not just page scroll. `viewRef`/`layoutRef` carry the latest
+  // zoom/pan/layout-size into that stable listener without needing to
+  // reattach it every render (and without calling `setPan` *from inside*
+  // `setZoom`'s updater function, which — with `<StrictMode>`, main.tsx —
+  // gets double-invoked to catch exactly this kind of impurity; caught live:
+  // the double-invoke compounded the pan math and the point under the
+  // cursor visibly drifted instead of staying put. Reading/writing plain
+  // refs and calling `setZoom`/`setPan` with already-computed values instead
+  // of updater functions sidesteps that entirely).
+  const svgRef = useRef<SVGSVGElement>(null);
+  const [zoom, setZoom] = useState(1);
+  const [pan, setPan] = useState({ x: 0, y: 0 });
+  const layoutRef = useRef({ width: 0, height: 0 });
+  const viewRef = useRef({ zoom, pan });
+  const MIN_ZOOM = 0.5;
+  const MAX_ZOOM = 4;
+  useEffect(() => {
+    const svg = svgRef.current;
+    if (!svg) return;
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      const { zoom: prevZoom, pan: prevPan } = viewRef.current;
+
+      if (!e.ctrlKey) {
+        // Plain wheel: pan vertically only. Divide by zoom so the same
+        // physical scroll notch moves a consistent on-screen distance
+        // regardless of how zoomed in the view currently is.
+        setPan({ x: prevPan.x, y: prevPan.y + e.deltaY / prevZoom });
+        return;
+      }
+
+      const pt = svg.createSVGPoint();
+      pt.x = e.clientX;
+      pt.y = e.clientY;
+      const ctm = svg.getScreenCTM();
+      if (!ctm) return;
+      // Cursor position in the CURRENT viewBox's user-space coordinates —
+      // this is the point that must stay fixed under the cursor.
+      const cursor = pt.matrixTransform(ctm.inverse());
+      const factor = e.deltaY < 0 ? 1.15 : 1 / 1.15; // scroll up = zoom in
+      const nextZoom = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, prevZoom * factor));
+      if (nextZoom === prevZoom) return;
+      const { width, height } = layoutRef.current;
+      const prevViewW = width / prevZoom;
+      const prevViewH = height / prevZoom;
+      const fracX = (cursor.x - prevPan.x) / prevViewW;
+      const fracY = (cursor.y - prevPan.y) / prevViewH;
+      const nextViewW = width / nextZoom;
+      const nextViewH = height / nextZoom;
+      const nextPan = { x: cursor.x - fracX * nextViewW, y: cursor.y - fracY * nextViewH };
+      setZoom(nextZoom);
+      setPan(nextPan);
+    };
+    svg.addEventListener('wheel', onWheel, { passive: false });
+    return () => svg.removeEventListener('wheel', onWheel);
+  }, []);
 
   if (!game) return null;
 
-  const layout = computeLayout(game, HEX_SIZE);
+  // Non-playable edge hexes, drawn (clipped) as the board's half-hex border.
+  const fringe = fringeHexes(game);
+  const layout = computeLayout(game, HEX_SIZE, HEX_SIZE * 0.7, fringe);
+  layoutRef.current = { width: layout.width, height: layout.height };
+  viewRef.current = { zoom, pan };
+  const bounds = playableBounds(game, HEX_SIZE); // clip edge for the fringe
   const clipPoints = pointsAttr(hexCorners({ x: 0, y: 0 }));
   const artW = Math.sqrt(3) * HEX_SIZE;
 
@@ -47,6 +210,17 @@ export function Board() {
   // Selected unit's legal move/fire highlights (hidden while showing LOS).
   const moveTargets = new Set<string>();
   const fireTargets = new Set<string>();
+  // Mortar Indirect Attack (§13.2) / Fire Smoke (§14.1) target Hexes.
+  const indirectFireTargets = new Set<string>();
+  const smokeTargets = new Set<string>();
+  // Load (§15.7) / Unload (§15.9) hexes — highlighted alongside Move so a
+  // player can see where clicking will load onto or unload from a Vehicle.
+  const transportTargets = new Set<string>();
+  // Hidden Move (§11.3-11.6) destinations, and Recon by Fire (§11.7) target
+  // Hexes — both hex-targeted like Move/Fire Smoke, so they get the same
+  // highlight-set treatment rather than an Inspector button list.
+  const hiddenMoveTargets = new Set<string>();
+  const reconByFireTargets = new Set<string>();
   if (!losActive && selectedUnitId && game.units[selectedUnitId]) {
     for (const a of legalActionsForUnit(game, selectedUnitId)) {
       if (a.type === 'MOVE') moveTargets.add(a.toHexId);
@@ -54,6 +228,122 @@ export function Board() {
         const t = game.units[a.targetId];
         if (t) fireTargets.add(t.hexId);
       }
+      if (a.type === 'INDIRECT_FIRE') indirectFireTargets.add(a.targetHexId);
+      if (a.type === 'FIRE_SMOKE') smokeTargets.add(a.targetHexId);
+      if (a.type === 'HIDDEN_MOVE') hiddenMoveTargets.add(a.toHexId);
+      if (a.type === 'RECON_BY_FIRE') reconByFireTargets.add(a.targetHexId);
+      if (a.type === 'LOAD') {
+        const v = game.units[a.vehicleId];
+        if (v) transportTargets.add(v.hexId);
+      }
+      // Unload hexes render green like Move (the carried Unit has no MOVE
+      // actions of its own, so this is the only "where can I go" highlight it
+      // gets) — clicking one asks for confirmation rather than unloading
+      // silently (store.ts's hexClick).
+      if (a.type === 'UNLOAD') moveTargets.add(a.toHexId);
+    }
+  }
+
+  // General Group Move (§10.2/§10.3): the front-of-queue member's own legal
+  // destination Hexes, highlighted the same green as a normal single-Unit
+  // Move — reuses `moveTargets` directly rather than a parallel Set, so the
+  // rendering below needs no changes at all.
+  if (!losActive && groupMoveQueue.length > 0) {
+    const activeUnit = game.units[groupMoveQueue[0]!];
+    if (activeUnit) {
+      for (const n of neighbors(parseHexId(activeUnit.hexId))) {
+        const nid = idOf(n);
+        if (game.hexes[nid] && moveCost(game, activeUnit, nid).ap != null) moveTargets.add(nid);
+      }
+    }
+  }
+
+  // Vehicle Bonus-Move path (§15.2): the chosen steps + the legal next steps.
+  const pathSet = new Set(movePath);
+  const nextSteps = new Set<string>();
+  if (!losActive && selectedUnitId && game.units[selectedUnitId]) {
+    const sel = game.units[selectedUnitId]!;
+    if (templateOf(game, sel).kind === 'vehicle') {
+      const from = movePath.length ? movePath[movePath.length - 1]! : sel.hexId;
+      for (const n of neighbors(parseHexId(from))) {
+        const nid = idOf(n);
+        if (!game.hexes[nid] || pathSet.has(nid)) continue;
+        if (planVehicleMove(game, sel, [...movePath, nid]).ap != null) nextSteps.add(nid);
+      }
+    }
+  }
+
+  // Manual/Group reinforcement placement (§4.12): the front-of-queue Unit's
+  // legal entry Hexes (hidden once it has a Hex and is awaiting a facing —
+  // the facing highlight below takes over at that point).
+  const entryTargets = new Set<string>();
+  if (!placingReinforcementFacing && placingReinforcementQueue.length > 0) {
+    const r = game.reinforcements.find((x) => x.id === placingReinforcementQueue[0]);
+    if (r) {
+      // §4.12 Group entry: once at least one Unit has a Hex, only offer
+      // Hexes connected to what's already placed — the reducer's own
+      // `hexesConnected` check would reject anything else, so restrict the
+      // picker up front rather than letting the player pick a scattered Hex
+      // and only find out it's illegal after choosing a facing too.
+      const alreadyPlaced = placingReinforcementDone.map((d) => d.hexId);
+      for (const h of legalEntryHexes(game, r)) {
+        if (
+          alreadyPlaced.length === 0 ||
+          alreadyPlaced.some((p) => p === h || distance(parseHexId(p), parseHexId(h)) <= 1)
+        ) {
+          entryTargets.add(h);
+        }
+      }
+    }
+  }
+  // Pre-Mission Setup phase: an armed Setup Pool Unit's legal (empty) Hexes —
+  // reuses the same purple highlight as reinforcement entry, since visually
+  // it's the identical "click here to place a Unit" affordance.
+  if (game.phase === 'setup' && armedSetupUnitId) {
+    const armedEntry = game.setupPool?.find((u) => u.id === armedSetupUnitId);
+    for (const h of legalSetupHexes(game, !!armedEntry?.mine)) entryTargets.add(h);
+  }
+  // While a just-placed reinforcement Unit awaits its facing choice, keep its
+  // chosen Hex highlighted the same purple — clicking it again keeps the
+  // wave's default facing (store.ts's hexClick).
+  if (placingReinforcementFacing) entryTargets.add(placingReinforcementFacing.hexId);
+
+  // Free facing correction (§4.5/§15.11): the six neighbor Hexes of a Unit
+  // awaiting CHOOSE_FACING, clickable to face that direction (the arrow-button
+  // picker in Inspector.tsx still works too — this is an additional way in).
+  // Also reused for the Pivot picker (P key, §4.6): same blue highlight, but
+  // clicking issues a real (AP-costed) PIVOT instead — see store.ts's
+  // `hexClick`, which branches on `pivotPicker` independently of this render.
+  // And reused a third time for a reinforcement Unit awaiting its placement
+  // facing (`placingReinforcementFacing`) — no live Unit exists yet for that
+  // one, so this works off a bare Hex id rather than a Unit.
+  const facingTargets = new Set<string>();
+  const facingChoiceUnit =
+    selectedUnitId && game.pendingFacingChoices?.includes(selectedUnitId) ? game.units[selectedUnitId] : null;
+  const pivotPickerUnit = pivotPicker && selectedUnitId ? game.units[selectedUnitId] : null;
+  // General Group Move (§10.2/§10.3): the front-of-queue member's own Hex
+  // gets the same floating label as the pickers above, but NOT the blue
+  // neighbor overlay — its legal destinations are already the ordinary green
+  // moveTargets highlight (added below), so a second blue overlay on the
+  // same hexes would just look muddy.
+  const activeGroupMoveUnit = groupMoveQueue.length > 0 ? (game.units[groupMoveQueue[0]!] ?? null) : null;
+  const facingHighlightHex: string | null =
+    placingReinforcementFacing?.hexId ??
+    facingChoiceUnit?.hexId ??
+    pivotPickerUnit?.hexId ??
+    activeGroupMoveUnit?.hexId ??
+    null;
+  const facingHighlightLabel = placingReinforcementFacing
+    ? 'Choose facing'
+    : facingChoiceUnit
+      ? 'Choose facing'
+      : pivotPickerUnit
+        ? 'Pivot (P)'
+        : 'Move Group member';
+  if (facingHighlightHex && !activeGroupMoveUnit) {
+    for (const n of neighbors(parseHexId(facingHighlightHex))) {
+      const nid = idOf(n);
+      if (game.hexes[nid]) facingTargets.add(nid);
     }
   }
 
@@ -63,17 +353,98 @@ export function Board() {
   const objectives = new Map(game.victory.victoryHexes.map((v) => [v.hexId, v.vp]));
   const ids = Object.keys(game.hexes);
 
+  // "Overlay mode" (Map Editor, CLAUDE.md §D): a board authored with a real
+  // gameplay-art image REPLACES per-hex terrain tiles for every hex on it —
+  // terrain type/mechanics are unaffected, only which art renders.
+  const overlayGroups = computeMapOverlayGroups(game.hexes, game.mapOverlays, HEX_SIZE);
+  const overlaidHexIds = new Set(overlayGroups.flatMap((g) => g.hexIds));
+
+  // Display-only {90°,-90°} board rotation (Mission/Map Editor, CLAUDE.md §B/
+  // §C): a pixel-only spin over an otherwise-unrotated hex assembly — see
+  // `computeDisplayRotationCluster`'s own comment for why "any entry in
+  // mapRotations at all" implies every Hex in this Mission is in the cluster.
+  // `hexRotationTransform` wraps a Hex's own rendered content in the shared
+  // `rotate(...)` around the cluster's pivot; `hexCounterRotation` undoes just
+  // that spin for legibility-only content (coordinate labels, VP numbers,
+  // elevation glyphs, etc.) — matching `EditorBoard.tsx`'s established
+  // technique exactly, since this is the same rendering problem the Mission
+  // Editor's own board preview already solved.
+  const rotationCluster = computeDisplayRotationCluster(game.hexes, game.mapRotations, HEX_SIZE);
+  const hexRotationTransform = (id: string): string | undefined =>
+    rotationCluster?.hexIds.has(id)
+      ? `rotate(${rotationCluster.rotation} ${rotationCluster.pivot.x} ${rotationCluster.pivot.y})`
+      : undefined;
+  const hexCounterRotation = (id: string, center: { x: number; y: number }): string | undefined =>
+    rotationCluster?.hexIds.has(id) ? `rotate(${-rotationCluster.rotation} ${center.x} ${center.y})` : undefined;
+
+  // §11 Hidden Units, hotseat concealment: on this one shared screen, "whose
+  // view is this" is whichever side is currently meant to be looking — the
+  // active Turn side while playing, or the side currently setting up during
+  // the Pre-Mission phase. A Hidden Unit renders for its own side always,
+  // and never for the other side while still Hidden — this is a render-
+  // layer-only mechanism (no per-client server), deliberately accepted for
+  // hotseat play (see Unit.hidden's doc comment in engine/types.ts).
+  const activeSide = game.phase === 'setup' ? game.setupSide : game.currentSide;
   const unitsByHex = new Map<string, Unit[]>();
   for (const u of Object.values(game.units)) {
+    if (u.hidden && u.side !== activeSide) continue;
     const arr = unitsByHex.get(u.hexId) ?? [];
     arr.push(u);
     unitsByHex.set(u.hexId, arr);
   }
 
+  // Manual/Group reinforcement placement (§4.12): a queued Unit doesn't
+  // become a real Unit (in `game.units`) until the whole ENTER dispatches —
+  // otherwise nothing would render on the board until every queued Unit has
+  // both a Hex AND a facing. Synthesize a preview counter the instant a Hex
+  // is chosen (fresh, no hit markers — it hasn't Stressed or taken a Hit
+  // yet), using the wave's suggested facing until the player picks one;
+  // `placingReinforcementDone` already holds an explicit chosen facing by
+  // the time an entry lands there, so this "snaps" to the real facing the
+  // same way the real free-facing-correction picker does elsewhere — no
+  // separate animation/interpolation needed, just render whatever the store
+  // currently says.
+  const previewReinforcement = (unitId: string, hexId: string, facing: number): Unit | null => {
+    const r = game.reinforcements.find((x) => x.id === unitId);
+    if (!r) return null;
+    return {
+      id: r.id,
+      side: r.side,
+      nation: r.nation,
+      templateId: r.templateId,
+      hexId,
+      facing: facing as Facing,
+      status: 'fresh',
+      stressed: false,
+      hitMarkers: [],
+      assignedWeaponCards: [],
+    };
+  };
+  for (const d of placingReinforcementDone) {
+    const preview = previewReinforcement(d.unitId, d.hexId, d.facing);
+    if (!preview) continue;
+    const arr = unitsByHex.get(preview.hexId) ?? [];
+    arr.push(preview);
+    unitsByHex.set(preview.hexId, arr);
+  }
+  if (placingReinforcementFacing) {
+    const r = game.reinforcements.find((x) => x.id === placingReinforcementFacing.unitId);
+    const preview = previewReinforcement(
+      placingReinforcementFacing.unitId,
+      placingReinforcementFacing.hexId,
+      r?.facing ?? 0,
+    );
+    if (preview) {
+      const arr = unitsByHex.get(preview.hexId) ?? [];
+      arr.push(preview);
+      unitsByHex.set(preview.hexId, arr);
+    }
+  }
+
   // Fire-odds popup when hovering a hex with a selected attacker. A shot resolves
   // the whole hex (§7.5.1), so show one row per targetable enemy (in the same
   // deterministic id order the engine rolls them).
-  type OddsRow = { targetId: string; fp: number; dv: number; flank: boolean; hit: number; crit: number };
+  type OddsRow = { targetId: string; ar: number; dr: number; hitNumber: number; flank: boolean; hit: number; crit: number; hopeless: boolean };
   const odds: { x: number; y: number; targets: OddsRow[] } | null = (() => {
     if (!hover || !selectedUnitId || !game.units[selectedUnitId]) return null;
     const sel = game.units[selectedUnitId]!;
@@ -85,17 +456,120 @@ export function Board() {
     for (const enemy of enemies) {
       const ctx = attackContext(game, sel, enemy);
       if (!ctx.legal) continue;
-      const o = fireOdds(ctx.baseFP, ctx.defenseValue);
-      rows.push({ targetId: enemy.id, fp: ctx.baseFP, dv: ctx.defenseValue, flank: ctx.isFlank, hit: o.hit, crit: o.crit });
+      const o = fireOdds(ctx.ar, ctx.dr);
+      rows.push({
+        targetId: enemy.id,
+        ar: ctx.ar,
+        dr: ctx.dr,
+        hitNumber: ctx.hitNumber,
+        flank: ctx.isFlank,
+        hit: o.hit,
+        crit: o.crit,
+        // §3.2: even a full 2-CAP dice mod can't ever exceed a natural 12, so
+        // this is a genuinely impossible shot, not just an unlikely one.
+        hopeless: isHopelessShot(ctx.hitNumber),
+      });
     }
     return rows.length ? { x: hover.x, y: hover.y, targets: rows } : null;
   })();
 
+  // Move-cost popup when hovering a legal Move-target hex with a unit selected
+  // (§4.7/§12.2): itemizes every AP modifier, not just the total. Independent
+  // of the fire-odds popup above — both can render at once for the same hex.
+  const moveCostPopup: {
+    x: number;
+    y: number;
+    hexId: string;
+    knownAp: number;
+    hasRandom: boolean;
+    mods: { label: string; value: number; random?: boolean }[];
+    willStripHastyDefense: boolean;
+    /** §17.3: this is the occupy-from-within case (hovering the Unit's own
+     *  Hex), not a real Move — the popup should say "Occupy X", not "Move to X". */
+    occupyKind?: FortificationKind;
+  } | null = (() => {
+    if (!hover || !selectedUnitId || !game.units[selectedUnitId] || !moveTargets.has(hover.id)) return null;
+    const sel = game.units[selectedUnitId]!;
+    if (sel.side !== game.currentSide) return null;
+
+    // §17.3 (2nd paragraph): hovering the Unit's own Hex is the occupy-from-
+    // within Move — `moveCost()` only understands adjacent Hexes (it returns
+    // null, "not adjacent", for this case), so read the AP cost from the
+    // engine's own legal-action list instead of calling it.
+    // §2.6: Stress adds +1AP to the next Action Cost — `moveCost()` (and the
+    // occupy-from-within branch below) only compute the Move's own terrain/
+    // backwards/wall/elevation component; Stress is folded in later by the
+    // reducer's `planCost`, so the popup has to add it itself or it silently
+    // under-reports the real cost for a Stressed Unit.
+    const stressMod: { label: string; value: number; random?: boolean; section: string }[] = sel.stressed
+      ? [{ label: 'Stress', value: 1, section: '§2.6' }]
+      : [];
+
+    if (hover.id === sel.hexId) {
+      const occupyAct = legalActionsForUnit(game, sel.id).find(
+        (a): a is Extract<Action, { type: 'MOVE' }> =>
+          a.type === 'MOVE' && a.toHexId === sel.hexId && a.occupyFortification === true,
+      );
+      if (!occupyAct) return null;
+      const fort = fortificationAt(game.hexes[hover.id]!);
+      const occMods = [{ label: 'Move', value: effectiveStats(game, sel).move, section: '§4.5' }, ...stressMod];
+      return {
+        x: hover.x,
+        y: hover.y,
+        hexId: hover.id,
+        knownAp: occMods.reduce((n, m) => n + m.value, 0),
+        hasRandom: false,
+        mods: occMods,
+        willStripHastyDefense: false,
+        occupyKind: fort?.kind,
+      };
+    }
+
+    const cost = moveCost(game, sel, hover.id);
+    if (cost.ap == null) return null;
+    const mods = [...(cost.mods ?? []), ...stressMod];
+    // §17.8 Barbed Wire's 1d6 is deterministic from the seeded RNG (so `cost.ap`
+    // is already the real, exact number), but the popup deliberately hides it
+    // until the move actually executes — same "don't spoil the roll" principle
+    // as the dice-roller showing "?" before a click (CLAUDE.md §7).
+    const hasRandom = mods.some((m) => m.random);
+    const knownAp = mods.filter((m) => !m.random).reduce((n, m) => n + m.value, 0);
+    // §17.6: Moving always strips this Unit's own Hasty Defense — warn before
+    // the click, since the marker's +1DR is easy to forget about mid-game.
+    return { x: hover.x, y: hover.y, hexId: hover.id, knownAp, hasRandom, mods, willStripHastyDefense: !!sel.hastyDefense };
+  })();
+
+  // Illegal-move popup: hovering an adjacent Hex the selected Unit CANNOT
+  // move into shows why, citing the same rule `moveCost`/`planVehicleMove`
+  // already denied it for — rather than the hex just doing nothing.
+  const moveIllegalPopup: { x: number; y: number; hexId: string; reason: string } | null = (() => {
+    if (!hover || !selectedUnitId || !game.units[selectedUnitId] || moveTargets.has(hover.id)) return null;
+    const sel = game.units[selectedUnitId]!;
+    if (sel.side !== game.currentSide || sel.carriedBy) return null;
+    if (directionTo(sel.hexId, hover.id) < 0) return null; // only adjacent Hexes are a real "why not"
+    const cost = moveCost(game, sel, hover.id);
+    if (cost.ap != null || !cost.reason) return null;
+    return { x: hover.x, y: hover.y, hexId: hover.id, reason: cost.reason };
+  })();
+
   return (
     <>
+      {obaCallout &&
+        (() => {
+          // Never show a bare Side letter (same convention as TurnFlash.tsx/
+          // VictoryScreen.tsx) — resolve the real nation name(s) instead.
+          const nation = game.players[obaCallout.side].nations.map((n) => NATIONS[n]?.name ?? n).join(', ');
+          const possessive = nation.endsWith('s') ? `${nation}’` : `${nation}’s`;
+          return (
+            <div className="oba-callout" key={obaCallout.key}>
+              💥 {possessive} Off-Board Artillery Strike is resolving… (§13.6-13.9)
+            </div>
+          );
+        })()}
       <svg
+        ref={svgRef}
         className="board"
-        viewBox={`0 0 ${layout.width} ${layout.height}`}
+        viewBox={`${pan.x} ${pan.y} ${layout.width / zoom} ${layout.height / zoom}`}
         preserveAspectRatio="xMidYMid meet"
         onMouseLeave={() => setHover(null)}
       >
@@ -103,26 +577,158 @@ export function Board() {
           <clipPath id="hexclip">
             <polygon points={clipPoints} />
           </clipPath>
+          {/* Cuts the fringe hexes at the playable board edge → half-hexes. */}
+          <clipPath id="boardclip">
+            <rect
+              x={bounds.minX}
+              y={bounds.minY}
+              width={bounds.maxX - bounds.minX}
+              height={bounds.maxY - bounds.minY}
+            />
+          </clipPath>
         </defs>
         <g transform={`translate(${layout.offset.x},${layout.offset.y})`}>
+          {/* Edge half-hexes (non-playable), clipped to the board rectangle. */}
+          <g clipPath="url(#boardclip)" pointerEvents="none">
+            {fringe.map((id) => {
+              const pts = pointsAttr(hexCorners(hexCenter(id)));
+              return (
+                <polygon
+                  key={`fr-${id}`}
+                  className="hex-fringe"
+                  points={pts}
+                  fill={TERRAIN_FILL.open}
+                  stroke={HEX_STROKE}
+                  strokeWidth={1}
+                  opacity={0.45}
+                />
+              );
+            })}
+          </g>
+          {/* "Overlay mode" real gameplay art (§D): one stretched image per
+              board that has one, clipped to the UNION of that board's own
+              (edge-clipped) hex polygons so it never spills past the real
+              board silhouette — drawn once, behind every per-hex fill/tile
+              below, which are themselves skipped for these hexes. */}
+          {overlayGroups.map((g) => {
+            const clipId = `map-overlay-clip-${g.mapNumber}`;
+            return (
+              <g
+                key={`overlay-${g.mapNumber}`}
+                pointerEvents="none"
+                transform={g.hexIds.length ? hexRotationTransform(g.hexIds[0]!) : undefined}
+              >
+                <defs>
+                  <clipPath id={clipId}>
+                    {g.clipPolygons.map((p, i) => (
+                      <polygon key={i} points={p} />
+                    ))}
+                  </clipPath>
+                </defs>
+                <image href={g.url} x={g.x} y={g.y} width={g.width} height={g.height} preserveAspectRatio="none" clipPath={`url(#${clipId})`} />
+              </g>
+            );
+          })}
           {ids.map((id) => {
             const hex = game.hexes[id]!;
             const c = hexCenter(id);
-            const pts = pointsAttr(hexCorners(c));
-            const art = artForHex(hex);
+            // Board-edge half/quarter-hexes (docs/hex_board_spec/README.md
+            // §Straight-edge clip) — clipped once here, every highlight/
+            // outline/click-target overlay below reuses these same `pts` so
+            // none of them spill past the hex's actual rendered shape.
+            const corners = hexCorners(c);
+            const clipped = hex.edgeCut ? clipHexPolygon(corners, c, hex.edgeCut) : corners;
+            const pts = pointsAttr(clipped);
+            const hasOverlayArt = overlaidHexIds.has(id);
+            const art = hasOverlayArt ? null : artForHex(hex);
             const losDim = visible ? !visible.has(id) && id !== losActive : false;
+            const artClipId = hex.edgeCut ? `hexclip-${id}` : 'hexclip';
             return (
-              <g key={id}>
-                <polygon points={pts} fill={TERRAIN_FILL[hex.terrain]} />
+              <g key={id} transform={hexRotationTransform(id)}>
+                {hex.edgeCut && (
+                  <defs>
+                    <clipPath id={artClipId}>
+                      <polygon points={pointsAttr(clipped.map((p) => ({ x: p.x - c.x, y: p.y - c.y })))} />
+                    </clipPath>
+                  </defs>
+                )}
+                {!hasOverlayArt && <polygon points={pts} fill={TERRAIN_FILL[hex.terrain]} />}
                 {art && (
-                  <g transform={`translate(${c.x},${c.y})`} clipPath="url(#hexclip)">
+                  <g transform={`translate(${c.x},${c.y})`} clipPath={`url(#${artClipId})`}>
                     <image href={art} x={-artW / 2} y={-HEX_SIZE} width={artW} height={2 * HEX_SIZE} preserveAspectRatio="xMidYMid slice" />
                   </g>
                 )}
+                {/* Coordinate label (small, top-centered) or board number (large,
+                    accent) — §Labeling. Rendered on top of art/terrain, below
+                    the interactive overlays that follow. */}
+                {hex.boardNumber != null ? (
+                  <text
+                    x={polygonCentroid(clipped).x}
+                    y={polygonCentroid(clipped).y}
+                    fontSize={HEX_SIZE * 0.75}
+                    fontWeight={700}
+                    fill="#b0442c"
+                    textAnchor="middle"
+                    dominantBaseline="central"
+                    pointerEvents="none"
+                    transform={hexCounterRotation(id, c)}
+                  >
+                    {hex.boardNumber}
+                  </text>
+                ) : (
+                  hex.label && (
+                    <text
+                      x={polygonCentroid(clipped).x}
+                      y={polygonTopY(clipped) + HEX_SIZE * 0.2}
+                      fontSize={HEX_SIZE * 0.22}
+                      fill={HEX_STROKE}
+                      textAnchor="middle"
+                      pointerEvents="none"
+                      transform={hexCounterRotation(id, c)}
+                    >
+                      {hex.label}
+                    </text>
+                  )
+                )}
+                {/* Smoke (§14): Heavy is denser/whiter than Light, both block/haze the hex. */}
+                {hex.features.smoke === 2 && (
+                  <polygon points={pts} fill="#e8ecef" opacity={0.72} pointerEvents="none" />
+                )}
+                {hex.features.smoke === 1 && (
+                  <polygon points={pts} fill="#e8ecef" opacity={0.4} pointerEvents="none" />
+                )}
                 {losDim && <polygon points={pts} fill="#0b0d08" opacity={0.62} />}
                 {visible?.has(id) && <polygon points={pts} fill="#7CFC8C" opacity={0.18} />}
-                {moveTargets.has(id) && <polygon points={pts} fill="#5ad17a" opacity={0.28} stroke="#5ad17a" strokeWidth={2} />}
-                {fireTargets.has(id) && <polygon points={pts} fill="none" stroke="#ff5a5a" strokeWidth={3} />}
+                {nextSteps.size === 0 && moveTargets.has(id) && <polygon points={pts} fill="#5ad17a" opacity={0.28} stroke="#5ad17a" strokeWidth={2} />}
+                {nextSteps.has(id) && <polygon points={pts} fill="#5ad17a" opacity={0.2} stroke="#5ad17a" strokeWidth={2} strokeDasharray="4 3" />}
+                {transportTargets.has(id) && <polygon points={pts} fill="none" stroke="#e0a83a" strokeWidth={3} strokeDasharray="2 3" />}
+                {facingTargets.has(id) && <polygon points={pts} fill="#3a8ee0" opacity={0.32} stroke="#3a8ee0" strokeWidth={2} />}
+                {entryTargets.has(id) && <polygon points={pts} fill="#c77dff" opacity={0.3} stroke="#c77dff" strokeWidth={2} strokeDasharray="4 3" />}
+                {/* §11.3-11.6 Hidden Move destinations — violet, matching UnitCounter's own "HIDDEN" badge color. */}
+                {hiddenMoveTargets.has(id) && <polygon points={pts} fill="#8b5cf6" opacity={0.28} stroke="#8b5cf6" strokeWidth={2} strokeDasharray="6 2" />}
+                {/* §11.7 Recon by Fire target Hexes — a distinct dotted burnt-orange, attack-shaped but visually separate from fireTargets' solid red (a suspected Hex, not a confirmed one) and transportTargets' amber. */}
+                {reconByFireTargets.has(id) && <polygon points={pts} fill="none" stroke="#c2410c" strokeWidth={3} strokeDasharray="2 4" />}
+                {pathSet.has(id) && (
+                  <>
+                    <polygon points={pts} fill="#4aa3ff" opacity={0.32} stroke="#4aa3ff" strokeWidth={2} />
+                    <text
+                      x={c.x}
+                      y={c.y}
+                      fontSize={HEX_SIZE * 0.5}
+                      fill="#fff"
+                      textAnchor="middle"
+                      dominantBaseline="central"
+                      fontWeight={700}
+                      pointerEvents="none"
+                      transform={hexCounterRotation(id, c)}
+                    >
+                      {movePath.indexOf(id) + 1}
+                    </text>
+                  </>
+                )}
+                {(fireTargets.has(id) || indirectFireTargets.has(id) || smokeTargets.has(id)) && (
+                  <polygon points={pts} fill="none" stroke="#ff5a5a" strokeWidth={3} />
+                )}
                 {id === losActive && <polygon points={pts} fill="none" stroke="#ffd24a" strokeWidth={3} />}
                 <polygon points={pts} fill="transparent" stroke={HEX_STROKE} strokeWidth={1} />
                 <polygon
@@ -142,24 +748,141 @@ export function Board() {
             if (!hex.road) return null;
             const a = parseHexId(id);
             const c = hexCenter(id);
-            return ([0, 1, 5] as Facing[]).map((dir) => {
-              const nId = idOf(neighbor(a, dir));
-              if (!game.hexes[nId]?.road) return null;
-              const nc = hexCenter(nId);
-              return <line key={`${id}-r${dir}`} x1={c.x} y1={c.y} x2={nc.x} y2={nc.y} stroke={ROAD_STROKE} strokeWidth={6} strokeLinecap="round" pointerEvents="none" />;
-            });
+            return (
+              <g key={`road-${id}`} transform={hexRotationTransform(id)}>
+                {([0, 1, 5] as Facing[]).map((dir) => {
+                  const nId = idOf(neighbor(a, dir));
+                  if (!game.hexes[nId]?.road) return null;
+                  const nc = hexCenter(nId);
+                  return <line key={`${id}-r${dir}`} x1={c.x} y1={c.y} x2={nc.x} y2={nc.y} stroke={ROAD_STROKE} strokeWidth={6} strokeLinecap="round" pointerEvents="none" />;
+                })}
+              </g>
+            );
           })}
 
           {ids.map((id) => {
             const hex = game.hexes[id]!;
             const corners = hexCorners(hexCenter(id));
-            return hex.walls.map((has, dir) => {
-              if (!has) return null;
-              const [i, j] = EDGE_CORNERS[dir]!;
-              const p1 = corners[i]!;
-              const p2 = corners[j]!;
-              return <line key={`${id}-w${dir}`} x1={p1.x} y1={p1.y} x2={p2.x} y2={p2.y} stroke={WALL_STROKE} strokeWidth={5} strokeLinecap="round" pointerEvents="none" />;
-            });
+            return (
+              <g key={`wall-${id}`} transform={hexRotationTransform(id)}>
+                {hex.walls.map((has, dir) => {
+                  if (!has) return null;
+                  const [i, j] = EDGE_CORNERS[dir]!;
+                  const p1 = corners[i]!;
+                  const p2 = corners[j]!;
+                  return <line key={`${id}-w${dir}`} x1={p1.x} y1={p1.y} x2={p2.x} y2={p2.y} stroke={WALL_STROKE} strokeWidth={5} strokeLinecap="round" pointerEvents="none" />;
+                })}
+              </g>
+            );
+          })}
+
+          {/* Elevation (§12.1): a small ▲/▲▲ glyph per Hill Hex so Steep drop-offs are legible. */}
+          {ids.map((id) => {
+            const hex = game.hexes[id]!;
+            if (!hex.elevation) return null;
+            const c = hexCenter(id);
+            return (
+              <g key={`elev-${id}`} transform={hexRotationTransform(id)}>
+                <text
+                  x={c.x}
+                  y={c.y - HEX_SIZE * 0.62}
+                  fontSize={HEX_SIZE * 0.32}
+                  fill="#5a4322"
+                  textAnchor="middle"
+                  fontWeight={700}
+                  pointerEvents="none"
+                  transform={hexCounterRotation(id, c)}
+                >
+                  {hex.elevation === 2 ? '▲▲' : '▲'}
+                </text>
+              </g>
+            );
+          })}
+
+          {/* Obstacles (§17.7): a short label per Hex — Mines are NOT hidden in
+              this build (locked decision, mirrors the Hidden Units deferral —
+              a hotseat render-layer hide would be trivially defeated). */}
+          {ids.map((id) => {
+            const obstacle = game.hexes[id]?.features.obstacle;
+            if (!obstacle) return null;
+            const c = hexCenter(id);
+            const label = obstacle.kind === 'barbedWire' ? 'WIRE' : obstacle.kind === 'mines' ? 'MINES' : 'BLOCK';
+            return (
+              <g key={`obstacle-${id}`} transform={hexRotationTransform(id)}>
+                <text
+                  x={c.x}
+                  y={c.y + HEX_SIZE * 0.68}
+                  fontSize={HEX_SIZE * 0.24}
+                  fill={obstacle.destroyed ? '#888' : '#b23a3a'}
+                  textAnchor="middle"
+                  fontWeight={700}
+                  textDecoration={obstacle.destroyed ? 'line-through' : undefined}
+                  pointerEvents="none"
+                  transform={hexCounterRotation(id, c)}
+                >
+                  {label}
+                </text>
+              </g>
+            );
+          })}
+
+          {/* Fortifications (§17.1): Trenches/Bunkers, same label styling as
+              Obstacles above but blue rather than red. Hasty Defense markers
+              are per-Unit, not a Hex feature — rendered on the counter itself. */}
+          {ids.map((id) => {
+            const fort = game.hexes[id]?.features.fortification;
+            if (!fort) return null;
+            const c = hexCenter(id);
+            const label = fort.kind === 'trench' ? 'TRENCH' : 'BUNKER';
+            return (
+              <g key={`fort-${id}`} transform={hexRotationTransform(id)}>
+                <text
+                  x={c.x}
+                  y={c.y + HEX_SIZE * 0.68}
+                  fontSize={HEX_SIZE * 0.24}
+                  fill={fort.destroyed ? '#888' : '#3a6ab2'}
+                  textAnchor="middle"
+                  fontWeight={700}
+                  textDecoration={fort.destroyed ? 'line-through' : undefined}
+                  pointerEvents="none"
+                  transform={hexCounterRotation(id, c)}
+                >
+                  {label}
+                </text>
+              </g>
+            );
+          })}
+
+          {/* §17.5 Bunker Arc of Fire: highlight the 3 frontal hexsides (facing
+              ±1) a Bunker occupant may fire out of / be attacked "within Arc"
+              through, so it's visible at a glance without hovering/selecting. */}
+          {ids.map((id) => {
+            const fort = game.hexes[id]?.features.fortification;
+            if (!fort || fort.kind !== 'bunker' || fort.destroyed || fort.facing == null) return null;
+            const corners = hexCorners(hexCenter(id));
+            const arcDirs = [((fort.facing + 5) % 6) as Facing, fort.facing, ((fort.facing + 1) % 6) as Facing];
+            return (
+              <g key={`bunker-arc-${id}`} transform={hexRotationTransform(id)}>
+                {arcDirs.map((dir) => {
+                  const [i, j] = EDGE_CORNERS[dir]!;
+                  const p1 = corners[i]!;
+                  const p2 = corners[j]!;
+                  return (
+                    <line
+                      key={`bunker-arc-${id}-${dir}`}
+                      x1={p1.x}
+                      y1={p1.y}
+                      x2={p2.x}
+                      y2={p2.y}
+                      stroke="#4fd1e8"
+                      strokeWidth={5}
+                      strokeLinecap="round"
+                      pointerEvents="none"
+                    />
+                  );
+                })}
+              </g>
+            );
           })}
 
           {[...objectives.entries()].map(([id, vp]) => {
@@ -167,44 +890,146 @@ export function Board() {
             const ctrl = game.hexes[id]?.features.control;
             const ring = ctrl === 'A' ? '#9fb0c4' : ctrl === 'B' ? '#e08a8a' : '#e9c46a';
             return (
-              <g key={`obj-${id}`} pointerEvents="none">
+              <g key={`obj-${id}`} pointerEvents="none" transform={hexRotationTransform(id)}>
                 <circle cx={c.x} cy={c.y} r={HEX_SIZE * 0.82} fill="none" stroke={ring} strokeWidth={3} strokeDasharray="5 4" />
-                <text x={c.x} y={c.y - HEX_SIZE * 0.52} fontSize={HEX_SIZE * 0.3} fill={ring} textAnchor="middle" fontWeight={700}>★{vp}</text>
+                <text
+                  x={c.x}
+                  y={c.y - HEX_SIZE * 0.52}
+                  fontSize={HEX_SIZE * 0.3}
+                  fill={ring}
+                  textAnchor="middle"
+                  fontWeight={700}
+                  transform={hexCounterRotation(id, c)}
+                >
+                  ★{vp}
+                </text>
               </g>
             );
           })}
 
-          {[...unitsByHex.entries()].flatMap(([hexId, list]) => {
+          {[...unitsByHex.entries()].map(([hexId, list]) => {
             const c = hexCenter(hexId);
             const n = list.length;
             const ordered = [...list].sort((a, b) => (a.id === selectedUnitId ? 1 : 0) - (b.id === selectedUnitId ? 1 : 0));
-            const nodes = ordered.map((u) => {
-              const k = list.indexOf(u);
-              const off = n > 1 ? (k - (n - 1) / 2) * 10 : 0;
-              return (
-                <g key={u.id} onMouseMove={(e) => setHover({ id: u.hexId, x: e.clientX, y: e.clientY })}>
-                  <UnitCounter
-                    game={game}
-                    unit={u}
-                    center={{ x: c.x + off, y: c.y + off }}
-                    size={HEX_SIZE}
-                    selected={u.id === selectedUnitId}
-                    activated={game.players[u.side].activatedUnitId === u.id}
-                    onClick={(e) => hexClick(u.hexId, { ctrl: e.ctrlKey, x: e.clientX, y: e.clientY })}
-                  />
-                </g>
-              );
-            });
-            if (n > 1) {
-              nodes.push(
-                <g key={`${hexId}-stack`} pointerEvents="none">
-                  <circle cx={c.x + HEX_SIZE * 0.7} cy={c.y - HEX_SIZE * 0.7} r={HEX_SIZE * 0.28} fill="#000a" />
-                  <text x={c.x + HEX_SIZE * 0.7} y={c.y - HEX_SIZE * 0.62} fontSize={HEX_SIZE * 0.3} fill="#fff" textAnchor="middle" fontWeight={700}>×{n}</text>
-                </g>,
-              );
-            }
-            return nodes;
+            return (
+              <g key={hexId} transform={hexRotationTransform(hexId)}>
+                {ordered.map((u) => {
+                  const k = list.indexOf(u);
+                  const off = n > 1 ? (k - (n - 1) / 2) * 10 : 0;
+                  return (
+                    <g key={u.id} onMouseMove={(e) => setHover({ id: u.hexId, x: e.clientX, y: e.clientY })}>
+                      <UnitCounter
+                        game={game}
+                        unit={u}
+                        center={{ x: c.x + off, y: c.y + off }}
+                        size={HEX_SIZE}
+                        selected={u.id === selectedUnitId}
+                        inGroup={groupSel.includes(u.id)}
+                        stressed={u.stressed}
+                        onClick={(e) => hexClick(u.hexId, { ctrl: e.ctrlKey, x: e.clientX, y: e.clientY })}
+                      />
+                    </g>
+                  );
+                })}
+                {n > 1 && (
+                  <g pointerEvents="none">
+                    <circle cx={c.x + HEX_SIZE * 0.7} cy={c.y - HEX_SIZE * 0.7} r={HEX_SIZE * 0.28} fill="#000a" />
+                    <text
+                      x={c.x + HEX_SIZE * 0.7}
+                      y={c.y - HEX_SIZE * 0.62}
+                      fontSize={HEX_SIZE * 0.3}
+                      fill="#fff"
+                      textAnchor="middle"
+                      fontWeight={700}
+                      transform={hexCounterRotation(hexId, c)}
+                    >
+                      ×{n}
+                    </text>
+                  </g>
+                )}
+              </g>
+            );
           })}
+
+          {/* Rendered last so it's always above every Hex fill and Unit counter. */}
+          {facingHighlightHex && (
+            <g pointerEvents="none">
+              {(() => {
+                // A floating instructional callout, not physical board content
+                // — it should stay upright and keep reading "above" the Hex
+                // regardless of board rotation, so this computes the Hex's
+                // real ROTATED screen position by math (not an SVG group
+                // transform, which would also spin the pill's own shape/offset
+                // direction) and draws the pill normally from there.
+                const cRaw = hexCenter(facingHighlightHex);
+                const c =
+                  rotationCluster?.hexIds.has(facingHighlightHex)
+                    ? rotateAround(cRaw, rotationCluster.pivot, rotationCluster.rotation)
+                    : cRaw;
+                // Width scales with the label text so longer variants (e.g.
+                // the Group Move one) don't get clipped — same ratio the
+                // original two-case hardcoded 2.6/4.6 split already implied.
+                const w = HEX_SIZE * Math.max(2.6, facingHighlightLabel.length * 0.11);
+                const h = HEX_SIZE * 0.6;
+                const ty = c.y - HEX_SIZE * 1.55;
+                return (
+                  <>
+                    <rect
+                      x={c.x - w / 2}
+                      y={ty - h / 2}
+                      width={w}
+                      height={h}
+                      rx={h / 3}
+                      fill="#3a8ee0"
+                      stroke="#0b0d08"
+                      strokeWidth={1}
+                    />
+                    <text
+                      x={c.x}
+                      y={ty}
+                      fontSize={HEX_SIZE * 0.32}
+                      fill="#fff"
+                      fontWeight={700}
+                      textAnchor="middle"
+                      dominantBaseline="central"
+                    >
+                      {facingHighlightLabel}
+                    </text>
+                  </>
+                );
+              })()}
+            </g>
+          )}
+
+          {/* §13.6-13.9 OBA Strike landing: a brief explosion burst over every
+              Hex in the blast radius — rendered last of all so it visually
+              covers the Hex it's bombing. SMIL <animate> (not CSS keyframes)
+              since this is a one-shot burst per Hex, remounted fresh (key
+              includes obaBlast.key) each time a new Strike lands, including
+              back-to-back Strikes in the same Round. */}
+          {obaBlast &&
+            obaBlast.hexIds
+              .filter((id) => game.hexes[id])
+              .map((id) => {
+                const c = hexCenter(id);
+                return (
+                  <g key={`oba-blast-${id}-${obaBlast.key}`} pointerEvents="none" transform={hexRotationTransform(id)}>
+                    <circle cx={c.x} cy={c.y} r={4} fill="#ffd166" opacity={0.95}>
+                      <animate attributeName="r" from={4} to={HEX_SIZE * 1.05} dur="0.45s" fill="freeze" />
+                      <animate attributeName="opacity" from={0.95} to={0} dur="0.45s" fill="freeze" />
+                    </circle>
+                    <circle cx={c.x} cy={c.y} r={6} fill="none" stroke="#ff7b3d" strokeWidth={5} opacity={0.9}>
+                      <animate attributeName="r" from={6} to={HEX_SIZE * 1.35} dur="0.6s" begin="0.05s" fill="freeze" />
+                      <animate attributeName="stroke-width" from={5} to={0} dur="0.6s" begin="0.05s" fill="freeze" />
+                      <animate attributeName="opacity" from={0.9} to={0} dur="0.6s" begin="0.05s" fill="freeze" />
+                    </circle>
+                    <circle cx={c.x} cy={c.y} r={2} fill="#5a5a5a" opacity={0.65}>
+                      <animate attributeName="r" from={2} to={HEX_SIZE * 0.95} dur="1.1s" begin="0.15s" fill="freeze" />
+                      <animate attributeName="opacity" from={0.6} to={0} dur="1.1s" begin="0.15s" fill="freeze" />
+                    </circle>
+                  </g>
+                );
+              })}
         </g>
       </svg>
 
@@ -218,14 +1043,57 @@ export function Board() {
           {odds.targets.map((t) => (
             <div key={t.targetId} className="fire-odds__row">
               {odds.targets.length > 1 && <div className="fire-odds__who">{t.targetId}</div>}
-              <div className="fire-odds__big">{pct(t.hit)}% to hit</div>
-              <div className="dim">incl. {pct(t.crit)}% critical (instant kill)</div>
+              {t.hopeless ? (
+                <div className="fire-odds__big fire-odds__hopeless">Cannot hit — even with CAP (§3.2)</div>
+              ) : (
+                <>
+                  <div className="fire-odds__big">{pct(t.hit)}% to hit</div>
+                  <div className="dim">incl. {pct(t.crit)}% critical (instant kill)</div>
+                </>
+              )}
               <div className="fire-odds__detail">
-                FP {t.fp} + 2d6 vs DV {t.dv}
+                AR {t.ar} vs DR {t.dr} — 2d6 ≥ {t.hitNumber}
                 {t.flank ? ' (flank)' : ''}
               </div>
             </div>
           ))}
+        </div>
+      )}
+
+      {moveCostPopup && (
+        <div
+          className="move-cost"
+          style={{ left: moveCostPopup.x + 16, top: moveCostPopup.y - 16, transform: 'translateY(-100%)' }}
+        >
+          <div className="move-cost__head">
+            {moveCostPopup.occupyKind
+              ? `Occupy ${moveCostPopup.occupyKind === 'trench' ? 'Trench' : 'Bunker'} (§17.3)`
+              : `Move to ${moveCostPopup.hexId}`}{' '}
+            — {moveCostPopup.knownAp} AP{moveCostPopup.hasRandom ? ' + ?' : ''}
+          </div>
+          {moveCostPopup.mods.map((m, i) => (
+            <div key={i} className="move-cost__row">
+              <span>{m.label}</span>
+              <span>
+                {m.random ? '?' : `${m.value >= 0 ? '+' : ''}${m.value}`}
+              </span>
+            </div>
+          ))}
+          {moveCostPopup.willStripHastyDefense && (
+            <div className="move-cost__row move-cost__warning">
+              ⚠ Moving will remove this Unit's Hasty Defense (§17.6)
+            </div>
+          )}
+        </div>
+      )}
+
+      {moveIllegalPopup && (
+        <div
+          className="move-illegal"
+          style={{ left: moveIllegalPopup.x + 16, top: moveIllegalPopup.y - 16, transform: 'translateY(-100%)' }}
+        >
+          <div className="move-illegal__head">Cannot move to {moveIllegalPopup.hexId}</div>
+          <div className="move-illegal__reason">{moveIllegalPopup.reason}</div>
         </div>
       )}
 

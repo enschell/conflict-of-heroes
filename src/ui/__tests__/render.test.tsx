@@ -11,6 +11,8 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { App } from '../../App';
 import { SavesDialog } from '../SavesDialog';
 import { useGame } from '../../state/store';
+import { ARMOR_SANDBOX } from '../../data/missions/sandbox';
+import { templateOf } from '../../engine';
 
 function render(): string {
   const el = document.createElement('div');
@@ -40,7 +42,9 @@ afterEach(() => {
 describe('UI renders', () => {
   it('shows the setup screen before a game starts', () => {
     useGame.setState({ game: null });
-    expect(render()).toContain('Start Firefight 1');
+    const html = render();
+    expect(html).toContain('Missions');
+    expect(html).toContain('Mission 1');
   });
 
   it('renders the board + panels in-game', () => {
@@ -54,13 +58,19 @@ describe('UI renders', () => {
   });
 
   it('renders the inspector with actions for a selected unit', () => {
-    useGame.getState().newGame();
+    // Mission 1's German platoon starts as a Round-1 reinforcement (no on-map
+    // Units yet, §4.12) — use the Armor Sandbox, which has both sides on-map
+    // from the start, to exercise the Inspector's per-unit action rendering.
+    useGame.getState().newGame(ARMOR_SANDBOX);
     const g = useGame.getState().game!;
     const own = Object.values(g.units).find((u) => u.side === g.currentSide)!;
     useGame.getState().select(own.id);
     const html = render();
-    expect(html).toContain(own.id);
-    expect(html).toContain('Activate');
+    // Inspector's header no longer prints the raw unit id or a "Spent Check"
+    // note (both lived in a paragraph that's since been removed) — assert on
+    // the unit's name (still the header) and its Move action prompt instead.
+    expect(html).toContain(templateOf(g, own).name);
+    expect(html).toContain('Move:');
   });
 
   it('renders the dice modal when a roll is pending', () => {
@@ -74,7 +84,7 @@ describe('UI renders', () => {
             dice: [3, 4],
             success: true,
             headline: 'HIT',
-            detail: 'AV 12 vs DV 11',
+            detail: 'AR 6 vs DR 12 — 2d6 ≥ 6',
             label: 'test roll',
           },
         ],
@@ -87,9 +97,24 @@ describe('UI renders', () => {
 
   it('renders the victory overlay at game over', () => {
     useGame.getState().newGame();
-    const finished = { ...useGame.getState().game!, phase: 'gameOver' as const, winner: 'A' as const };
+    // v3: the winner is the VP-Advantage holder (positive marker = Side A).
+    const finished = { ...useGame.getState().game!, phase: 'gameOver' as const, vpMarker: 3 };
     useGame.setState({ game: finished });
-    expect(render()).toContain('Side A wins');
+    expect(render()).toContain('Germans win!'); // Mission 1's Side A nation — no bare "Side A" text
+  });
+
+  it('renders a mapOverlays image as real gameplay art, replacing per-hex tiles', () => {
+    useGame.getState().newGame();
+    const game = useGame.getState().game!;
+    const mapNumber = Object.values(game.hexes).find((h) => h.mapNumber != null)!.mapNumber!;
+    const overlayUrl = 'data:image/png;base64,FAKEOVERLAYDATA';
+    useGame.setState({ game: { ...game, mapOverlays: { [mapNumber]: overlayUrl } } });
+    const html = render();
+    expect(html).toContain(overlayUrl);
+    // Mission 1 is one single board (every hex shares mapNumber 1), so
+    // covering it with an overlay replaces per-hex terrain tiles entirely —
+    // no `/assets/terrain/` tile art should remain.
+    expect(html).not.toContain('/assets/terrain/');
   });
 
   it('shows the under-cursor hover panel with terrain of the hovered hex', () => {
@@ -97,7 +122,7 @@ describe('UI renders', () => {
     const someHex = Object.keys(useGame.getState().game!.hexes)[0]!;
     useGame.setState({ hover: { id: someHex, x: 0, y: 0 } });
     const html = render();
-    expect(html).toContain('Under cursor');
+    expect(html).toContain('Terrain in Hex');
     expect(html).toContain(someHex);
   });
 

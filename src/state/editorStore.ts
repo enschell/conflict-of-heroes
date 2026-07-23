@@ -1,0 +1,954 @@
+/**
+ * Mission Editor authoring state — separate from `state/store.ts` (the live
+ * `GameState`-driven store) on purpose: this is authoring data, not a game in
+ * progress, and mixing the two would bloat/risk the already-large game store
+ * for no benefit. Mirrors the approved design's own flat state tree
+ * (`docs/design_handoff_mission_editor/Mission Editor.dc.html`'s `state`/
+ * setter shape) re-implemented against the real engine types instead of the
+ * prototype's placeholder ones.
+ */
+import { create } from 'zustand';
+import { mapById } from '../data/maps/catalog';
+import { missionById } from '../data/missions/catalog';
+import { buildEditorStateFromMission } from '../data/editor/loadMissionSource';
+import { assembleBoards, rotationClusters as engineRotationClusters } from '../engine';
+import type { BoardAssemblyEntry, BoardEdge, Rotation, RotationCluster } from '../engine';
+import type { Facing, HexId, MapHexDef, NationId, SideId } from '../engine/types';
+
+export type EditorSection = 'info' | 'map' | 'forces' | 'reinforcements' | 'victory' | 'advanced';
+
+// ---------------------------------------------------------------------------
+// Mission Info
+// ---------------------------------------------------------------------------
+
+export interface EditorInfoSide {
+  nations: NationId[];
+  orders: string;
+  instructions: string;
+  caps: number;
+  vp: number;
+}
+
+export interface EditorInfo {
+  title: string;
+  situation: string;
+  sideA: EditorInfoSide;
+  sideB: EditorInfoSide;
+  roundsTotal: number;
+  initiative: SideId;
+}
+
+function defaultInfoSide(nation: NationId, vp: number): EditorInfoSide {
+  return { nations: [nation], orders: '', instructions: '', caps: 6, vp };
+}
+
+function defaultInfo(): EditorInfo {
+  return {
+    title: 'New Mission',
+    situation: '',
+    sideA: defaultInfoSide('germans', 0),
+    sideB: defaultInfoSide('soviets', 0),
+    roundsTotal: 5,
+    initiative: 'A',
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Map (obstacles/fortifications painted onto a picked catalog map)
+// ---------------------------------------------------------------------------
+
+export type MapTool = 'wire' | 'mines' | 'roadblock' | 'trench' | 'bunker' | 'clear';
+
+export interface EditorObstacle {
+  kind: 'barbedWire' | 'mines' | 'roadBlock';
+  side: SideId;
+  /** Mines only (§17.10) — the fixed Hit Number rolled against. Required: an
+   *  unset Hit Number defaults to 0 at the engine layer, an always-hits mine. */
+  hitNumber?: number;
+  /** Data-only hidden marker (see engine/types.ts's Unit.hidden) — Mines
+   *  placed via the Starting Forces tab are always authored hidden. */
+  hidden?: boolean;
+}
+export interface EditorFortification {
+  kind: 'trench' | 'bunker';
+  facing: Facing | null;
+}
+
+/** One placed board in the Mission's assembly (§C multi-board). The first board is the anchor (no `attachTo`). */
+export interface EditorBoard {
+  id: string;
+  mapId: string;
+  rotation: Rotation;
+  attachTo?: { boardId: string; localEdge: BoardEdge; neighborLocalEdge: BoardEdge };
+}
+
+export interface EditorMapState {
+  boards: EditorBoard[];
+  tool: MapTool;
+  toolSide: SideId;
+  bunkerFacing: Facing;
+  minesHitNumber: number;
+  obstacles: Record<HexId, EditorObstacle>;
+  fortifications: Record<HexId, EditorFortification>;
+}
+
+const TOOL_TO_OBSTACLE: Partial<Record<MapTool, EditorObstacle['kind']>> = {
+  wire: 'barbedWire',
+  mines: 'mines',
+  roadblock: 'roadBlock',
+};
+const TOOL_TO_FORT: Partial<Record<MapTool, EditorFortification['kind']>> = {
+  trench: 'trench',
+  bunker: 'bunker',
+};
+
+function defaultMap(): EditorMapState {
+  return {
+    boards: [{ id: 'board-1', mapId: 'mission1', rotation: 0 }],
+    tool: 'wire',
+    toolSide: 'A',
+    bunkerFacing: 0,
+    minesHitNumber: 8,
+    obstacles: {},
+    fortifications: {},
+  };
+}
+
+/**
+ * The Mission's merged hexes (§C: independently-rotated boards assembled into
+ * one shared space) with obstacle/fortification overlays painted on top —
+ * the single source of truth every other section reads. Pure/derived, not
+ * stored in Zustand state itself, since it's fully computable from `boards` +
+ * `obstacles` + `fortifications`. Returns `{ hexes: [], error }` (instead of
+ * throwing) if the current board configuration is invalid — e.g. a board
+ * mid-edit with no `attachTo` chosen yet, or a rejected cross-family/edge-
+ * length attachment — so the UI can show a clear message instead of crashing
+ * while the author is still configuring it.
+ */
+function assemblyEntriesFor(map: EditorMapState): BoardAssemblyEntry[] {
+  return map.boards.map((b) => ({
+    id: b.id,
+    hexes: mapById(b.mapId)?.hexes ?? [],
+    rotation: b.rotation,
+    attachTo: b.attachTo,
+  }));
+}
+
+export function assembledMap(map: EditorMapState): { hexes: MapHexDef[]; error: string | null } {
+  try {
+    const merged = assembleBoards(assemblyEntriesFor(map));
+    const hexes = merged.map((h) => {
+      const obstacle = map.obstacles[h.id];
+      const fortification = map.fortifications[h.id];
+      return {
+        ...h,
+        obstacle: obstacle
+          ? { kind: obstacle.kind, ownerSide: obstacle.side, hitNumber: obstacle.hitNumber, hidden: obstacle.hidden }
+          : undefined,
+        fortification: fortification
+          ? { kind: fortification.kind, facing: fortification.facing ?? undefined }
+          : undefined,
+      };
+    });
+    return { hexes, error: null };
+  } catch (e) {
+    return { hexes: [], error: e instanceof Error ? e.message : String(e) };
+  }
+}
+
+/** The {90°,-90°} rotation cluster (if any) for rendering — see `EditorBoard`'s `rotationClusters` prop. */
+export function assembledRotationClusters(map: EditorMapState): RotationCluster[] {
+  try {
+    return engineRotationClusters(assemblyEntriesFor(map));
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Real gameplay art overrides (Map Editor "Overlay mode", CLAUDE.md §D) for
+ * every picked board that was itself authored with one — keyed by that
+ * board's own `mapNumber` (stamped on every one of its hexes; unaffected by
+ * rotation, which is a display-only pixel transform, not a data change), so
+ * `MissionDef.mapOverlays`/`GameState.mapOverlays` can resolve it per-hex at
+ * runtime without needing to carry the Mission Editor's own board-id concept
+ * into the exported Mission at all.
+ */
+export function assembledMapOverlays(map: EditorMapState): Record<number, string> {
+  const overlays: Record<number, string> = {};
+  for (const b of map.boards) {
+    const entry = mapById(b.mapId);
+    const n = entry?.hexes[0]?.mapNumber;
+    if (entry?.overlayImage && n != null) overlays[n] = entry.overlayImage;
+  }
+  return overlays;
+}
+
+/**
+ * Which boards were authored at a 90°/-90° rotation, keyed by that board's
+ * own `mapNumber` — see `MissionDef.mapRotations`'s header comment for why
+ * only this rotation family needs recording (0°/180° are already baked into
+ * the merged hex coordinates and need no extra data).
+ */
+export function assembledMapRotations(map: EditorMapState): Record<number, 90 | -90> {
+  const rotations: Record<number, 90 | -90> = {};
+  for (const b of map.boards) {
+    if (b.rotation !== 90 && b.rotation !== -90) continue;
+    const entry = mapById(b.mapId);
+    const n = entry?.hexes[0]?.mapNumber;
+    if (n != null) rotations[n] = b.rotation;
+  }
+  return rotations;
+}
+
+// ---------------------------------------------------------------------------
+// Starting Forces
+// ---------------------------------------------------------------------------
+
+export interface PlacedUnit {
+  id: string;
+  side: SideId;
+  templateId: string;
+  hexId: HexId;
+  facing: Facing;
+  /** Data-only hidden marker (see engine/types.ts's Unit.hidden). */
+  hidden?: boolean;
+}
+
+/**
+ * Sentinel `armedTemplateId` value: the Starting Forces board is armed to
+ * place a MINES token (§17.10) — clicking a hex writes into `map.obstacles`
+ * (the same record the Map section's paint tool uses), always hidden, rather
+ * than adding a `PlacedUnit`. Never a real `UNIT_TEMPLATES` key.
+ */
+export const MINE_ARM_ID = '__mine__';
+
+/**
+ * A pre-Mission Setup-phase pool Unit (no `hexId` — unlike `PlacedUnit`, its
+ * Hex is chosen by the player during the real Setup phase, not authored here).
+ */
+export interface EditorSetupUnit {
+  id: string;
+  side: SideId;
+  templateId: string;
+  facing: Facing;
+  /** Data-only hidden marker (see engine/types.ts's Unit.hidden). */
+  hidden?: boolean;
+  /** A Mines token (§17.10), not a Unit — placed by the player during the
+   *  Pre-Mission Setup phase as a hidden hex obstacle. */
+  mine?: { hitNumber: number };
+}
+
+export interface EditorForcesState {
+  placed: PlacedUnit[];
+  search: string;
+  nationFilter: string; // 'all' | NationId
+  /** A real `UNIT_TEMPLATES` key, or `MINE_ARM_ID` to place a hidden Mines token. */
+  armedTemplateId: string | null;
+  armedSide: SideId;
+  armedFacing: Facing;
+  /** Place the next armed Unit hidden (data-only; Mines are ALWAYS hidden regardless). */
+  armedHidden: boolean;
+  /** §17.10 Hit Number for Mines placed from this tab (fixed or Setup Pool). */
+  mineHitNumber: number;
+  /** Pre-Mission Setup phase (Mission-configurable): coexists with `placed` —
+   *  a Mission may mix fixed-location Units with a player-placed pool. */
+  setupPool: EditorSetupUnit[];
+  /** Which side sets up first, before the other side places its own pool. */
+  setupFirstSide: SideId;
+  /** Free-text guidance for how the Setup phase should proceed (display-only). */
+  setupInstructions: string;
+}
+
+function defaultForces(): EditorForcesState {
+  return {
+    placed: [],
+    search: '',
+    nationFilter: 'all',
+    armedTemplateId: null,
+    armedSide: 'A',
+    armedFacing: 0,
+    armedHidden: false,
+    mineHitNumber: 8,
+    setupPool: [],
+    setupFirstSide: 'A',
+    setupInstructions: '',
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Reinforcements
+// ---------------------------------------------------------------------------
+
+export interface WaveUnit {
+  id: string;
+  templateId: string;
+  facing: Facing;
+  /** §11: enters the Map already Hidden (see engine/types.ts's Unit.hidden). */
+  hidden?: boolean;
+}
+export interface EditorWave {
+  id: string;
+  name: string;
+  earliestRound: number;
+  description: string;
+  entryHexIds: HexId[];
+  units: WaveUnit[];
+}
+export interface EditorReinforcementsState {
+  activeSide: SideId;
+  waves: Record<SideId, EditorWave[]>;
+  expandedWaveId: string | null;
+  search: string;
+  nationFilter: string;
+  draftFacing: Facing;
+  /** §11: whether the next unit added to a wave enters already Hidden. */
+  draftHidden: boolean;
+}
+
+function defaultReinforcements(): EditorReinforcementsState {
+  return {
+    activeSide: 'A',
+    waves: { A: [], B: [] },
+    expandedWaveId: null,
+    search: '',
+    nationFilter: 'all',
+    draftFacing: 0,
+    draftHidden: false,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Victory Conditions
+// ---------------------------------------------------------------------------
+
+export interface VictoryOverride {
+  round: number;
+  vp: number;
+}
+export interface EditorVictoryHex {
+  id: string;
+  hexLabel: string;
+  vp: number;
+  control: 'neutral' | SideId;
+  overrides?: VictoryOverride[];
+  /**
+   * Every Round it's held (default), once at the Mission's final Round-end, or
+   * only on the explicit `awardRounds` list below (e.g. "Rounds 3, 4, and 5
+   * only"). Never more than one at a time.
+   */
+  awardTiming: 'endOfRound' | 'endOfMission' | 'specificRounds';
+  /** Only meaningful when `awardTiming === 'specificRounds'`. */
+  awardRounds?: number[];
+}
+/** VP for destroying one SPECIFIC placed/reinforcement Unit, overriding the general per-kill value for it. */
+export interface EditorUnitKillVp {
+  unitId: string;
+  vp: number;
+}
+export interface EditorExitZone {
+  id: string;
+  side: SideId;
+  hexIds: HexId[];
+  vpPerUnit: number;
+  description: string;
+}
+export interface EditorVictoryState {
+  hexes: EditorVictoryHex[];
+  vpPerKillA: number;
+  vpPerKillB: number;
+  vpPerSurvivorA: number;
+  vpPerSurvivorB: number;
+  unitKillVp: EditorUnitKillVp[];
+  exitZones: EditorExitZone[];
+  activeExitSide: SideId;
+  draftHex: string;
+  draftVp: number;
+  draftControl: 'neutral' | SideId;
+}
+
+function defaultVictory(): EditorVictoryState {
+  return {
+    hexes: [],
+    vpPerKillA: 0,
+    vpPerKillB: 0,
+    vpPerSurvivorA: 0,
+    vpPerSurvivorB: 0,
+    unitKillVp: [],
+    exitZones: [],
+    activeExitSide: 'A',
+    draftHex: '',
+    draftVp: 1,
+    draftControl: 'neutral',
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Advanced / Future — inert (see engine `MissionAdvancedNotes`)
+// ---------------------------------------------------------------------------
+
+export interface EditorAdvancedState {
+  airSupport: Record<SideId, number | ''>;
+  /** Terrain overlays (mock options) — the real Map Table (which maps, rotation,
+   *  abutment) is now a REAL feature of the Map section itself (§C), not inert. */
+  overlays: string[];
+}
+
+function defaultAdvanced(): EditorAdvancedState {
+  return {
+    airSupport: { A: '', B: '' },
+    overlays: [],
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Cards (§8) + OBA (§13.4-13.9) — real, consumed by MissionDef.cardConfig
+// ---------------------------------------------------------------------------
+
+export interface EditorCardsState {
+  /** Battle Card ids in this Mission's shared deck (§8.1) — each repeated by its catalog count. */
+  battleCardIds: string[];
+  drawPerRound: Record<SideId, { round1: number; eachRoundAfter: number }>;
+  /** Weapon/Veteran cards a side starts the Mission already holding (§8.2/§8.3). */
+  initialHand: Record<SideId, string[]>;
+  /** Rounds OBA may be used at all (§13.4) — empty means any Round. */
+  obaAllowedRounds: number[];
+  /** Per-Mission text for Mission-type cards actually in `battleCardIds` (Score/Event/Objectives). */
+  missionCardText: Record<string, string>;
+}
+
+function defaultCards(): EditorCardsState {
+  return {
+    battleCardIds: [],
+    drawPerRound: { A: { round1: 0, eachRoundAfter: 0 }, B: { round1: 0, eachRoundAfter: 0 } },
+    initialHand: { A: [], B: [] },
+    obaAllowedRounds: [],
+    missionCardText: {},
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Store
+// ---------------------------------------------------------------------------
+
+let seq = 0;
+function genId(prefix: string): string {
+  seq += 1;
+  return `${prefix}${Date.now().toString(36)}${seq}`;
+}
+
+/**
+ * EVERY authored unit id in the mission — fixed placements, the Setup Pool,
+ * and every reinforcement wave. A new id must be unique across ALL THREE:
+ * they all end up as keys in the same `game.units` map at play time, so a
+ * collision means a reinforcement ENTER silently overwrites an
+ * already-placed unit (caught live — a Setup Pool 'B-sov-rifle-43-2'
+ * colliding with a wave unit of the same id, because the wave's own id
+ * generator only checked placements + waves, not the pool).
+ */
+function allUnitIds(st: Pick<EditorStore, 'forces' | 'reinforcements'>): string[] {
+  return [
+    ...st.forces.placed.map((p) => p.id),
+    ...st.forces.setupPool.map((p) => p.id),
+    ...Object.values(st.reinforcements.waves).flatMap((ws) => ws.flatMap((w) => w.units.map((u) => u.id))),
+  ];
+}
+
+/** `side-templateId-n`, matching the existing hand-authored id convention (e.g. 'G-rifle-1'). */
+function nextUnitId(existing: Iterable<string>, side: SideId, templateId: string): string {
+  const base = `${side}-${templateId}`;
+  const taken = new Set(existing);
+  let n = 1;
+  while (taken.has(`${base}-${n}`)) n += 1;
+  return `${base}-${n}`;
+}
+
+export interface EditorStore {
+  section: EditorSection;
+  setSection: (s: EditorSection) => void;
+  /** "Load Existing Mission": replaces every authoring slice with the given
+   *  Mission's own data — see `data/editor/loadMissionSource.ts` for the
+   *  reverse-mapping and its one real limitation (the Map section). */
+  loadMission: (missionId: string) => boolean;
+
+  info: EditorInfo;
+  setInfo: (patch: Partial<EditorInfo>) => void;
+  setInfoSide: (side: SideId, patch: Partial<EditorInfoSide>) => void;
+  addNation: (side: SideId, nation: NationId) => void;
+  removeNation: (side: SideId, nation: NationId) => void;
+
+  map: EditorMapState;
+  addBoard: (mapId: string) => void;
+  removeBoard: (id: string) => void;
+  updateBoard: (id: string, patch: Partial<Omit<EditorBoard, 'id'>>) => void;
+  setMapTool: (patch: Partial<Pick<EditorMapState, 'tool' | 'toolSide' | 'bunkerFacing' | 'minesHitNumber'>>) => void;
+  paintMapHex: (hexId: HexId) => void;
+  removeObstacle: (hexId: HexId) => void;
+  removeFortification: (hexId: HexId) => void;
+
+  forces: EditorForcesState;
+  setForces: (patch: Partial<EditorForcesState>) => void;
+  armTemplate: (templateId: string | null) => void;
+  placeAtHex: (hexId: HexId) => void;
+  removePlaced: (id: string) => void;
+  updatePlacedFacing: (id: string, facing: Facing) => void;
+  addToSetupPool: (side: SideId, templateId: string, facing: Facing, hidden?: boolean) => void;
+  /** Add a hidden Mines token (§17.10) to the side's Setup Pool — Hit Number
+   *  taken from `forces.mineHitNumber` at add time. */
+  addMineToSetupPool: (side: SideId) => void;
+  removeFromSetupPool: (id: string) => void;
+  setSetupFirstSide: (side: SideId) => void;
+  setSetupInstructions: (text: string) => void;
+
+  reinforcements: EditorReinforcementsState;
+  setReinf: (patch: Partial<EditorReinforcementsState>) => void;
+  addWave: (side: SideId) => void;
+  removeWave: (side: SideId, id: string) => void;
+  toggleExpandWave: (id: string) => void;
+  updateWave: (side: SideId, id: string, patch: Partial<Omit<EditorWave, 'id' | 'units'>>) => void;
+  toggleWaveHex: (side: SideId, waveId: string, hexId: HexId) => void;
+  addUnitToWave: (side: SideId, waveId: string, templateId: string, facing: Facing, hidden?: boolean) => void;
+  removeUnitFromWave: (side: SideId, waveId: string, unitId: string) => void;
+
+  victory: EditorVictoryState;
+  setVictory: (patch: Partial<EditorVictoryState>) => void;
+  addVictoryHex: () => void;
+  removeVictoryHex: (id: string) => void;
+  updateVictoryHex: (id: string, patch: Partial<EditorVictoryHex>) => void;
+  toggleVictoryVaries: (id: string) => void;
+  addVictoryOverride: (id: string) => void;
+  updateVictoryOverride: (id: string, idx: number, patch: Partial<VictoryOverride>) => void;
+  removeVictoryOverride: (id: string, idx: number) => void;
+  setUnitKillVp: (unitId: string, vp: number) => void;
+  removeUnitKillVp: (unitId: string) => void;
+  addExitZone: (side: SideId) => void;
+  removeExitZone: (id: string) => void;
+  updateExitZone: (id: string, patch: Partial<Omit<EditorExitZone, 'id' | 'hexIds'>>) => void;
+  toggleExitZoneHex: (id: string, hexId: HexId) => void;
+
+  advanced: EditorAdvancedState;
+  setAdvanced: (patch: Partial<EditorAdvancedState>) => void;
+  setAirSupport: (side: SideId, round: number | '') => void;
+  toggleOverlay: (name: string) => void;
+
+  cards: EditorCardsState;
+  toggleBattleCardId: (id: string) => void;
+  setDrawPerRound: (side: SideId, patch: Partial<EditorCardsState['drawPerRound'][SideId]>) => void;
+  toggleInitialHandCard: (side: SideId, id: string) => void;
+  toggleObaAllowedRound: (round: number) => void;
+  setMissionCardText: (id: string, text: string) => void;
+
+  resetEditor: () => void;
+}
+
+export const useEditorStore = create<EditorStore>((set) => ({
+  section: 'info',
+  setSection: (s) => set({ section: s }),
+  loadMission: (missionId) => {
+    const def = missionById(missionId);
+    if (!def) return false;
+    set({ section: 'info', ...buildEditorStateFromMission(def) });
+    return true;
+  },
+
+  info: defaultInfo(),
+  setInfo: (patch) => set((st) => ({ info: { ...st.info, ...patch } })),
+  setInfoSide: (side, patch) =>
+    set((st) => ({
+      info: { ...st.info, [side === 'A' ? 'sideA' : 'sideB']: { ...st.info[side === 'A' ? 'sideA' : 'sideB'], ...patch } },
+    })),
+  addNation: (side, nation) => {
+    if (!nation) return;
+    const key = side === 'A' ? 'sideA' : 'sideB';
+    set((st) => {
+      const cur = st.info[key].nations;
+      if (cur.includes(nation)) return st;
+      return { info: { ...st.info, [key]: { ...st.info[key], nations: [...cur, nation] } } };
+    });
+  },
+  removeNation: (side, nation) => {
+    const key = side === 'A' ? 'sideA' : 'sideB';
+    set((st) => ({
+      info: { ...st.info, [key]: { ...st.info[key], nations: st.info[key].nations.filter((n) => n !== nation) } },
+    }));
+  },
+
+  map: defaultMap(),
+  addBoard: (mapId) =>
+    set((st) => {
+      if (!mapById(mapId)) return st;
+      const id = genId('board-');
+      const board: EditorBoard = st.map.boards.length === 0 ? { id, mapId, rotation: 0 } : { id, mapId, rotation: 0 };
+      return { map: { ...st.map, boards: [...st.map.boards, board] } };
+    }),
+  removeBoard: (id) =>
+    set((st) => ({
+      map: {
+        ...st.map,
+        boards: st.map.boards
+          .filter((b) => b.id !== id)
+          // Clear any attachTo pointing at the removed board — surfaces as a
+          // clear "needs attachTo" error via `assembledMap` rather than
+          // silently leaving a dangling reference.
+          .map((b) => (b.attachTo?.boardId === id ? { ...b, attachTo: undefined } : b)),
+      },
+    })),
+  updateBoard: (id, patch) =>
+    set((st) => ({
+      map: { ...st.map, boards: st.map.boards.map((b) => (b.id === id ? { ...b, ...patch } : b)) },
+    })),
+  setMapTool: (patch) => set((st) => ({ map: { ...st.map, ...patch } })),
+  paintMapHex: (hexId) =>
+    set((st) => {
+      const { tool, toolSide, bunkerFacing, minesHitNumber } = st.map;
+      const obstacles = { ...st.map.obstacles };
+      const fortifications = { ...st.map.fortifications };
+      if (tool === 'clear') {
+        delete obstacles[hexId];
+        delete fortifications[hexId];
+      } else if (tool === 'wire' || tool === 'mines' || tool === 'roadblock') {
+        delete fortifications[hexId];
+        obstacles[hexId] = {
+          kind: TOOL_TO_OBSTACLE[tool]!,
+          side: toolSide,
+          ...(tool === 'mines' ? { hitNumber: minesHitNumber } : {}),
+        };
+      } else if (tool === 'trench' || tool === 'bunker') {
+        delete obstacles[hexId];
+        fortifications[hexId] = { kind: TOOL_TO_FORT[tool]!, facing: tool === 'bunker' ? bunkerFacing : null };
+      }
+      return { map: { ...st.map, obstacles, fortifications } };
+    }),
+  removeObstacle: (hexId) =>
+    set((st) => {
+      const obstacles = { ...st.map.obstacles };
+      delete obstacles[hexId];
+      return { map: { ...st.map, obstacles } };
+    }),
+  removeFortification: (hexId) =>
+    set((st) => {
+      const fortifications = { ...st.map.fortifications };
+      delete fortifications[hexId];
+      return { map: { ...st.map, fortifications } };
+    }),
+
+  forces: defaultForces(),
+  setForces: (patch) => set((st) => ({ forces: { ...st.forces, ...patch } })),
+  armTemplate: (templateId) => set((st) => ({ forces: { ...st.forces, armedTemplateId: templateId } })),
+  placeAtHex: (hexId) =>
+    set((st) => {
+      const { armedTemplateId, armedSide, armedFacing, armedHidden, mineHitNumber } = st.forces;
+      if (!armedTemplateId) return st;
+      if (armedTemplateId === MINE_ARM_ID) {
+        // A fixed-location Mines token: writes into the SAME obstacles record
+        // the Map section's paint tool uses (one Obstacle per Hex, §17.0) —
+        // always hidden, owner = the armed side.
+        const obstacles = {
+          ...st.map.obstacles,
+          [hexId]: { kind: 'mines' as const, side: armedSide, hitNumber: mineHitNumber, hidden: true },
+        };
+        return { map: { ...st.map, obstacles } };
+      }
+      const id = nextUnitId(allUnitIds(st), armedSide, armedTemplateId);
+      const entry: PlacedUnit = {
+        id,
+        side: armedSide,
+        templateId: armedTemplateId,
+        hexId,
+        facing: armedFacing,
+        hidden: armedHidden || undefined,
+      };
+      return { forces: { ...st.forces, placed: [...st.forces.placed, entry] } };
+    }),
+  removePlaced: (id) => set((st) => ({ forces: { ...st.forces, placed: st.forces.placed.filter((p) => p.id !== id) } })),
+  updatePlacedFacing: (id, facing) =>
+    set((st) => ({
+      forces: { ...st.forces, placed: st.forces.placed.map((p) => (p.id === id ? { ...p, facing } : p)) },
+    })),
+  addToSetupPool: (side, templateId, facing, hidden = false) =>
+    set((st) => {
+      const id = nextUnitId(allUnitIds(st), side, templateId);
+      const entry: EditorSetupUnit = { id, side, templateId, facing, hidden: hidden || undefined };
+      return { forces: { ...st.forces, setupPool: [...st.forces.setupPool, entry] } };
+    }),
+  addMineToSetupPool: (side) =>
+    set((st) => {
+      const id = nextUnitId(allUnitIds(st), side, 'mines');
+      // A Mines token: placed by the player during the Pre-Mission Setup
+      // phase, always hidden; templateId is display-only (never resolved).
+      const entry: EditorSetupUnit = {
+        id,
+        side,
+        templateId: 'mines',
+        facing: 0,
+        hidden: true,
+        mine: { hitNumber: st.forces.mineHitNumber },
+      };
+      return { forces: { ...st.forces, setupPool: [...st.forces.setupPool, entry] } };
+    }),
+  removeFromSetupPool: (id) =>
+    set((st) => ({ forces: { ...st.forces, setupPool: st.forces.setupPool.filter((p) => p.id !== id) } })),
+  setSetupFirstSide: (side) => set((st) => ({ forces: { ...st.forces, setupFirstSide: side } })),
+  setSetupInstructions: (text) => set((st) => ({ forces: { ...st.forces, setupInstructions: text } })),
+
+  reinforcements: defaultReinforcements(),
+  setReinf: (patch) => set((st) => ({ reinforcements: { ...st.reinforcements, ...patch } })),
+  addWave: (side) =>
+    set((st) => {
+      const n = st.reinforcements.waves[side].length + 1;
+      const wave: EditorWave = {
+        id: genId('wave-'),
+        name: `Wave ${n}`,
+        earliestRound: 2,
+        description: '',
+        entryHexIds: [],
+        units: [],
+      };
+      return {
+        reinforcements: {
+          ...st.reinforcements,
+          activeSide: side,
+          waves: { ...st.reinforcements.waves, [side]: [...st.reinforcements.waves[side], wave] },
+          expandedWaveId: wave.id,
+        },
+      };
+    }),
+  removeWave: (side, id) =>
+    set((st) => ({
+      reinforcements: {
+        ...st.reinforcements,
+        waves: { ...st.reinforcements.waves, [side]: st.reinforcements.waves[side].filter((w) => w.id !== id) },
+        expandedWaveId: st.reinforcements.expandedWaveId === id ? null : st.reinforcements.expandedWaveId,
+      },
+    })),
+  toggleExpandWave: (id) =>
+    set((st) => ({
+      reinforcements: { ...st.reinforcements, expandedWaveId: st.reinforcements.expandedWaveId === id ? null : id },
+    })),
+  updateWave: (side, id, patch) =>
+    set((st) => ({
+      reinforcements: {
+        ...st.reinforcements,
+        waves: {
+          ...st.reinforcements.waves,
+          [side]: st.reinforcements.waves[side].map((w) => (w.id === id ? { ...w, ...patch } : w)),
+        },
+      },
+    })),
+  toggleWaveHex: (side, waveId, hexId) =>
+    set((st) => ({
+      reinforcements: {
+        ...st.reinforcements,
+        waves: {
+          ...st.reinforcements.waves,
+          [side]: st.reinforcements.waves[side].map((w) => {
+            if (w.id !== waveId) return w;
+            const has = w.entryHexIds.includes(hexId);
+            return { ...w, entryHexIds: has ? w.entryHexIds.filter((h) => h !== hexId) : [...w.entryHexIds, hexId] };
+          }),
+        },
+      },
+    })),
+  addUnitToWave: (side, waveId, templateId, facing, hidden) =>
+    set((st) => {
+      const wave = st.reinforcements.waves[side].find((w) => w.id === waveId);
+      if (!wave) return st;
+      const id = nextUnitId(allUnitIds(st), side, templateId);
+      return {
+        reinforcements: {
+          ...st.reinforcements,
+          waves: {
+            ...st.reinforcements.waves,
+            [side]: st.reinforcements.waves[side].map((w) =>
+              w.id === waveId
+                ? { ...w, units: [...w.units, { id, templateId, facing, hidden: hidden || undefined }] }
+                : w,
+            ),
+          },
+        },
+      };
+    }),
+  removeUnitFromWave: (side, waveId, unitId) =>
+    set((st) => ({
+      reinforcements: {
+        ...st.reinforcements,
+        waves: {
+          ...st.reinforcements.waves,
+          [side]: st.reinforcements.waves[side].map((w) =>
+            w.id === waveId ? { ...w, units: w.units.filter((u) => u.id !== unitId) } : w,
+          ),
+        },
+      },
+    })),
+
+  victory: defaultVictory(),
+  setVictory: (patch) => set((st) => ({ victory: { ...st.victory, ...patch } })),
+  addVictoryHex: () =>
+    set((st) => {
+      const hexLabel = st.victory.draftHex.trim().toUpperCase();
+      if (!hexLabel) return st;
+      const entry: EditorVictoryHex = {
+        id: genId('vhex-'),
+        hexLabel,
+        vp: st.victory.draftVp || 0,
+        control: st.victory.draftControl,
+        awardTiming: 'endOfRound',
+      };
+      return {
+        victory: {
+          ...st.victory,
+          hexes: [...st.victory.hexes, entry],
+          draftHex: '',
+          draftVp: 1,
+          draftControl: 'neutral',
+        },
+      };
+    }),
+  removeVictoryHex: (id) => set((st) => ({ victory: { ...st.victory, hexes: st.victory.hexes.filter((v) => v.id !== id) } })),
+  updateVictoryHex: (id, patch) =>
+    set((st) => ({
+      victory: { ...st.victory, hexes: st.victory.hexes.map((v) => (v.id === id ? { ...v, ...patch } : v)) },
+    })),
+  toggleVictoryVaries: (id) =>
+    set((st) => ({
+      victory: {
+        ...st.victory,
+        hexes: st.victory.hexes.map((v) => (v.id === id ? { ...v, overrides: v.overrides ? undefined : [] } : v)),
+      },
+    })),
+  addVictoryOverride: (id) =>
+    set((st) => ({
+      victory: {
+        ...st.victory,
+        hexes: st.victory.hexes.map((v) =>
+          v.id === id ? { ...v, overrides: [...(v.overrides ?? []), { round: 2, vp: v.vp }] } : v,
+        ),
+      },
+    })),
+  updateVictoryOverride: (id, idx, patch) =>
+    set((st) => ({
+      victory: {
+        ...st.victory,
+        hexes: st.victory.hexes.map((v) =>
+          v.id === id ? { ...v, overrides: v.overrides?.map((o, i) => (i === idx ? { ...o, ...patch } : o)) } : v,
+        ),
+      },
+    })),
+  removeVictoryOverride: (id, idx) =>
+    set((st) => ({
+      victory: {
+        ...st.victory,
+        hexes: st.victory.hexes.map((v) =>
+          v.id === id ? { ...v, overrides: v.overrides?.filter((_, i) => i !== idx) } : v,
+        ),
+      },
+    })),
+  setUnitKillVp: (unitId, vp) =>
+    set((st) => {
+      const existing = st.victory.unitKillVp.some((u) => u.unitId === unitId);
+      const unitKillVp = existing
+        ? st.victory.unitKillVp.map((u) => (u.unitId === unitId ? { ...u, vp } : u))
+        : [...st.victory.unitKillVp, { unitId, vp }];
+      return { victory: { ...st.victory, unitKillVp } };
+    }),
+  removeUnitKillVp: (unitId) =>
+    set((st) => ({ victory: { ...st.victory, unitKillVp: st.victory.unitKillVp.filter((u) => u.unitId !== unitId) } })),
+  addExitZone: (side) =>
+    set((st) => ({
+      victory: {
+        ...st.victory,
+        activeExitSide: side,
+        exitZones: [
+          ...st.victory.exitZones,
+          { id: genId('exit-'), side, hexIds: [], vpPerUnit: 1, description: '' },
+        ],
+      },
+    })),
+  removeExitZone: (id) =>
+    set((st) => ({ victory: { ...st.victory, exitZones: st.victory.exitZones.filter((z) => z.id !== id) } })),
+  updateExitZone: (id, patch) =>
+    set((st) => ({
+      victory: { ...st.victory, exitZones: st.victory.exitZones.map((z) => (z.id === id ? { ...z, ...patch } : z)) },
+    })),
+  toggleExitZoneHex: (id, hexId) =>
+    set((st) => ({
+      victory: {
+        ...st.victory,
+        exitZones: st.victory.exitZones.map((z) => {
+          if (z.id !== id) return z;
+          const has = z.hexIds.includes(hexId);
+          return { ...z, hexIds: has ? z.hexIds.filter((h) => h !== hexId) : [...z.hexIds, hexId] };
+        }),
+      },
+    })),
+
+  advanced: defaultAdvanced(),
+  setAdvanced: (patch) => set((st) => ({ advanced: { ...st.advanced, ...patch } })),
+  setAirSupport: (side, round) =>
+    set((st) => ({ advanced: { ...st.advanced, airSupport: { ...st.advanced.airSupport, [side]: round } } })),
+  toggleOverlay: (name) =>
+    set((st) => ({
+      advanced: {
+        ...st.advanced,
+        overlays: st.advanced.overlays.includes(name)
+          ? st.advanced.overlays.filter((n) => n !== name)
+          : [...st.advanced.overlays, name],
+      },
+    })),
+
+  cards: defaultCards(),
+  toggleBattleCardId: (id) =>
+    set((st) => ({
+      cards: {
+        ...st.cards,
+        battleCardIds: st.cards.battleCardIds.includes(id)
+          ? st.cards.battleCardIds.filter((i) => i !== id)
+          : [...st.cards.battleCardIds, id],
+      },
+    })),
+  setDrawPerRound: (side, patch) =>
+    set((st) => ({
+      cards: { ...st.cards, drawPerRound: { ...st.cards.drawPerRound, [side]: { ...st.cards.drawPerRound[side], ...patch } } },
+    })),
+  toggleInitialHandCard: (side, id) =>
+    set((st) => ({
+      cards: {
+        ...st.cards,
+        initialHand: {
+          ...st.cards.initialHand,
+          [side]: st.cards.initialHand[side].includes(id)
+            ? st.cards.initialHand[side].filter((i) => i !== id)
+            : [...st.cards.initialHand[side], id],
+        },
+      },
+    })),
+  toggleObaAllowedRound: (round) =>
+    set((st) => ({
+      cards: {
+        ...st.cards,
+        obaAllowedRounds: st.cards.obaAllowedRounds.includes(round)
+          ? st.cards.obaAllowedRounds.filter((r) => r !== round)
+          : [...st.cards.obaAllowedRounds, round],
+      },
+    })),
+  setMissionCardText: (id, text) =>
+    set((st) => ({ cards: { ...st.cards, missionCardText: { ...st.cards.missionCardText, [id]: text } } })),
+
+  resetEditor: () =>
+    set({
+      section: 'info',
+      info: defaultInfo(),
+      map: defaultMap(),
+      forces: defaultForces(),
+      reinforcements: defaultReinforcements(),
+      victory: defaultVictory(),
+      advanced: defaultAdvanced(),
+      cards: defaultCards(),
+    }),
+}));
+
+/** Just the authored data slices (no action functions) — what the TS-source emitter reads. */
+export type EditorAuthoredState = Pick<
+  EditorStore,
+  'info' | 'map' | 'forces' | 'reinforcements' | 'victory' | 'advanced' | 'cards'
+>;

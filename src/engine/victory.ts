@@ -1,10 +1,30 @@
 /**
  * Victory points and victory-hex control (rulebook §2.4, §2.5).
  */
-import type { GameState, SideId } from './types';
+import { templateOf } from './hits';
+import type { GameState, SideId, VictoryConfig, VictoryHexDef } from './types';
 
 export function otherSide(s: SideId): SideId {
   return s === 'A' ? 'B' : 'A';
+}
+
+/** VP a victory hex is worth this Round: a `roundOverrides` entry for `round`, else its base `vp`. */
+export function vpForRound(vh: VictoryHexDef, round: number): number {
+  return vh.roundOverrides?.find((o) => o.round === round)?.vp ?? vh.vp;
+}
+
+/** VP per enemy Unit destroyed, for the side gaining it — supports the plain-number and per-side forms. */
+export function vpPerKillFor(victory: VictoryConfig, side: SideId): number | undefined {
+  const v = victory.vpPerKill;
+  if (v == null) return undefined;
+  return typeof v === 'number' ? v : v[side];
+}
+
+/** VP per enemy Unit still on the Map at Mission end, for `side` — same shape as `vpPerKillFor`. */
+export function vpPerSurvivorFor(victory: VictoryConfig, side: SideId): number | undefined {
+  const v = victory.vpPerSurvivor;
+  if (v == null) return undefined;
+  return typeof v === 'number' ? v : v[side];
 }
 
 /**
@@ -14,7 +34,10 @@ export function otherSide(s: SideId): SideId {
  */
 export function updateVictoryHexControl(state: GameState): void {
   for (const vh of state.victory.victoryHexes) {
-    const occupants = Object.values(state.units).filter((u) => u.hexId === vh.hexId);
+    // §16.1: Trucks/Wagons cannot take control of a Hex — they don't count.
+    const occupants = Object.values(state.units).filter(
+      (u) => u.hexId === vh.hexId && !templateOf(state, u).cannotControlHex,
+    );
     const sides = new Set(occupants.map((o) => o.side));
     if (sides.size === 1) {
       const hex = state.hexes[vh.hexId];
@@ -23,20 +46,46 @@ export function updateVictoryHexControl(state: GameState): void {
   }
 }
 
-/** Final scores: accumulated VP plus controlled victory-hex VP. */
+/**
+ * Final gross VP per side (kills + the per-Round control VP already awarded at
+ * each Round end). Display-only; the winner comes from the no-tie marker.
+ */
 export function finalScores(state: GameState): Record<SideId, number> {
-  const scores: Record<SideId, number> = { A: state.players.A.vp, B: state.players.B.vp };
-  for (const vh of state.victory.victoryHexes) {
-    const ctrl = state.hexes[vh.hexId]?.features.control;
-    if (ctrl) scores[ctrl] += vh.vp;
-  }
-  return scores;
+  return { A: state.players.A.vp, B: state.players.B.vp };
 }
 
-/** Winner by score; null on a tie (rulebook: a tie means both lose). */
+// ---------------------------------------------------------------------------
+// No-tie VP track (§9.2): one shared marker, never 0. `vpMarker` is signed from
+// Side A's perspective (>0 = A leads by that many, <0 = B leads).
+// ---------------------------------------------------------------------------
+
+/** Which side currently holds VP Advantage (the face-up marker). */
+export function vpLeader(state: GameState): SideId {
+  return state.vpMarker > 0 ? 'A' : 'B';
+}
+
+/** How many VP the leader is ahead by (always ≥ 1). */
+export function vpMargin(state: GameState): number {
+  return Math.abs(state.vpMarker);
+}
+
+/**
+ * Award `n` VP to `side` (§9.1) and step the no-tie marker `n` spaces. The
+ * leader gaining moves the marker away from 0; the trailer gaining moves it
+ * toward 0, and a step that would land on 0 flips to the gaining side's 1
+ * (§9.2 — there is no zero). Also bumps the side's gross VP for display.
+ */
+export function gainVp(state: GameState, side: SideId, n: number): void {
+  if (n <= 0) return;
+  state.players[side].vp += n;
+  const dir = side === 'A' ? 1 : -1;
+  for (let i = 0; i < n; i++) {
+    const stepped = state.vpMarker + dir;
+    state.vpMarker = stepped === 0 ? dir : stepped; // skip 0 → flip to gainer's 1
+  }
+}
+
+/** Winner = the VP-Advantage holder. v3 has no ties (§9.3). */
 export function computeWinner(state: GameState): SideId | null {
-  const s = finalScores(state);
-  if (s.A > s.B) return 'A';
-  if (s.B > s.A) return 'B';
-  return null;
+  return vpLeader(state);
 }

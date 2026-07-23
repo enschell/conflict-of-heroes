@@ -1,7 +1,7 @@
 /**
- * Rules-conformance harness (M3.4).
+ * Rules-conformance harness (M3.4, re-pointed to v3 §2–§3 in the M4.5 cutover).
  *
- * Auto-plays full Firefight 1 games and, for EVERY action, independently
+ * Auto-plays full Mission 1 games and, for EVERY action, independently
  * re-derives the expected result straight from the rulebook and asserts the
  * engine agrees. The re-derivation deliberately does NOT call the engine's
  * cost/combat functions — it recomputes from the data tables (terrain, hit
@@ -10,9 +10,10 @@
  *
  *   npm run conformance
  *
- * Each violation is tagged with its rulebook section. Ambiguous rules where the
- * engine makes a defensible-but-unconfirmed choice are listed in
- * RULES-ASSUMPTIONS.md rather than reported as violations.
+ * v3 economy: there is no AP pool. Each Action's (modified) cost is the
+ * threshold for a d10 Spent Check (§2.5); acting Stresses the unit (§2.6).
+ * The AI below acts only with Fresh units (so CAP is never spent on 0AP
+ * Actions); the spent-unit-via-CAP path (§3.4) is exercised by the probe.
  */
 import {
   reduce,
@@ -26,14 +27,16 @@ import {
   inArc,
   otherSide,
   directionTo,
-  neighbor,
   idOf,
+  legalEntryHexes,
+  vpForRound,
+  vpPerKillFor,
 } from '../src/engine';
 import { lineDraw } from '../src/engine/hex';
 import { TERRAIN } from '../src/data/terrainTypes';
 import { FOOT_HIT_MARKERS } from '../src/data/hitMarkers';
-import { FIREFIGHT_1 } from '../src/data/firefights/firefight1';
-import type { Action, GameState, Unit } from '../src/engine/types';
+import { MISSION_1 } from '../src/data/missions/mission1';
+import type { Action, GameEvent, GameState, SideId, Unit } from '../src/engine/types';
 
 // ---------------------------------------------------------------------------
 // Independent re-derivations from the rules + data (no engine cost/combat fns)
@@ -84,6 +87,26 @@ function rangeMod(dist: number, range: number): number | null {
   return null;
 }
 
+/** Elevation Move Cost Penalty (§12.2): Sloping (1 level) is +1AP ascending
+ * only; Steep (2 levels) is +2AP either direction. Applies to every unit kind
+ * (§15's own "Vehicle Moving Uphill" example pays it too) — this oracle never
+ * drives a vehicle (Mission 1 is foot-only), so no Steep-impassable check is
+ * needed here. */
+function elevationMoveCost(fromElev: number, toElev: number): number {
+  const diff = toElev - fromElev;
+  const absDiff = Math.abs(diff);
+  if (absDiff >= 2) return 2;
+  if (absDiff === 1) return diff > 0 ? 1 : 0;
+  return 0;
+}
+
+/** §12.3 Elevation Combat Bonus: +1AR attacker higher, +1DR target higher. */
+function elevationCombatMods(state: GameState, attackerHexId: string, targetHexId: string) {
+  const aElev = state.hexes[attackerHexId]?.elevation ?? 0;
+  const tElev = state.hexes[targetHexId]?.elevation ?? 0;
+  return { elevAr: aElev > tElev ? 1 : 0, elevDr: tElev > aElev ? 1 : 0 };
+}
+
 /** +1 DM if the shot crosses a wall in/bordering the target hex (§5.0.2). */
 function myWallDM(state: GameState, fromId: string, toId: string): number {
   const line = lineDraw(parseHexId(fromId), parseHexId(toId));
@@ -103,22 +126,23 @@ function expectFire(state: GameState, atk: Unit, tgt: Unit) {
   const dist = distance(parseHexId(atk.hexId), parseHexId(tgt.hexId));
   const rm = rangeMod(dist, ae.range);
   if (rm === null) return null;
-  const baseFP = (te.color === 'red' ? ae.fpRed : ae.fpBlue) + rm;
+  const { elevAr, elevDr } = elevationCombatMods(state, atk.hexId, tgt.hexId);
+  const ar = (te.color === 'red' ? ae.fpRed : ae.fpBlue) + rm + elevAr;
   const inFront = inArc(tgt.hexId, tgt.facing, atk.hexId); // attacker in target's front?
-  const dr = inFront ? te.front : te.flank;
+  const defense = inFront ? te.front : te.flank;
   const tHex = state.hexes[tgt.hexId]!;
-  const dv = dr + TERRAIN[tHex.terrain].dm + (tHex.features.smoke ?? 0) + myWallDM(state, atk.hexId, tgt.hexId);
-  return { baseFP, dv, isFlank: !inFront, apToFire: ae.apToFire };
+  const dr = defense + TERRAIN[tHex.terrain].dm + (tHex.features.smoke ?? 0) + myWallDM(state, atk.hexId, tgt.hexId) + elevDr;
+  return { ar, dr, hitNumber: dr - ar, isFlank: !inFront, apToFire: ae.apToFire };
 }
 
 function expectCC(state: GameState, atk: Unit, tgt: Unit) {
   const ae = myEff(state, atk);
   const te = myEff(state, tgt);
   const whiteBox = !!state.templates[atk.templateId]!.whiteBoxFp;
-  const baseFP = (te.color === 'red' ? ae.fpRed : ae.fpBlue) + (whiteBox ? -2 : 4);
+  const ar = (te.color === 'red' ? ae.fpRed : ae.fpBlue) + (whiteBox ? -2 : 4);
   const tHex = state.hexes[tgt.hexId]!;
-  const dv = te.flank + TERRAIN[tHex.terrain].dm + (tHex.features.smoke ?? 0);
-  return { baseFP, dv, apToFire: ae.apToFire };
+  const dr = te.flank + TERRAIN[tHex.terrain].dm + (tHex.features.smoke ?? 0);
+  return { ar, dr, hitNumber: dr - ar, apToFire: ae.apToFire };
 }
 
 function expectMoveCost(state: GameState, unit: Unit, toId: string): number {
@@ -131,29 +155,55 @@ function expectMoveCost(state: GameState, unit: Unit, toId: string): number {
   const dir = directionTo(unit.hexId, toId);
   const opp = (dir + 3) % 6;
   if (from.walls[dir] || to.walls[opp]) ap += 1; // wall crossing (§5.0.2)
-  ap += Math.max(0, to.elevation - from.elevation); // uphill (§5)
+  ap += elevationMoveCost(from.elevation, to.elevation); // §12.2
   return ap;
 }
 
 // ---------------------------------------------------------------------------
-// Helpers
+// v3 helpers: action actor, expected base cost, and Spent-event parsing
 // ---------------------------------------------------------------------------
 
-type Mode = 'ap' | 'opportunity' | 'invalid';
-
-function modeOf(state: GameState, unitId: string): Mode {
-  const u = state.units[unitId];
-  if (!u) return 'invalid';
-  if (state.players[u.side].activatedUnitId === unitId) return 'ap';
-  if (u.status === 'fresh') return 'opportunity';
-  return 'invalid';
+/** The Unit that performs an Action (none for PASS). */
+function actorId(a: Action): string | null {
+  switch (a.type) {
+    case 'MOVE':
+    case 'PIVOT':
+    case 'RALLY':
+    case 'STALL':
+      return a.unitId;
+    case 'FIRE':
+    case 'CLOSE_COMBAT':
+      return a.attackerId;
+    default:
+      return null;
+  }
 }
 
-function apPaid(pre: GameState, post: GameState, side: 'A' | 'B'): number {
-  return (
-    pre.players[side].ap + pre.players[side].capCurrent -
-    (post.players[side].ap + post.players[side].capCurrent)
-  );
+/** Base Action Cost (before Stress / CAPs), re-derived from the rules. */
+function expectBase(state: GameState, a: Action): number {
+  switch (a.type) {
+    case 'MOVE':
+      return expectMoveCost(state, state.units[a.unitId]!, a.toHexId);
+    case 'FIRE':
+    case 'CLOSE_COMBAT':
+      return myEff(state, state.units[a.attackerId]!).apToFire;
+    case 'RALLY':
+      return 5;
+    case 'PIVOT':
+    case 'STALL':
+      return 1;
+    default:
+      return 0;
+  }
+}
+
+/** Parse the engine's Spent-Check log line (§2.5). */
+function parseSpent(events: GameEvent[]): { roll: number; cost: number; fresh: boolean } | null {
+  const e = events.find((x) => x.type === 'spent');
+  if (!e) return null;
+  const m = /rolled (\d+) vs cost (\d+) -> (Fresh|Spent)/.exec(e.text);
+  if (!m) return null;
+  return { roll: Number(m[1]), cost: Number(m[2]), fresh: m[3] === 'Fresh' };
 }
 
 function actionEq(a: Action, b: Action): boolean {
@@ -167,8 +217,7 @@ function actionEq(a: Action, b: Action): boolean {
     case 'PIVOT':
       return a.unitId === (b as typeof a).unitId && a.facing === (b as typeof a).facing;
     case 'RALLY':
-    case 'ACTIVATE_UNIT':
-    case 'MARK_SPENT':
+    case 'STALL':
       return a.unitId === (b as typeof a).unitId;
     default:
       return true;
@@ -183,16 +232,9 @@ interface Violation {
 }
 
 // ---------------------------------------------------------------------------
-// A simple AI to drive the game. style 'activate' = activate then act in AP
-// mode (real combat); style 'opportunity' = act with fresh units (free, spends
-// them) — together they exercise both action modes.
+// A simple AI that drives the game with Fresh units only.
+// 'assault' prefers moving onto an adjacent enemy hex (forces close combat, §5.4).
 // ---------------------------------------------------------------------------
-
-function nearestEnemyDist(state: GameState, u: Unit): number {
-  const enemies = Object.values(state.units).filter((e) => e.side !== u.side);
-  if (!enemies.length) return Infinity;
-  return Math.min(...enemies.map((e) => distance(parseHexId(u.hexId), parseHexId(e.hexId))));
-}
 
 function bestBy<T>(arr: T[], score: (t: T) => number): T | undefined {
   if (arr.length === 0) return undefined;
@@ -208,58 +250,46 @@ function bestBy<T>(arr: T[], score: (t: T) => number): T | undefined {
   return best;
 }
 
-type Style = 'activate' | 'opportunity' | 'assault';
+type Style = 'default' | 'assault';
 
 function chooseAction(state: GameState, style: Style): Action {
   const side = state.currentSide;
-  const acts = legalActions(state);
-  const player = state.players[side];
   const enemies = Object.values(state.units).filter((e) => e.side !== side);
+  const isFresh = (a: Action) => {
+    const id = actorId(a);
+    return id != null && state.units[id]?.status === 'fresh';
+  };
+  const allActs = legalActions(state);
+  // §4.12: bring reinforcements on as soon as they're eligible — they aren't
+  // "fresh Units" (not on the Map yet), so the isFresh filter doesn't apply.
+  const entries = allActs.filter((a): a is Extract<Action, { type: 'ENTER' }> => a.type === 'ENTER');
+  if (entries.length) return entries[0]!;
+
+  const acts = allActs.filter(isFresh);
+
   const towardScore = (toHexId: string) =>
     enemies.length ? -Math.min(...enemies.map((e) => distance(parseHexId(toHexId), parseHexId(e.hexId)))) : 0;
   const fireScore = (a: { attackerId: string; targetId: string }) => {
     const ex = expectFire(state, state.units[a.attackerId]!, state.units[a.targetId]!);
-    return ex ? ex.baseFP - ex.dv : -Infinity;
+    return ex ? -ex.hitNumber : -Infinity; // lower Hit Number = easier
   };
 
-  // Close combat is always taken first (any style).
   const cc = acts.filter((a): a is Extract<Action, { type: 'CLOSE_COMBAT' }> => a.type === 'CLOSE_COMBAT');
-  if (cc.length) return bestBy(cc, (a) => { const e = expectCC(state, state.units[a.attackerId]!, state.units[a.targetId]!); return e.baseFP - e.dv; })!;
+  if (cc.length) return bestBy(cc, (a) => { const e = expectCC(state, state.units[a.attackerId]!, state.units[a.targetId]!); return -e.hitNumber; })!;
 
   const fires = acts.filter((a): a is Extract<Action, { type: 'FIRE' }> => a.type === 'FIRE');
+  if (fires.length) return bestBy(fires, fireScore)!;
 
-  if (style === 'opportunity') {
-    if (fires.length) return bestBy(fires, fireScore)!;
-    const rallies = acts.filter((a) => a.type === 'RALLY');
-    if (rallies.length) return rallies[0]!;
-    const moves = acts.filter((a): a is Extract<Action, { type: 'MOVE' }> => a.type === 'MOVE');
-    if (moves.length) return bestBy(moves, (a) => towardScore(a.toHexId))!;
-    return { type: 'PASS' };
-  }
-
-  // 'activate' and 'assault' both use activation (AP-mode coverage).
-  if (!player.activatedUnitId) {
-    const activations = acts.filter((a): a is Extract<Action, { type: 'ACTIVATE_UNIT' }> => a.type === 'ACTIVATE_UNIT');
-    if (activations.length) return bestBy(activations, (a) => -nearestEnemyDist(state, state.units[a.unitId]!))!;
-  }
-  const U = player.activatedUnitId;
-  const rallies = acts.filter((a) => a.type === 'RALLY' && a.unitId === U);
+  const rallies = acts.filter((a) => a.type === 'RALLY');
   if (rallies.length) return rallies[0]!;
 
-  // Assault: prefer moving ONTO an adjacent enemy hex (forces close combat, §5.4).
-  if (style === 'assault' && U) {
-    const onto = acts.filter(
-      (a): a is Extract<Action, { type: 'MOVE' }> =>
-        a.type === 'MOVE' && a.unitId === U && enemies.some((e) => e.hexId === a.toHexId),
-    );
+  const moves = acts.filter((a): a is Extract<Action, { type: 'MOVE' }> => a.type === 'MOVE');
+  if (style === 'assault') {
+    const onto = moves.filter((a) => enemies.some((e) => e.hexId === a.toHexId));
     if (onto.length) return onto[0]!;
   }
+  if (moves.length) return bestBy(moves, (a) => towardScore(a.toHexId))!;
 
-  const fU = fires.filter((a) => a.attackerId === U);
-  if (fU.length) return bestBy(fU, fireScore)!;
-  const movesU = acts.filter((a): a is Extract<Action, { type: 'MOVE' }> => a.type === 'MOVE' && a.unitId === U);
-  if (movesU.length) return bestBy(movesU, (a) => towardScore(a.toHexId))!;
-  if (U) return { type: 'MARK_SPENT', unitId: U };
   return { type: 'PASS' };
 }
 
@@ -280,7 +310,7 @@ interface GameResult {
 }
 
 function playGame(seed: number, style: Style): GameResult {
-  let state = initGame({ ...FIREFIGHT_1, seed });
+  let state = initGame({ ...MISSION_1, seed });
   const violations: Violation[] = [];
   const coverage: Record<string, number> = {};
   const bump = (k: string) => (coverage[k] = (coverage[k] ?? 0) + 1);
@@ -308,10 +338,12 @@ function playGame(seed: number, style: Style): GameResult {
       }
     }
 
-    const mode = action.type === 'MOVE' || action.type === 'FIRE' || action.type === 'CLOSE_COMBAT' ||
-      action.type === 'RALLY' || action.type === 'PIVOT'
-      ? modeOf(pre, (action as { unitId?: string; attackerId?: string }).unitId ?? (action as { attackerId: string }).attackerId)
-      : 'invalid';
+    // Independent expectations BEFORE reducing -------------------------------
+    const aId = actorId(action);
+    const actor = aId ? pre.units[aId] : null;
+    const expStress = actor?.stressed ? 1 : 0;
+    const expCost = aId ? expectBase(pre, action) + expStress : 0;
+    const preCap = { A: pre.players.A.capCurrent, B: pre.players.B.capCurrent };
 
     // Pre-roll peeks (deterministic from pre.rng) for dice actions ----------
     const firePeek =
@@ -329,50 +361,73 @@ function playGame(seed: number, style: Style): GameResult {
     const post = res.state;
 
     // Post invariants -------------------------------------------------------
-    check(post.players.A.ap >= 0 && post.players.B.ap >= 0, '3.0', 'AP went negative');
     check(post.players.A.capCurrent >= 0 && post.players.B.capCurrent >= 0, '3.2', 'CAP went negative');
     for (const u of Object.values(post.units)) check(u.hitMarkers.length <= 1, '7.4', `${u.id} has >1 hit marker`);
 
-    // VP only from destroyed units this step (§2.5.1) -----------------------
+    // §7.13: a new Round resets each side's CAP to max(3, capStart − losses).
+    if (post.phase === 'playing' && post.round > pre.round) {
+      for (const sd of ['A', 'B'] as SideId[]) {
+        const p = post.players[sd];
+        const exp = Math.max(3, p.capStart - p.unitLosses);
+        check(p.capCurrent === exp, '7.13', `round-reset CAP for ${sd} ${p.capCurrent} != ${exp}`);
+      }
+    }
+
+    // VP from destroyed units (§9.1) plus end-of-Round control awards (§9.1) --
     const destroyed = Object.keys(pre.units).filter((id) => !post.units[id]);
     let vpToA = 0;
     let vpToB = 0;
     for (const id of destroyed) {
       const u = pre.units[id]!;
-      const vp = pre.templates[u.templateId]!.vp;
-      if (otherSide(u.side) === 'A') vpToA += vp;
+      const opp = otherSide(u.side);
+      const vp = vpPerKillFor(pre.victory, opp) ?? pre.templates[u.templateId]!.vp;
+      if (opp === 'A') vpToA += vp;
       else vpToB += vp;
     }
-    check(post.players.A.vp - pre.players.A.vp === vpToA, '2.5.1', `Side A VP delta ${post.players.A.vp - pre.players.A.vp} != ${vpToA} from kills`);
-    check(post.players.B.vp - pre.players.B.vp === vpToB, '2.5.1', `Side B VP delta ${post.players.B.vp - pre.players.B.vp} != ${vpToB} from kills`);
+    // A Round-ending Pass also awards control VP for each held objective (§9.0).
+    const roundEnded = action.type === 'PASS' && (post.round > pre.round || post.phase === 'gameOver');
+    if (roundEnded) {
+      for (const vh of post.victory.victoryHexes) {
+        const ctrl = post.hexes[vh.hexId]?.features.control;
+        const vp = vpForRound(vh, pre.round);
+        if (ctrl === 'A') vpToA += vp;
+        else if (ctrl === 'B') vpToB += vp;
+      }
+    }
+    check(post.players.A.vp - pre.players.A.vp === vpToA, '9.1', `Side A VP delta ${post.players.A.vp - pre.players.A.vp} != ${vpToA} (kills+control)`);
+    check(post.players.B.vp - pre.players.B.vp === vpToB, '9.1', `Side B VP delta ${post.players.B.vp - pre.players.B.vp} != ${vpToB} (kills+control)`);
+    // §9.2: the no-tie marker is never 0 — one side always holds VP Advantage.
+    check(post.vpMarker !== 0, '9.2', 'VP marker landed on 0 (no-tie violated)');
 
     const handover = (turnAction: boolean) => {
       if (post.phase !== 'playing' || post.round !== pre.round) return; // round/game ended
       if (turnAction) check(post.currentSide !== pre.currentSide, '2.2', `turn should alternate after ${action.type}`);
       else check(post.currentSide === pre.currentSide, '2.2', `${action.type} should not change the active side`);
     };
-    const oppSpent = (id: string) => {
-      if (mode === 'opportunity') check(!post.units[id] || post.units[id]!.status === 'spent', '3.1', `${id} opportunity action should spend it`);
+
+    // Spent Check + Stress for any cost-bearing Action (§2.5, §2.6) ----------
+    const verifyEconomy = (side: SideId, id: string) => {
+      // The AI only acts with Fresh units → no CAP is spent (cost > 0AP).
+      check(post.players[side].capCurrent === preCap[side], '3.3', `fresh action should spend no CAP (${aStr})`);
+      const sp = parseSpent(res.events);
+      check(!!sp, '2.5', `expected a Spent Check log for ${aStr}`);
+      if (sp) {
+        check(sp.cost === expCost, '2.4', `Spent Check cost engine ${sp.cost} != expected ${expCost}`);
+        check(sp.fresh === sp.roll > sp.cost, '2.5', `Spent result inconsistent: rolled ${sp.roll} vs ${sp.cost} -> ${sp.fresh}`);
+        const postActor = post.units[id];
+        if (postActor) check(postActor.status === (sp.fresh ? 'fresh' : 'spent'), '2.5', `actor status ${postActor.status} != Spent Check result`);
+      }
+      // Stress Marker moved onto the actor; at most one stressed unit per side (§2.6).
+      const postActor = post.units[id];
+      if (postActor) check(postActor.stressed === true, '2.6', `${id} should be Stressed after acting`);
+      const stressedSame = Object.values(post.units).filter((u) => u.side === side && u.stressed);
+      check(stressedSame.length <= 1, '2.6', `side ${side} has ${stressedSame.length} stressed units (max 1)`);
     };
 
     switch (action.type) {
-      case 'ACTIVATE_UNIT': {
-        const u = post.units[action.unitId]!;
-        check(post.players[u.side].activatedUnitId === action.unitId, '3.0', 'activate sets activatedUnitId');
-        check(post.players[u.side].ap === 7, '3.0', 'activate grants 7 AP');
-        check(u.status === 'active', '2.2', 'activated unit is active');
-        handover(false);
-        bump('ACTIVATE');
-        break;
-      }
       case 'MOVE': {
-        const preU = pre.units[action.unitId]!;
-        const exp = expectMoveCost(pre, preU, action.toHexId);
-        const paid = apPaid(pre, post, preU.side);
-        if (mode === 'ap') check(paid === exp, '5.0', `move AP cost ${paid} != expected ${exp}`);
-        else check(paid === 0, '3.1', `opportunity move should be free, paid ${paid}`);
-        check(post.units[action.unitId]?.hexId === action.toHexId, '5.4', 'unit did not move to target hex');
-        oppSpent(action.unitId);
+        check(post.units[action.unitId]?.hexId === action.toHexId, '4.5', 'unit did not move to target hex');
+        verifyEconomy(pre.units[action.unitId]!.side, action.unitId);
         handover(true);
         bump('MOVE');
         break;
@@ -382,31 +437,24 @@ function playGame(seed: number, style: Style): GameResult {
         const stack = firePeek!;
         // §7.5.1: one shot at a hex hits every enemy stacked there.
         check(stack.rolls.length >= 1, '7.5.1', 'fire should resolve at least one target');
-        check(
-          stack.rolls.some((r) => r.targetId === action.targetId),
-          '7.5.1',
-          'clicked target must be among the resolved stack',
-        );
+        check(stack.rolls.some((r) => r.targetId === action.targetId), '7.5.1', 'clicked target must be among the resolved stack');
         for (const { targetId, roll } of stack.rolls) {
           const exp = expectFire(pre, attacker, pre.units[targetId]!);
           if (!exp) {
-            check(false, '7.7', `${targetId} in fired hex should be a legal target`);
+            check(false, '6.0', `${targetId} in fired hex should be a legal target`);
             continue;
           }
-          check(roll.dv === exp.dv, '7.3', `DV: engine ${roll.dv} != expected ${exp.dv}`);
-          const myAV = exp.baseFP + roll.dice[0] + roll.dice[1];
-          check(roll.av === myAV, '7.2', `AV: engine ${roll.av} != expected ${myAV} (FP ${exp.baseFP}+${roll.dice[0]}+${roll.dice[1]})`);
-          check(roll.hit === myAV >= exp.dv, '7.0', `hit: engine ${roll.hit} != ${myAV >= exp.dv}`);
-          check(roll.critical === myAV >= exp.dv + 4, '7.0', `crit: engine ${roll.critical} != ${myAV >= exp.dv + 4}`);
-          check(roll.isFlank === exp.isFlank, '7.3', `flank flag mismatch`);
+          check(roll.ar === exp.ar, '6.1', `AR: engine ${roll.ar} != expected ${exp.ar}`);
+          check(roll.dr === exp.dr, '6.3', `DR: engine ${roll.dr} != expected ${exp.dr}`);
+          check(roll.hitNumber === exp.hitNumber, '6.8', `Hit Number: engine ${roll.hitNumber} != expected ${exp.hitNumber} (DR ${exp.dr} − AR ${exp.ar})`);
+          const myTotal = roll.dice[0] + roll.dice[1];
+          check(roll.total === myTotal, '6.8', `total: engine ${roll.total} != ${myTotal}`);
+          check(roll.hit === myTotal >= exp.hitNumber, '6.8', `hit: engine ${roll.hit} != ${myTotal >= exp.hitNumber}`);
+          check(roll.critical === myTotal >= exp.hitNumber + 4, '6.8', `crit: engine ${roll.critical} != ${myTotal >= exp.hitNumber + 4}`);
+          check(roll.isFlank === exp.isFlank, '6.3', `flank flag mismatch`);
           verifyHit(pre, post, targetId, roll.hit, roll.critical, check);
         }
-        // The whole shot costs a single fire action (§7.5.1).
-        const paid = apPaid(pre, post, attacker.side);
-        const apToFire = myEff(pre, attacker).apToFire;
-        if (mode === 'ap') check(paid === apToFire, '7.0', `fire AP cost ${paid} != ${apToFire}`);
-        else check(paid === 0, '3.1', `opportunity fire should be free, paid ${paid}`);
-        oppSpent(action.attackerId);
+        verifyEconomy(attacker.side, action.attackerId);
         handover(true);
         bump('FIRE');
         break;
@@ -414,12 +462,12 @@ function playGame(seed: number, style: Style): GameResult {
       case 'CLOSE_COMBAT': {
         const exp = expectCC(pre, pre.units[action.attackerId]!, pre.units[action.targetId]!);
         const peek = ccPeek!;
-        check(peek.dv === exp.dv, '7.7.3', `CC DV: engine ${peek.dv} != expected ${exp.dv} (flank+terrain)`);
-        const myAV = exp.baseFP + peek.dice[0] + peek.dice[1];
-        check(peek.av === myAV, '7.7.3', `CC AV: engine ${peek.av} != expected ${myAV} (FP ${exp.baseFP})`);
-        check(peek.isFlank === true, '7.7.3', 'CC must resolve vs flank DR');
+        check(peek.ar === exp.ar, '6.11', `CC AR: engine ${peek.ar} != expected ${exp.ar}`);
+        check(peek.dr === exp.dr, '6.11', `CC DR: engine ${peek.dr} != expected ${exp.dr} (flank+terrain)`);
+        check(peek.hitNumber === exp.hitNumber, '6.11', `CC Hit Number: engine ${peek.hitNumber} != expected ${exp.hitNumber}`);
+        check(peek.isFlank === true, '6.11', 'CC must resolve vs flank DR');
         verifyHit(pre, post, action.targetId, peek.hit, peek.critical, check);
-        oppSpent(action.attackerId);
+        verifyEconomy(pre.units[action.attackerId]!.side, action.attackerId);
         handover(true);
         bump('CC');
         break;
@@ -435,46 +483,50 @@ function playGame(seed: number, style: Style): GameResult {
           if (o.id !== preU.id && o.side === preU.side && o.hexId === preU.hexId && o.hitMarkers.length === 0) mod += 1;
         }
         const myTotal = peek.dice[0] + peek.dice[1] + mod;
-        check(peek.target === def.rally, '7.6', `rally number engine ${peek.target} != ${def.rally}`);
-        check(peek.total === myTotal, '7.6.1', `rally total engine ${peek.total} != ${myTotal} (mods ${mod})`);
-        check(peek.success === myTotal >= def.rally, '7.6', 'rally success mismatch');
+        check(peek.target === def.rally, '7.7', `rally number engine ${peek.target} != ${def.rally}`);
+        check(peek.total === myTotal, '7.7', `rally total engine ${peek.total} != ${myTotal} (mods ${mod})`);
+        check(peek.success === myTotal >= def.rally, '7.7', 'rally success mismatch');
         const postU = post.units[action.unitId];
-        if (myTotal >= def.rally) check(!!postU && postU.hitMarkers.length === 0, '7.6', 'successful rally should remove the marker');
-        else check(!!postU && postU.hitMarkers.length === preU.hitMarkers.length, '7.6', 'failed rally should keep the marker');
-        const paid = apPaid(pre, post, preU.side);
-        if (mode === 'ap') check(paid === 5, '7.6', `rally AP cost ${paid} != 5`);
-        oppSpent(action.unitId);
+        if (myTotal >= def.rally) check(!!postU && postU.hitMarkers.length === 0, '7.7', 'successful rally should remove the marker');
+        else check(!!postU && postU.hitMarkers.length === preU.hitMarkers.length, '7.7', 'failed rally should keep the marker');
+        // §7.10: a Spent Check follows the rally regardless of result.
+        verifyEconomy(preU.side, action.unitId);
         handover(true);
         bump('RALLY');
         break;
       }
       case 'PIVOT': {
-        const paid = apPaid(pre, post, pre.units[action.unitId]!.side);
-        if (mode === 'ap') check(paid === 1, '5.3', `pivot AP cost ${paid} != 1`);
-        check(post.units[action.unitId]?.facing === action.facing, '5.3', 'pivot did not set facing');
-        oppSpent(action.unitId);
+        check(post.units[action.unitId]?.facing === action.facing, '4.5', 'pivot did not set facing');
+        verifyEconomy(pre.units[action.unitId]!.side, action.unitId);
         handover(true);
         bump('PIVOT');
         break;
       }
-      case 'MARK_SPENT': {
-        check(post.units[action.unitId]?.status === 'spent', '2.2', 'mark-spent did not spend the unit');
-        handover(false);
-        bump('MARKSPENT');
-        break;
-      }
       case 'STALL': {
-        const paid = apPaid(pre, post, pre.currentSide);
-        check(paid === 1, '2.2', `stall should cost 1, paid ${paid}`);
+        verifyEconomy(pre.units[action.unitId]!.side, action.unitId);
         handover(true);
         bump('STALL');
         break;
       }
+      case 'ENTER': {
+        // §4.12: 0AP, never a Spent Check, but the Unit(s) are Stressed.
+        for (const p of action.placements) {
+          check(post.units[p.unitId]?.hexId === p.hexId, '4.12', 'entered unit should be at its chosen hex');
+          check(post.units[p.unitId]?.stressed === true, '2.6', 'entry should Stress the unit');
+        }
+        check(parseSpent(res.events) === null, '4.12', 'entry makes no Spent Check');
+        handover(true);
+        bump('ENTER');
+        break;
+      }
       case 'PASS': {
         if (post.phase === 'playing' && post.round === pre.round) {
-          check(post.currentSide !== pre.currentSide, '2.2', 'pass should alternate turn');
-          check(post.consecutivePasses === pre.consecutivePasses + 1, '2.3', 'pass should increment the pass counter');
+          check(post.currentSide !== pre.currentSide, '2.7', 'pass should alternate turn');
+          check(post.consecutivePasses === pre.consecutivePasses + 1, '2.7', 'pass should increment the pass counter');
         }
+        // Passing clears the passing side's Stress (§2.7).
+        const stillStressed = Object.values(post.units).filter((u) => u.side === pre.currentSide && u.stressed);
+        check(stillStressed.length === 0, '2.7', `pass should clear side ${pre.currentSide}'s Stress`);
         bump('PASS');
         break;
       }
@@ -516,15 +568,16 @@ function verifyHit(
     check(!postT, '7.4', 'critical or second hit must destroy the target');
     return;
   }
-  check(!postT || postT.hitMarkers.length === 1, '7.5', 'a first hit must add exactly one marker (or KIA destroys)');
+  check(!postT || postT.hitMarkers.length === 1, '7.5', 'a first hit must add exactly one marker (or Destroyed kills)');
 }
 
 // ---------------------------------------------------------------------------
-// Scripted probe for the two actions the AI rarely takes (pivot, stall).
+// Scripted probe for the actions the AI rarely takes: pivot, stall, and a
+// Spent unit acting by buying its cost down to 0AP with CAPs (§3.4).
 // ---------------------------------------------------------------------------
 
 function probe(): GameResult {
-  let state = initGame({ ...FIREFIGHT_1, seed: 909 });
+  let state = initGame({ ...MISSION_1, seed: 909 });
   const violations: Violation[] = [];
   const coverage: Record<string, number> = {};
   const bump = (k: string) => (coverage[k] = (coverage[k] ?? 0) + 1);
@@ -532,39 +585,92 @@ function probe(): GameResult {
     if (!cond) violations.push({ section, msg, round: state.round, action: 'probe' });
   };
 
+  // §4.12: Mission 1's German platoon starts as a Round-1 reinforcement (no
+  // on-map Units yet) — enter the whole Group as one Action first, so the rest
+  // of this probe has Side A Units to pivot/stall/move as before.
   const side = state.currentSide;
-  const u = Object.values(state.units).find((x) => x.side === side)!;
-  state = reduce(state, { type: 'ACTIVATE_UNIT', unitId: u.id }).state;
-  check(state.players[side].ap === 7, '3.0', 'probe: activate should grant 7 AP');
+  const waveReinf = state.reinforcements.filter((r) => r.side === side && state.round >= r.earliestRound);
+  if (waveReinf.length) {
+    const placements = waveReinf.map((r) => ({
+      unitId: r.id,
+      hexId: legalEntryHexes(state, r)[0]!,
+      facing: r.facing,
+    }));
+    const re = reduce(state, { type: 'ENTER', placements });
+    if (re.events[0]?.type === 'illegal') {
+      check(false, '4.12', `probe: reinforcement entry rejected (${re.events[0]?.text})`);
+    } else {
+      check(
+        placements.every((p) => re.state.units[p.unitId]?.hexId === p.hexId),
+        '4.12',
+        'probe: entered Units should be placed on their chosen entry Hex',
+      );
+      check(
+        placements.every((p) => re.state.units[p.unitId]?.stressed === true),
+        '2.6',
+        'probe: entry Stresses the Unit',
+      );
+      check(parseSpent(re.events) === null, '4.12', 'probe: entry makes no Spent Check');
+      check(re.state.currentSide !== side, '4.12', 'probe: entry should hand over the turn');
+      bump('ENTER');
+      state = re.state;
+    }
+  }
 
-  // Pivot (1 AP, sets facing, hands over the turn).
-  const apBefore = state.players[side].ap;
+  // Re-derive whose Turn it is now — entry (if any) already handed it over.
+  const u = Object.values(state.units).find((x) => x.side === state.currentSide)!;
+
+  // Pivot (cost 1, sets facing, runs a Spent Check, hands over the turn).
   const turnBefore = state.currentSide;
   const newFacing = ((u.facing + 2) % 6) as 0 | 1 | 2 | 3 | 4 | 5;
   const rp = reduce(state, { type: 'PIVOT', unitId: u.id, facing: newFacing });
   if (rp.events[0]?.type === 'illegal') {
-    check(false, '5.3', `probe: pivot rejected (${rp.events[0]?.text})`);
+    check(false, '4.5', `probe: pivot rejected (${rp.events[0]?.text})`);
   } else {
-    check(rp.state.units[u.id]?.facing === newFacing, '5.3', 'probe: pivot did not set facing');
-    check(apBefore - rp.state.players[side].ap === 1, '5.3', 'probe: pivot should cost 1 AP');
+    check(rp.state.units[u.id]?.facing === newFacing, '4.5', 'probe: pivot did not set facing');
+    check(rp.state.units[u.id]?.stressed === true, '2.6', 'probe: pivot should Stress the unit');
+    const pivotCost = 1 + (u.stressed ? 1 : 0);
+    check(parseSpent(rp.events)?.cost === pivotCost, '2.4', `probe: pivot Spent Check should be cost ${pivotCost}`);
     check(rp.state.currentSide !== turnBefore, '2.2', 'probe: pivot should hand over the turn');
     bump('PIVOT');
     state = rp.state;
   }
 
-  // Stall by the now-active side (no activated unit → spends 1 CAP).
-  const s = state.currentSide;
-  const capBefore = state.players[s].capCurrent;
-  const apB = state.players[s].ap;
-  const rs = reduce(state, { type: 'STALL' });
+  // Stall by the now-active side (a Unit does nothing; Spent Check + Stress).
+  const s2 = state.currentSide;
+  const u2 = Object.values(state.units).find((x) => x.side === s2 && x.status === 'fresh')!;
+  const rs = reduce(state, { type: 'STALL', unitId: u2.id });
   if (rs.events[0]?.type === 'illegal') {
-    check(false, '2.2', `probe: stall rejected (${rs.events[0]?.text})`);
+    check(false, '2.8', `probe: stall rejected (${rs.events[0]?.text})`);
   } else {
-    const paid = apB + capBefore - (rs.state.players[s].ap + rs.state.players[s].capCurrent);
-    check(paid === 1, '2.2', `probe: stall should cost 1, paid ${paid}`);
-    check(rs.state.currentSide !== s, '2.2', 'probe: stall should hand over the turn');
+    const stallCost = 1 + (u2.stressed ? 1 : 0);
+    check(parseSpent(rs.events)?.cost === stallCost, '2.8', `probe: stall Spent Check should be cost ${stallCost}`);
+    check(rs.state.units[u2.id]?.stressed === true, '2.8', 'probe: stall should Stress the unit');
+    check(rs.state.currentSide !== s2, '2.8', 'probe: stall should hand over the turn');
     bump('STALL');
     state = rs.state;
+  }
+
+  // Spent unit acting via CAP to reach 0AP (§3.4): flip a unit Spent and move it.
+  const s3 = state.currentSide;
+  const u3 = Object.values(state.units).find((x) => x.side === s3)!;
+  const moveTarget = legalActions({ ...state, units: { ...state.units, [u3.id]: { ...u3, status: 'fresh' } } })
+    .find((a): a is Extract<Action, { type: 'MOVE' }> => a.type === 'MOVE' && a.unitId === u3.id);
+  if (moveTarget) {
+    const spentState: GameState = { ...state, units: { ...state.units, [u3.id]: { ...u3, status: 'spent', stressed: false } } };
+    const capBefore = spentState.players[s3].capCurrent;
+    const base = expectBase(spentState, moveTarget); // no Stress (cleared above)
+    // §3.4: a Spent unit must explicitly spend CAPs to reach 0AP (no auto-reduce).
+    const rc = reduce(spentState, { ...moveTarget, capCostReduce: base });
+    if (rc.events[0]?.type === 'illegal') {
+      check(false, '3.4', `probe: spent-unit 0AP move rejected (${rc.events[0]?.text})`);
+    } else {
+      check(rc.state.units[u3.id]?.hexId === moveTarget.toHexId, '3.4', 'probe: spent unit should move');
+      check(rc.state.units[u3.id]?.status === 'spent', '3.4', 'probe: spent unit stays Spent after a 0AP Action');
+      check(parseSpent(rc.events) === null, '3.4', 'probe: 0AP Action makes no Spent Check');
+      check(capBefore - rc.state.players[s3].capCurrent === base, '3.3', `probe: 0AP move should spend ${base} CAP`);
+      bump('SPENT0AP');
+    }
   }
 
   return { seed: 909, style: 'scripted probe', steps: 3, rounds: state.round, winner: '-', vpA: 0, vpB: 0, violations, coverage };
@@ -589,12 +695,12 @@ function report(r: GameResult) {
 }
 
 const games: GameResult[] = [
-  playGame(101, 'activate'),
-  playGame(202, 'opportunity'),
+  playGame(101, 'default'),
+  playGame(202, 'default'),
   playGame(303, 'assault'), // forces move-into-enemy-hex + close combat
-  probe(), // pivot + stall
+  probe(), // pivot + stall + spent-unit-via-CAP
 ];
-console.log('Conflict of Heroes — rules conformance audit (Firefight 1)');
+console.log('Conflict of Heroes — rules conformance audit (Mission 1, v3 economy)');
 for (const g of games) report(g);
 const total = games.reduce((n, g) => n + g.violations.length, 0);
 console.log(`\nTOTAL violations across ${games.length} games: ${total}`);

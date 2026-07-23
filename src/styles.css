@@ -43,6 +43,12 @@ button.primary {
   border-color: #3c8a4c;
   font-weight: 700;
 }
+button.danger {
+  background: #7a2020;
+  border-color: #a83a3a;
+  color: #fff;
+  font-weight: 700;
+}
 button.on {
   background: #4a3a16;
   border-color: var(--accent);
@@ -96,6 +102,13 @@ button.link {
   gap: 6px;
   flex-wrap: wrap;
 }
+.online-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.85rem;
+  color: var(--dim);
+}
 .left {
   grid-column: 1;
   display: flex;
@@ -123,11 +136,107 @@ button.link {
 }
 
 /* ---- board ---- */
+/* Wraps just the <svg class="board"> (not the other .center children like
+   ActionChooser/DiceRoller/etc.) so TurnFlash's `inset: 0` sizes to the
+   board's own rendered box, not `.center`'s. `.center` is a flex ROW with
+   `align-items: flex-start` and no explicit height, so it can be taller
+   than the board itself (whatever's left of the viewport below `.board`'s
+   own `max-height` cap) — a real bug once shipped: TurnFlash centered its
+   text within `.center`'s full (larger, viewport-dependent) height instead
+   of the board's, landing the text somewhere below/outside the visible map
+   depending on window size, not fading in place over it as intended. No
+   explicit height on `.board-frame` itself — it shrink-wraps to the SVG's
+   own intrinsic height, so it's authoritative regardless of `.center`'s.
+   Has no other effect: it doesn't touch `.center`'s own row-flex layout. */
+.board-frame {
+  position: relative;
+  width: 100%;
+}
 .board {
   width: 100%;
   height: auto;
   max-height: calc(100vh - 90px);
   display: block;
+}
+
+/* Large text flashed over the board announcing whose Turn it is, fading
+   away over 4s (TurnFlash.tsx) — pinned to the top of the map, not centered
+   over it (so it doesn't sit on top of units/terrain mid-board). */
+.turn-flash {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 1.2rem;
+  pointer-events: none;
+  z-index: 5;
+}
+.turn-flash__text {
+  font-size: 3rem;
+  font-weight: 800;
+  padding: 0.4em 0.9em;
+  border-radius: 16px;
+  background: rgba(10, 13, 8, 0.62);
+  border: 2px solid var(--line);
+  text-shadow: 0 2px 6px rgba(0, 0, 0, 0.6);
+  animation: turn-flash-fade 4s ease-out forwards;
+}
+.turn-flash__text[data-side='A'] {
+  color: #dfe4e9;
+  border-color: #7d8794;
+}
+.turn-flash__text[data-side='B'] {
+  color: #ffc9c9;
+  border-color: #c45b5b;
+}
+@keyframes turn-flash-fade {
+  0% {
+    opacity: 0;
+    transform: scale(0.92);
+  }
+  12% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  65% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+/* Callout above the map when an OBA Strike is resolving (§13.6-13.9,
+   Board.tsx) — normal document flow (not absolutely overlaid), so it sits
+   above the SVG rather than competing with .turn-flash's centered position. */
+.oba-callout {
+  text-align: center;
+  font-weight: 700;
+  font-size: 1.05rem;
+  color: #ffd166;
+  background: linear-gradient(180deg, #3a1f10, #241209);
+  border: 1px solid #ff7b3d;
+  border-radius: 8px;
+  padding: 0.45rem 1rem;
+  margin-bottom: 0.5rem;
+  animation: oba-callout-fade 2.4s ease-in-out forwards;
+}
+@keyframes oba-callout-fade {
+  0% {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+  10% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  80% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
 }
 
 /* ---- panels ---- */
@@ -140,6 +249,63 @@ button.link {
 .panel h3 {
   margin: 0 0 0.5rem;
   font-size: 1rem;
+}
+/* EXPERIMENTAL (easy to roll back via git): counter moved below the name,
+   at 3x scale, with text labels beside the printed numbers instead of a
+   separate stats-grid. */
+.inspector-header {
+  display: flex;
+  flex-direction: column;
+  gap: 0.0rem;
+}
+.inspector-header h3 {
+  /* Halves .panel h3's global 0.5rem margin-bottom, just for this heading —
+     combined with the gap above, that's half the old name-to-counter space. */
+  margin-bottom: 0.25rem;
+}
+.inspector-counter-row {
+  display: flex;
+  align-items: stretch;
+  justify-content: center;
+  gap: 0;
+}
+.inspector-counter-labels {
+  position: relative;
+  flex: 0 0 42px;
+}
+.inspector-counter-labels--left {
+  text-align: right;
+}
+.inspector-counter-labels--right {
+  text-align: left;
+}
+.inspector-counter-labels__item {
+  position: absolute;
+  /* -50% recenters on its own `top`; the extra -5px nudges every label up. */
+  transform: translateY(calc(-50% - 10px));
+  font-size: 1.0rem;
+  color: var(--dim);
+  line-height: 1.15;
+}
+.inspector-counter-labels--left .inspector-counter-labels__item {
+  /* Pulled in past the `pad` inset (Inspector.tsx's INSPECTOR_PAD_INNER ≈
+     13px, +8px closer per feedback) UnitCounter.tsx uses to indent each
+     number from the counter's edge, so the label overlaps in toward the
+     number itself instead of stopping at the true image border. */
+  right: -23px;
+}
+.inspector-counter-labels--right .inspector-counter-labels__item {
+  left: -23px;
+}
+.inspector-counter {
+  /* 3x board scale (237.6px, matches Inspector.tsx's INSPECTOR_COUNTER_SIZE). */
+  flex: 0 0 auto;
+  width: 237.6px;
+}
+.inspector-counter-range {
+  text-align: center;
+  font-size: 1.0rem;
+  color: var(--dim);
 }
 
 .track {
@@ -192,6 +358,119 @@ button.link {
   background: var(--line);
   color: var(--dim);
 }
+.badge--adv {
+  background: #d8b24a;
+  color: #1b1b1b;
+  margin-left: 0.35rem;
+}
+
+/* ---- reinforcements panel ---- */
+.reinforce__wave {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 0.4rem 0.5rem;
+  margin-bottom: 0.4rem;
+}
+.reinforce__wave:last-child {
+  margin-bottom: 0;
+}
+.reinforce__wave.is-eligible {
+  border-color: #d8b24a;
+}
+.reinforce__cond {
+  font-size: 0.82rem;
+  margin-bottom: 0.35rem;
+}
+.reinforce__units {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+.reinforce__unit {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.85rem;
+}
+.reinforce__badge {
+  flex: 0 0 auto;
+  font-size: 0.65rem;
+  font-weight: 700;
+  color: #1b1b1b;
+  border: 1px solid #0006;
+  border-radius: 3px;
+  padding: 0.05rem 0.3rem;
+  min-width: 2.4em;
+  text-align: center;
+}
+.reinforce__name {
+  color: var(--dim);
+  flex: 1 1 auto;
+}
+.reinforce__place {
+  flex: 0 0 auto;
+  font-size: 0.72rem;
+  padding: 0.1rem 0.4rem;
+}
+.reinforce__place.is-active {
+  border-color: #c77dff;
+  color: #c77dff;
+}
+.reinforce__enter {
+  margin-top: 0.4rem;
+  width: 100%;
+}
+.reinforce__wave-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+.reinforce__status {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  font-size: 0.82rem;
+  color: #c77dff;
+  border: 1px solid #c77dff;
+  border-radius: 6px;
+  padding: 0.35rem 0.5rem;
+  margin-bottom: 0.5rem;
+}
+
+/* ---- hand panel (§8 Cards — plain-text, the full card-art UI is deferred) ---- */
+.hand-panel {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 0.4rem 0.5rem;
+  margin-top: 0.4rem;
+}
+.hand-panel__head {
+  font-weight: 700;
+  font-size: 0.82rem;
+  margin-bottom: 0.35rem;
+}
+.hand-panel__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+.hand-panel__card {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 0.3rem 0.4rem;
+}
+.hand-panel__name {
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+.hand-panel__effect {
+  font-size: 0.75rem;
+  margin: 0.15rem 0 0.3rem;
+}
 
 .stats-grid {
   display: grid;
@@ -202,10 +481,82 @@ button.link {
 .stats-grid span {
   color: var(--dim);
 }
+.move-path {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.35rem 0.5rem;
+  border: 1px solid rgba(74, 163, 255, 0.5);
+  border-radius: 4px;
+  background: rgba(74, 163, 255, 0.1);
+}
+.move-path__actions {
+  display: flex;
+  gap: 0.4rem;
+}
 .hit-note {
   color: #ff8a8a;
   font-weight: 700;
   margin: 0.4rem 0;
+  border: 1px solid rgba(255, 138, 138, 0.45);
+  border-radius: 4px;
+  padding: 0.35rem 0.5rem;
+  background: rgba(255, 138, 138, 0.08);
+}
+.hit-note__title {
+  margin-bottom: 0.25rem;
+}
+.hit-note__effects {
+  margin: 0;
+  padding-left: 1.1rem;
+  font-weight: 600;
+}
+.hit-note__effects li {
+  margin: 0.1rem 0;
+}
+.hit-effect {
+  color: #ff8a8a;
+  font-weight: 700;
+  margin: 0.5rem 0;
+  border: 1px solid rgba(255, 138, 138, 0.45);
+  border-radius: 4px;
+  padding: 0.4rem 0.6rem;
+  background: rgba(255, 138, 138, 0.08);
+  text-align: left;
+}
+.hit-effect__title {
+  margin-bottom: 0.2rem;
+}
+.hit-effect__list {
+  margin: 0;
+  padding-left: 1.1rem;
+  font-weight: 600;
+  font-size: 0.85rem;
+}
+.hit-effect__list li {
+  margin: 0.1rem 0;
+}
+.group-members {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  margin: 0.4rem 0;
+}
+.group-chip {
+  border: 1px solid #22d3ee;
+  background: rgba(34, 211, 238, 0.12);
+  color: #d7fbff;
+  border-radius: 999px;
+  padding: 0.15rem 0.5rem;
+  font-size: 0.82rem;
+  cursor: pointer;
+}
+.group-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  margin-top: 0.4rem;
 }
 .actions {
   display: flex;
@@ -230,6 +581,13 @@ button.link {
   gap: 4px;
   flex-wrap: wrap;
 }
+.facing-choice {
+  background: #2a2410;
+  border: 1px solid #e0a83a;
+  border-radius: 6px;
+  padding: 6px 8px;
+  margin: 6px 0;
+}
 
 .log ul {
   list-style: none;
@@ -253,6 +611,10 @@ button.link {
   color: #ff6b6b;
   font-weight: 700;
 }
+.log__obstacle {
+  color: #ff6b6b;
+  font-weight: 700;
+}
 .log__rally {
   color: #a0e0ff;
 }
@@ -265,8 +627,8 @@ button.link {
 
 /* ---- setup ---- */
 .setup {
-  max-width: 640px;
-  margin: 6vh auto;
+  max-width: 1400px;
+  margin: 4vh auto;
   padding: 1.5rem;
   text-align: center;
 }
@@ -277,18 +639,109 @@ button.link {
   color: var(--dim);
   margin-top: 0;
 }
+.setup__topbar {
+  display: flex;
+  justify-content: center;
+  gap: 0.6rem;
+  margin-top: 1.2rem;
+}
+/* Tests (left) | Missions + Play (middle) | selected-mission details (right) */
+.setup__layout {
+  display: grid;
+  grid-template-columns: 240px minmax(320px, 1fr) minmax(380px, 1.4fr);
+  align-items: start;
+  gap: 1.5rem;
+  margin-top: 1.5rem;
+  text-align: left;
+}
+/* Selecting a mission highlights it green — selection only, never a start. */
+.setup__mission-btn.is-selected {
+  border-color: #5ad17a;
+  background: rgba(90, 209, 122, 0.18);
+  color: #7fe89c;
+}
+.setup__details h2 {
+  margin-top: 0;
+}
+.setup__details h4 {
+  margin: 0.9rem 0 0.3rem;
+}
+.setup__detail-line {
+  margin: 0.2rem 0;
+  font-size: 0.9rem;
+}
+.setup__detail-situation {
+  white-space: pre-wrap;
+  font-size: 0.88rem;
+  color: var(--dim);
+}
+/* ~quarter-scale board preview: the real board is ~972px wide at HEX_SIZE=36,
+   so a ~300px-wide box reads as the requested 0.25× view. */
+.setup__map-thumb {
+  width: 100%;
+  max-width: 450px;
+  margin: 0.6rem 0;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--bg);
+}
+.setup__main {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
 .setup__card {
   background: var(--panel);
   border: 1px solid var(--line);
   border-radius: 10px;
   padding: 1.2rem;
-  margin-top: 1.5rem;
   text-align: left;
+}
+.setup__tests {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 1.2rem;
+  text-align: left;
+}
+.setup__tests h2 {
+  margin-top: 0;
 }
 .setup__actions {
   display: flex;
   gap: 0.6rem;
   margin-top: 1rem;
+}
+.setup__actions--vertical {
+  flex-direction: column;
+  align-items: stretch;
+}
+.setup__join {
+  display: flex;
+  gap: 0.6rem;
+  margin-top: 0.6rem;
+}
+/* Authored Setup-phase guidance (GameState.setupInstructions) — free text
+   with real paragraph breaks, so preserve them. */
+.setup-panel__instructions {
+  white-space: pre-wrap;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 0.5rem 0.7rem;
+  font-size: 0.85rem;
+}
+
+.setup__join input {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 0.4rem 0.6rem;
+  border-radius: 6px;
+  border: 1px solid var(--line);
+  background: var(--bg);
+  color: inherit;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
 }
 
 /* ---- modals ---- */
@@ -310,12 +763,47 @@ button.link {
   text-align: center;
   min-width: 260px;
 }
+.dice-modal {
+  max-width: 460px;
+}
 .dice-label {
   font-weight: 700;
 }
 .dice-detail {
   color: var(--dim);
   margin-bottom: 0.8rem;
+}
+.dice-mods {
+  display: flex;
+  gap: 1.2rem;
+  text-align: left;
+  font-size: 0.8rem;
+  margin-bottom: 0.8rem;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  padding: 0.5rem 0;
+}
+.dice-mods__col {
+  flex: 1;
+  min-width: 0;
+}
+.dice-mods__head {
+  font-weight: 700;
+  color: var(--dim);
+  margin-bottom: 0.2rem;
+}
+.dice-mods__row {
+  display: flex;
+  gap: 0.4rem;
+  align-items: baseline;
+}
+.dice-mods__val {
+  font-weight: 700;
+  min-width: 1.6em;
+  flex-shrink: 0;
+}
+.dice-mods__label {
+  flex: 1;
 }
 .dice-row {
   display: flex;
@@ -338,6 +826,11 @@ button.link {
 .outcome--miss {
   color: #ff8a8a;
 }
+.victory__adv {
+  color: #d8b24a;
+  font-weight: 700;
+  margin: 0.2rem 0 0;
+}
 .victory__scores {
   margin: 1rem 0;
   font-size: 1.05rem;
@@ -350,16 +843,28 @@ button.link {
 .hover-units {
   margin-top: 0.6rem;
 }
+.hover-units__heading {
+  /* Same font-size/boldness as `.panel h3` ("Terrain in Hex"), so the two
+     section labels read as a matched pair. */
+  font-size: 1rem;
+  font-weight: bold;
+}
 .hover-units__row {
   display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem;
+  flex-wrap: nowrap;
+  gap: 5px;
   margin-top: 0.35rem;
 }
 .hover-units__cell {
   text-align: center;
+  /* flex-basis is the counter's literal size (--mini-box): 1-2 units render
+     at that size untouched, and flexbox's own shrink math only kicks in
+     once a 3rd would actually overflow the row — never widens the panel. */
+  flex: 0 1 var(--mini-box, 160px);
+  min-width: 0;
 }
 .hover-units__id {
+  margin-top: 3px;
   font-size: 0.68rem;
   color: var(--dim);
 }
@@ -422,6 +927,10 @@ button.link {
   font-weight: 800;
   color: #ffd24a;
 }
+.fire-odds__hopeless {
+  font-size: 1rem;
+  color: #c45b5b;
+}
 .fire-odds__detail {
   font-size: 0.8rem;
   color: var(--dim);
@@ -438,6 +947,59 @@ button.link {
   color: #e7c46a;
 }
 
+/* ---- move-cost popup ---- */
+.move-cost {
+  position: fixed;
+  z-index: 22;
+  pointer-events: none;
+  background: #0e1218f4;
+  border: 1px solid #5ad17a;
+  border-radius: 8px;
+  padding: 0.5rem 0.7rem;
+  box-shadow: 0 6px 18px #0009;
+  min-width: 9rem;
+}
+.move-cost__head {
+  font-weight: 700;
+  margin-bottom: 0.3rem;
+  color: #8fe3a6;
+}
+.move-cost__row {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+  font-size: 0.8rem;
+  color: var(--dim);
+}
+.move-cost__warning {
+  margin-top: 0.3rem;
+  color: #e7c46a;
+  font-weight: 600;
+  justify-content: flex-start;
+}
+
+/* ---- illegal-move popup ---- */
+.move-illegal {
+  position: fixed;
+  z-index: 22;
+  pointer-events: none;
+  background: #0e1218f4;
+  border: 1px solid #c45b5b;
+  border-radius: 8px;
+  padding: 0.5rem 0.7rem;
+  box-shadow: 0 6px 18px #0009;
+  max-width: 16rem;
+}
+.move-illegal__head {
+  font-weight: 700;
+  margin-bottom: 0.25rem;
+  color: #ff9d9d;
+}
+.move-illegal__reason {
+  font-size: 0.8rem;
+  color: var(--dim);
+}
+
 /* ---- confirm + turn banner ---- */
 .confirm {
   background: var(--panel);
@@ -452,6 +1014,25 @@ button.link {
   gap: 0.6rem;
   justify-content: center;
   margin-top: 1rem;
+}
+.confirm__mines-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-top: 0.6rem;
+  font-size: 0.85rem;
+  text-align: left;
+}
+.confirm__mines-stepper {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+.confirm__mines-stepper button {
+  width: 1.8rem;
+  height: 1.8rem;
+  padding: 0;
 }
 .turn-banner {
   background: var(--panel);
@@ -565,4 +1146,677 @@ button.link {
   align-items: center;
   gap: 0.4rem;
   text-align: left;
+}
+
+/* ---------------------------------------------------------------------------
+   Mission Editor — "Field Manual" theme (dark olive/khaki, monospace, sharp
+   corners), per docs/design_handoff_mission_editor/README.md's design tokens.
+   Scoped entirely under .editor so it can never leak into the live game UI.
+--------------------------------------------------------------------------- */
+.editor {
+  display: flex;
+  height: 100vh;
+  width: 100vw;
+  background: #1b1d16;
+  color: #d9d4bd;
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+  font-size: 18.8px;
+}
+.editor * {
+  box-sizing: border-box;
+  border-radius: 0 !important;
+}
+.editor__sidebar {
+  width: 224px;
+  flex: 0 0 224px;
+  background: #15170f;
+  border-right: 1px solid #3a3d2e;
+  display: flex;
+  flex-direction: column;
+  padding: 0.9rem 0;
+}
+.editor__brand {
+  font-size: 16.5px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  color: #c9a04a;
+  padding: 0 0.9rem 0.4rem;
+}
+.editor__mission-title {
+  font-size: 19.5px;
+  color: #e5e0c9;
+  padding: 0 0.9rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.editor__draft-caption {
+  font-size: 15px;
+  color: #6e6c56;
+  padding: 0.2rem 0.9rem 0.8rem;
+}
+.editor__nav {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+}
+.editor__nav-row {
+  position: relative;
+  text-align: left;
+  background: transparent;
+  border: none;
+  border-left: 2px solid transparent;
+  color: #a09c81;
+  font-family: inherit;
+  font-size: 18.8px;
+  padding: 0.55rem 0.9rem;
+  cursor: pointer;
+}
+.editor__nav-row--active {
+  background: #262918;
+  border-left: 2px solid #c9a04a;
+  color: #eee0bb;
+  font-weight: 700;
+}
+.editor__nav-row--soon {
+  color: #5c5a48;
+}
+.editor__soon-badge {
+  position: absolute;
+  right: 0.9rem;
+  top: 50%;
+  transform: translateY(-50%);
+  background: #2a2c20;
+  color: #8b8871;
+  font-size: 13.5px;
+  padding: 2px 6px;
+}
+.editor__exit {
+  margin: 0.6rem 0.9rem 0;
+  background: transparent;
+  border: 1px solid #3a3d2e;
+  color: #a09c81;
+  font-family: inherit;
+  padding: 0.4rem;
+  cursor: pointer;
+}
+.editor__main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.editor__topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: #1f2116;
+  border-bottom: 1px solid #3a3d2e;
+  padding: 0.6rem 1rem;
+}
+.editor__topbar-label {
+  font-size: 16.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: #8b8871;
+  font-weight: 700;
+}
+.editor__export {
+  background: #c9a04a;
+  color: #1b1d16;
+  font-family: inherit;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  border: none;
+  padding: 0.5rem 1rem;
+  cursor: pointer;
+}
+.editor__content {
+  flex: 1;
+  overflow: auto;
+  padding: 1.2rem;
+}
+.editor__section h3 {
+  color: #eee0bb;
+  font-size: 19.5px;
+  margin: 1.1rem 0 0.4rem;
+}
+.editor__section h4 {
+  color: #c7c2a5;
+  font-size: 18px;
+  margin: 0.8rem 0 0.3rem;
+}
+.editor__title-input {
+  width: 100%;
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid #3a3d2e;
+  color: #eee0bb;
+  font-family: inherit;
+  font-size: 25.5px;
+  font-weight: 700;
+  padding: 0.3rem 0;
+  margin-bottom: 0.8rem;
+}
+.editor__field-label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  font-size: 14.3px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #8b8871;
+  margin: 0.5rem 0;
+}
+.editor__field-label input,
+.editor__field-label textarea,
+.editor__field-label select,
+.editor__field {
+  background: #22261c;
+  border: 1px solid #3a3d2e;
+  color: #c7c2a5;
+  font-family: inherit;
+  font-size: 18.8px;
+  padding: 0.35rem 0.5rem;
+}
+.editor__field-label textarea {
+  min-height: 180px;
+  line-height: 1.65;
+  resize: vertical;
+}
+.editor__side-cards {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 20px;
+  margin-top: 0.6rem;
+}
+.editor__side-card {
+  background: #1f2116;
+  border: 1px solid #48513f;
+  padding: 0.7rem;
+}
+.editor__side-card--B {
+  border-color: #533d33;
+}
+.editor__side-head {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin-bottom: 0.5rem;
+}
+.editor__side-swatch {
+  width: 12px;
+  height: 12px;
+  background: #8a9a8a;
+  display: inline-block;
+}
+.editor__side-card--B .editor__side-swatch {
+  background: #b4553c;
+}
+.editor__side-label {
+  font-size: 19.5px;
+  font-weight: 700;
+  color: #eee0bb;
+}
+.editor__initiative-badge {
+  margin-left: auto;
+  font-size: 13.5px;
+  background: #2a2c20;
+  color: #c9a04a;
+  padding: 2px 6px;
+}
+.editor__side-stats {
+  display: flex;
+  gap: 0.6rem;
+  margin-bottom: 0.5rem;
+}
+.editor__stat-box {
+  display: flex;
+  flex-direction: column;
+  font-size: 14.3px;
+  text-transform: uppercase;
+  color: #8b8871;
+  flex: 1;
+}
+.editor__stat-box input {
+  background: transparent;
+  border: none;
+  color: #c9a04a;
+  font-size: 22.5px;
+  font-weight: 700;
+  text-align: right;
+  font-family: inherit;
+}
+.editor__nation-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  margin-bottom: 0.5rem;
+}
+.editor__chip {
+  background: #262918;
+  border: 1px solid #48513f;
+  color: #d9d4bd;
+  font-size: 16.5px;
+  padding: 0.15rem 0.4rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+.editor__side-card--B .editor__chip {
+  background: #2a2018;
+  border-color: #533d33;
+}
+.editor__chip button {
+  background: none;
+  border: none;
+  color: inherit;
+  cursor: pointer;
+  font-family: inherit;
+}
+.editor__nation-chips select {
+  background: transparent;
+  border: 1px dashed #48513f;
+  color: #8b8871;
+  font-size: 15px;
+  font-family: inherit;
+}
+.editor__bottom-row {
+  display: flex;
+  gap: 1rem;
+  margin-top: 0.8rem;
+}
+.editor__stat-card {
+  background: #1f2116;
+  border: 1px solid #3a3d2e;
+  padding: 0.6rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+.editor__big-number {
+  background: transparent;
+  border: none;
+  color: #c9a04a;
+  font-size: 39px;
+  font-weight: 700;
+  font-family: inherit;
+  width: 4rem;
+}
+.editor__initiative-picker {
+  flex: 1;
+}
+.editor__toggle-row {
+  display: flex;
+  gap: 0.4rem;
+}
+.editor__toggle {
+  background: #22261c;
+  border: 1px solid #3a3d2e;
+  color: #a09c81;
+  font-family: inherit;
+  padding: 0.4rem 0.8rem;
+  cursor: pointer;
+}
+.editor__toggle--active {
+  background: #262918;
+  border-color: #c9a04a;
+  color: #eee0bb;
+}
+.editor__caption {
+  color: #6e6c56;
+  font-size: 15.8px;
+  font-style: italic;
+}
+
+.editor__map-toprow {
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+  margin-bottom: 0.6rem;
+}
+.editor__map-body {
+  display: flex;
+  gap: 1rem;
+}
+/* Starting Forces: Side A column | board | Side B column. */
+.editor__forces-grid {
+  display: grid;
+  grid-template-columns: minmax(260px, 3fr) minmax(400px, 6fr) minmax(260px, 3fr);
+  gap: 1rem;
+  align-items: start;
+}
+/* Reinforcements: Side A waves | Side B waves. */
+.editor__reinf-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+  align-items: start;
+}
+/* One side's authoring column — top border carries the side color. */
+.editor__side-col {
+  background: #1f2116;
+  border: 1px solid #3a3d2e;
+  border-top: 4px solid #8b8871;
+  border-radius: 4px;
+  padding: 0.7rem 0.8rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+  min-width: 0;
+}
+.editor__side-col-head {
+  margin: 0;
+}
+.editor__side-col-nations {
+  font-weight: 400;
+  color: #8b8871;
+  font-size: 0.8em;
+}
+.editor__side-col .editor__unit-list {
+  max-height: 420px; /* tighter than the old full-width picker — the column is tall already */
+}
+.editor__forces-status {
+  text-align: center;
+  margin-top: 0.4rem;
+}
+.editor__map-board {
+  flex: 1;
+  border: 1px solid #3a3d2e;
+  background: #1f2116;
+  min-height: 320px;
+}
+.editor__map-board--small {
+  min-height: 220px;
+}
+.editor__map-tools {
+  width: 270px;
+  flex: 0 0 270px;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.editor__tool-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+.editor__tool-btn {
+  background: #22261c;
+  border: 1px solid #3a3d2e;
+  color: #a09c81;
+  font-family: inherit;
+  text-align: left;
+  padding: 0.4rem 0.6rem;
+  cursor: pointer;
+}
+.editor__tool-btn--active {
+  border-color: #c9a04a;
+  background: #262918;
+  color: #eee0bb;
+}
+.editor__placed-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  font-size: 17.3px;
+}
+.editor__placed-list li {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  background: #1f2116;
+  border: 1px solid #3a3d2e;
+  padding: 0.3rem 0.5rem;
+}
+.editor__placed-list button {
+  margin-left: auto;
+  background: none;
+  border: none;
+  color: #b4553c;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.editor__unit-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+.editor__unit-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  max-height: 556px; /* ~6 unit cards at the current (1.5x-scaled) text size */
+  overflow: auto;
+}
+.editor__unit-card {
+  background: #1f2116;
+  border: 1px solid #3a3d2e;
+  border-left-width: 3px;
+  padding: 0.4rem 0.6rem;
+  cursor: pointer;
+}
+.editor__unit-card--armed {
+  background: #262918;
+  border-color: #c9a04a;
+}
+.editor__unit-card-head {
+  display: flex;
+  justify-content: space-between;
+  font-size: 18px;
+}
+.editor__unit-name {
+  font-weight: 700;
+  color: #eee0bb;
+}
+.editor__unit-nation {
+  color: #8b8871;
+  font-size: 15px;
+  text-transform: uppercase;
+}
+.editor__unit-stats {
+  color: #a09c81;
+  font-size: 15.8px;
+  margin-top: 0.2rem;
+}
+.editor__unit-add {
+  margin-top: 0.3rem;
+  background: #22261c;
+  border: 1px solid #3a3d2e;
+  color: #d9d4bd;
+  font-family: inherit;
+  cursor: pointer;
+  padding: 0.2rem 0.5rem;
+}
+.editor__placement-panel {
+  border-top: 1px solid #3a3d2e;
+  padding-top: 0.5rem;
+}
+.editor__status-line {
+  color: #c7c2a5;
+  font-size: 16.5px;
+}
+
+.editor__table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 1rem;
+  font-size: 17.3px;
+}
+.editor__table th,
+.editor__table td {
+  border-bottom: 1px solid #3a3d2e;
+  padding: 0.35rem 0.5rem;
+  text-align: left;
+}
+.editor__table th {
+  color: #8b8871;
+  text-transform: uppercase;
+  font-size: 14.3px;
+}
+.editor__table button {
+  background: none;
+  border: none;
+  color: #b4553c;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.editor__wave-card {
+  background: #1f2116;
+  border: 1px solid #3a3d2e;
+  padding: 0.6rem 0.8rem;
+  margin-bottom: 0.6rem;
+}
+.editor__wave-summary {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  font-size: 17.3px;
+}
+.editor__wave-summary strong {
+  color: #eee0bb;
+}
+.editor__wave-summary button {
+  margin-left: auto;
+  background: #22261c;
+  border: 1px solid #3a3d2e;
+  color: #d9d4bd;
+  font-family: inherit;
+  cursor: pointer;
+  padding: 0.2rem 0.6rem;
+}
+.editor__wave-expanded {
+  margin-top: 0.6rem;
+  border-top: 1px solid #3a3d2e;
+  padding-top: 0.6rem;
+}
+.editor__wave-row {
+  display: flex;
+  gap: 1rem;
+}
+.editor__hex-echo {
+  color: #a09c81;
+  font-size: 15.8px;
+}
+.editor__warning {
+  color: #d8b25c;
+  font-size: 16.5px;
+}
+
+.editor__add-row {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  border: 1px dashed #3a3d2e;
+  padding: 0.5rem;
+  margin: 0.6rem 0;
+}
+.editor__add-row input,
+.editor__add-row select {
+  background: #22261c;
+  border: 1px solid #3a3d2e;
+  color: #c7c2a5;
+  font-family: inherit;
+  padding: 0.3rem 0.5rem;
+}
+.editor__victory-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+.editor__victory-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  background: #1f2116;
+  border: 1px solid #3a3d2e;
+  padding: 0.4rem 0.6rem;
+}
+.editor__victory-hex {
+  color: #c9a04a;
+  font-weight: 700;
+  font-size: 21px;
+}
+.editor__override-panel {
+  flex-basis: 100%;
+  border-top: 1px solid #3a3d2e;
+  margin-top: 0.4rem;
+  padding-top: 0.4rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+.editor__override-row {
+  display: flex;
+  gap: 0.6rem;
+  align-items: center;
+  font-size: 15.8px;
+}
+
+.editor__warning-banner {
+  background: #2a2410;
+  border: 1px solid #55491f;
+  color: #d8b25c;
+  padding: 0.6rem 0.8rem;
+  margin-bottom: 0.8rem;
+}
+/* Renders IN PLACE of the board itself when the multi-board config is
+   invalid (e.g. missing attachTo, mismatched edges) — an empty canvas plus a
+   small text warning elsewhere reads as "the board broke," not "fix this
+   setting," so this fills the board's own space and can't be missed. */
+.editor__map-error {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  min-height: 320px;
+  background: #2a2410;
+  border: 1px solid #55491f;
+  color: #eee0bb;
+  padding: 1.5rem;
+}
+.editor__map-error__inner {
+  max-width: 480px;
+}
+.editor__map-error__title {
+  font-size: 21px;
+  font-weight: 700;
+  color: #d8b25c;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin-bottom: 0.5rem;
+}
+.editor__map-error__detail {
+  font-size: 18px;
+  color: #c7c2a5;
+  line-height: 1.5;
+}
+.editor__round-checks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  font-size: 16.5px;
+}
+.editor__checklist {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  font-size: 17.3px;
+}
+.editor__empty {
+  color: #6e6c56;
+  font-style: italic;
 }

@@ -5,8 +5,18 @@
 export * from './types';
 
 export { reduce } from './reducer';
-export { initGame, serialize, deserialize } from './state';
-export { legalActions, legalActionsForUnit } from './actions';
+export { initGame, serialize, deserialize, buildHex } from './state';
+export {
+  legalActions,
+  legalActionsForUnit,
+  legalActionsForReinforcement,
+  modifiedActionCost,
+} from './actions';
+export { groupConnected, groupStress, isValidSupporter, hexesConnected } from './groups';
+export { legalEntryHexes } from './reinforcements';
+export { legalSetupHexes } from './setup';
+export { assembleBoards, rotationClusters } from './boardAssembly';
+export type { BoardAssemblyEntry, BoardEdge, Rotation, RotationCluster } from './boardAssembly';
 
 // Selected pure helpers useful to the UI (e.g. previews, LOS overlay):
 export {
@@ -17,13 +27,63 @@ export {
   enemiesInHex,
   rollStackFire,
 } from './combat';
+export type { AttackRoll } from './combat';
+export type { IndirectAttackRoll } from './mortar';
 export { rollRally } from './rally';
-export { effectiveStats, templateOf } from './hits';
+export { effectiveStats, templateOf, resolveHit } from './hits';
+export type { HitOutcome, ResolvedHit } from './hits';
 export { hasLOS, inArc, canSightTarget, visibleHexesFrom } from './los';
-export { moveCost, directionTo, pivotCost } from './movement';
+export { moveCost, directionTo, pivotCost, planVehicleMove } from './movement';
 export { rangeBand, fpRangeModifier } from './range';
+export {
+  isConcealed,
+  isOutOfAllEnemyLOS,
+  mustReveal,
+  mustRevealAtHex,
+  mustRevealForSharedHex,
+  revealNumber,
+  hiddenMoveBase,
+  becomingHiddenCandidates,
+  rollReveal,
+  facingToward,
+} from './hidden';
+export type { RevealRoll } from './hidden';
 export { rallyModifier, RALLY_AP_COST } from './rally';
-export { finalScores, computeWinner, otherSide } from './victory';
+export {
+  bestSpotterFor,
+  directFireZone,
+  indirectFireZone,
+  isValidSpotterHex,
+  rollIndirectFire,
+} from './mortar';
+export { smokeAttackPenalty, smokeDefenseBonus, smokeLosDrBonus, smokeRallyBonus } from './smoke';
+export { rollMinesAttack, minesTargetsFor, minesOwnerSide, destroysBarbedWire } from './obstacles';
+export type { MinesAttackRoll } from './obstacles';
+export {
+  fortificationAt,
+  isOccupying,
+  canOccupy,
+  fortificationDrBonus,
+  hastyDefenseDrBonus,
+  withinBunkerArc,
+  deniedByBunkerMortarRule,
+  destructibleFeatureAt,
+  destroyFeatureAt,
+  rollStructureDestroy,
+  closeCombatStructureAr,
+} from './fortifications';
+export type { StructureDestroyRoll } from './fortifications';
+export {
+  finalScores,
+  computeWinner,
+  otherSide,
+  vpLeader,
+  vpMargin,
+  gainVp,
+  vpForRound,
+  vpPerKillFor,
+  vpPerSurvivorFor,
+} from './victory';
 export {
   AXIAL_DIRECTIONS,
   distance,
