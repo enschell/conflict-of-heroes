@@ -149,7 +149,12 @@ export function legalActionsForUnit(state: GameState, unitId: UnitId): Action[] 
   // code — a Hidden Unit's action list is a small, closed set, not "the
   // normal list minus a few items."
   if (unit.hidden) {
-    if (unit.hitMarkers.length > 0 && actionable(RALLY_AP_COST)) {
+    // §7.7/§15.13: some hit markers (e.g. the Armored deck's Immobilized,
+    // Light Damage, Gun Damaged) have no Rally Number at all — offering
+    // RALLY for one lets a Unit spend a whole Action on a roll that can
+    // never succeed (bug found via self-play against a Mission with Vehicles,
+    // the first one in this project with an un-rallyable Armored marker).
+    if (unit.hitMarkers.length > 0 && HIT_MARKERS[unit.hitMarkers[0]!].rally > 0 && actionable(RALLY_AP_COST)) {
       const enemyHere = Object.values(state.units).some((u) => u.side !== unit.side && u.hexId === unit.hexId);
       if (!enemyHere) actions.push({ type: 'RALLY', unitId, ...cr(RALLY_AP_COST) });
     }
@@ -322,7 +327,10 @@ export function legalActionsForUnit(state: GameState, unitId: UnitId): Action[] 
     }
   }
 
-  if (unit.hitMarkers.length > 0 && actionable(RALLY_AP_COST)) {
+  // §7.7/§15.13: some hit markers (e.g. the Armored deck's Immobilized, Light
+  // Damage, Gun Damaged) have no Rally Number — see the matching Hidden-Unit
+  // branch above for the full note.
+  if (unit.hitMarkers.length > 0 && HIT_MARKERS[unit.hitMarkers[0]!].rally > 0 && actionable(RALLY_AP_COST)) {
     const enemyHere = Object.values(state.units).some(
       (u) => u.side !== unit.side && u.hexId === unit.hexId,
     );
@@ -377,6 +385,7 @@ export function legalActionsForUnit(state: GameState, unitId: UnitId): Action[] 
 
   if (!carried && loadable) {
     for (const vehicle of Object.values(state.units)) {
+      if (vehicle.id === unit.id) continue; // a Unit cannot Load/Tow onto itself
       if (vehicle.side !== unit.side || templateOf(state, vehicle).kind !== 'vehicle') continue;
       if (Object.values(state.units).some((u) => u.carriedBy === vehicle.id)) continue; // full (§15.6)
       // §15.10: a Tracked Vehicle may only be towed by another Tracked Vehicle.

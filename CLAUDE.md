@@ -693,6 +693,28 @@ This repo is self-describing: a fresh session needs only the code + these docs.
   §13.4-13.9) is built — read it before touching `cards.ts`/`PLAY_CARD`/`PLAN_OBA_STRIKE`/
   `HandPanel.tsx` again, and before assuming the card catalog is complete (it has ~13 flagged
   best-guess cost colors, see §G).
+- **Large-scale self-play testing** (branch `game-testing`, ad-hoc, not a shipped feature): a series
+  of AI-vs-AI harnesses in `scripts/selfplay*.ts` (untracked — not part of the app) played tens of
+  thousands of games across Mission 1 and the AtB Firefight 9 - KV2 mission, each Action
+  independently re-derived from the rules tables (the same oracle technique `scripts/conformance.ts`
+  uses) to catch engine/rules disagreement at scale. Full findings in memory
+  `conflict-of-heroes-selfplay-testing` — headline results: Mission 1's Germans hold a persistent
+  ~85% win rate in heuristic-vs-heuristic play despite the raw Mission (no skill on either side)
+  favoring the Soviets, and the KV2 mission is far more lopsided still (Germans 0/2000 across the
+  largest run). **Two real, permanent engine bugs this found** (not just test-harness gaps):
+  (1) `legalActionsForUnit` (both branches, `src/engine/actions.ts`) and `doRally`
+  (`src/engine/reducer.ts`) let a Unit attempt RALLY on a hit marker with no Rally Number — some
+  Armored-deck markers (Immobilized, Light Damage, Gun Damaged, §7.7/§15.13) can never be rallied,
+  but nothing checked that before this fix, so the Action silently "failed" while still charging a
+  full Turn. Mission 1 has no Vehicles, so this path was never exercised until a Mission with
+  Armored hit markers existed. Fixed by checking `HIT_MARKERS[...].rally > 0` before offering or
+  allowing the Action (defense in depth, matching the check `doGroupRally` already had).
+  (2) `legalActionsForUnit`'s own LOAD-action enumeration (`src/engine/actions.ts`) looped over
+  every same-side Vehicle as a possible tow vehicle without excluding itself, so a damaged
+  (Immobilized/Stunned) Vehicle could be offered — and `doLoad` would accept — a LOAD Action naming
+  itself as its own `vehicleId` (`unit.carriedBy = unit.id`). Never exercised before a self-play
+  round finally used LOAD/UNLOAD at scale. Fixed with a one-line self-exclusion in both
+  `actions.ts`'s enumeration and `reducer.ts`'s own `doLoad` guard.
 
 ---
 

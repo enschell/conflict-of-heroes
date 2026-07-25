@@ -155,4 +155,8 @@ v3/M-numbered roadmap is M13's own follow-ups: a real visual design + opponent-a
 See `CLAUDE.md` §8 for the full milestone roadmap.
 
 A **rules-conformance audit** (`npm run conformance`) self-plays several full games and re-derives
-every move against the rules (0 violations).
+every move against the rules (0 violations). A separate, larger-scale AI-vs-AI self-play effort
+(`scripts/selfplay*.ts`, ad-hoc/untracked, `game-testing` branch) has since run tens of thousands of
+games across Mission 1 and AtB Firefight 9 - KV2 the same way — it's what caught the one real
+RALLY-legality engine bug fixed on that branch (a Unit could attempt to Rally a hit marker with no
+Rally Number, e.g. some Armored-deck markers).

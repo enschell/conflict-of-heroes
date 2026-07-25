@@ -14,7 +14,7 @@ export const ATB_FIREFIGHT_9_KV2_MISSION: MissionDef = {
   id: 'atb-firefight-9-kv2',
   name: 'AtB Firefight 9 - KV2',
   roundsTotal: 5,
-  seed: 1784413289518,
+  seed: 1784908638339,
   caps: {
     A: 7,
     B: 12,
@@ -34,6 +34,7 @@ export const ATB_FIREFIGHT_9_KV2_MISSION: MissionDef = {
   },
   unitKillVp: {
     'A-sov-kv1s-2': 3,
+    'B-sov-kv2a-1': 3,
   },
   hexes: [
     {
@@ -749,6 +750,12 @@ export const ATB_FIREFIGHT_9_KV2_MISSION: MissionDef = {
       terrain: 'open',
       label: 'I12',
       mapNumber: 4,
+      obstacle: {
+        kind: 'mines',
+        ownerSide: 'B',
+        hitNumber: 8,
+        hidden: true,
+      },
     },
     {
       id: '9,-4',
@@ -2962,23 +2969,23 @@ export const ATB_FIREFIGHT_9_KV2_MISSION: MissionDef = {
   ],
   units: [
     {
-      id: 'A-sov-kv1s-2',
-      side: 'A',
-      templateId: 'sov-kv1s',
+      id: 'B-sov-kv2a-1',
+      side: 'B',
+      templateId: 'sov-kv2a',
       hexId: '9,8',
       facing: 2,
     },
     {
-      id: 'A-sov-maxim-1',
-      side: 'A',
+      id: 'B-sov-maxim-1',
+      side: 'B',
       templateId: 'sov-maxim',
       hexId: '7,9',
       facing: 2,
     },
     {
-      id: 'A-sov-smg-1',
-      side: 'A',
-      templateId: 'sov-smg',
+      id: 'B-sov-maxim-2',
+      side: 'B',
+      templateId: 'sov-maxim',
       hexId: '15,7',
       facing: 2,
     },
@@ -2989,18 +2996,21 @@ export const ATB_FIREFIGHT_9_KV2_MISSION: MissionDef = {
       side: 'B',
       templateId: 'sov-atgun45',
       facing: 0,
+      hidden: true,
     },
     {
       id: 'B-sov-truck-1',
       side: 'B',
       templateId: 'sov-truck',
       facing: 0,
+      hidden: true,
     },
     {
       id: 'B-sov-rifle-1',
       side: 'B',
       templateId: 'sov-rifle',
       facing: 0,
+      hidden: true,
     },
   ],
   setupFirstSide: 'B',
@@ -3069,8 +3079,8 @@ export const ATB_FIREFIGHT_9_KV2_MISSION: MissionDef = {
           facing: 0,
         },
         {
-          id: 'A-ger-sdkfz251-2-1',
-          templateId: 'ger-sdkfz251-2',
+          id: 'A-ger-pz38t-1',
+          templateId: 'ger-pz38t',
           facing: 0,
         },
       ],
@@ -3085,19 +3095,19 @@ export const ATB_FIREFIGHT_9_KV2_MISSION: MissionDef = {
       entryDescription: 'Reinforcements enter onto Road Hex 4-J01',
       units: [
         {
-          id: 'A-ger-sdkfz251-17-1',
-          templateId: 'ger-sdkfz251-17',
+          id: 'A-ger-flak18-88mm-1',
+          templateId: 'ger-flak18-88mm',
           facing: 0,
         },
         {
-          id: 'A-ger-mortar-1',
-          templateId: 'ger-mortar',
+          id: 'A-ger-truck-opel-1',
+          templateId: 'ger-truck-opel',
           facing: 0,
         },
       ],
     },
   ],
-  templates: [UNIT_TEMPLATES['sov-kv1s']!, UNIT_TEMPLATES['sov-maxim']!, UNIT_TEMPLATES['sov-smg']!, UNIT_TEMPLATES['sov-atgun45']!, UNIT_TEMPLATES['sov-truck']!, UNIT_TEMPLATES['sov-rifle']!, UNIT_TEMPLATES['ger-rifle']!, UNIT_TEMPLATES['ger-lmg']!, UNIT_TEMPLATES['ger-pioneer']!, UNIT_TEMPLATES['ger-pz2f']!, UNIT_TEMPLATES['ger-pz4e']!, UNIT_TEMPLATES['ger-sdkfz251-2']!, UNIT_TEMPLATES['ger-sdkfz251-17']!, UNIT_TEMPLATES['ger-mortar']!],
+  templates: [UNIT_TEMPLATES['sov-kv2a']!, UNIT_TEMPLATES['sov-maxim']!, UNIT_TEMPLATES['sov-atgun45']!, UNIT_TEMPLATES['sov-truck']!, UNIT_TEMPLATES['sov-rifle']!, UNIT_TEMPLATES['ger-rifle']!, UNIT_TEMPLATES['ger-lmg']!, UNIT_TEMPLATES['ger-pioneer']!, UNIT_TEMPLATES['ger-pz2f']!, UNIT_TEMPLATES['ger-pz4e']!, UNIT_TEMPLATES['ger-pz38t']!, UNIT_TEMPLATES['ger-flak18-88mm']!, UNIT_TEMPLATES['ger-truck-opel']!],
   victoryHexes: [
     {
       hexId: '9,18',
@@ -3113,7 +3123,6 @@ export const ATB_FIREFIGHT_9_KV2_MISSION: MissionDef = {
   ],
   mapOverlays: {
     '4': '/assets/maps/atb-map-4.png',
-    '5': '/assets/maps/atb-map-5.png',
   },
   situation: 'Elements of the 6th Schützen Brigade (XLI Motorized Corps,\n4th Panzer Group) and its supply train are being held up by a\nSoviet KV-2 tank and its tenacious crew. The Germans must\nforce their way through to Hex 5-J01 by eliminating the KV-2\nand its support.',
   sideOrders: {

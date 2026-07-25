@@ -893,6 +893,13 @@ export function reduce(state: GameState, action: Action): ReduceResult {
     if (!unit) return deny('no such unit');
     if (unit.side !== next.currentSide) return deny('not your turn');
     if (unit.hitMarkers.length === 0) return deny('unit has no hit marker');
+    // §7.7/§15.13: a marker with no Rally Number (some Armored Target hit
+    // markers — Immobilized, Light Damage, Gun Damaged) can never be rallied.
+    // Same guard `doGroupRally` already has; this solo path was missing it,
+    // so a Unit could spend a whole Action on a Rally that could never
+    // succeed. Denied here — matches `legalActionsForUnit` no longer
+    // offering it in the first place (defense in depth).
+    if (HIT_MARKERS[unit.hitMarkers[0]!].rally <= 0) return deny('this marker has no Rally Number (§7.7)');
     const enemyHere = Object.values(next.units).some(
       (u) => u.side !== unit.side && u.hexId === unit.hexId,
     );
@@ -1161,6 +1168,7 @@ export function reduce(state: GameState, action: Action): ReduceResult {
     const unit = next.units[a.unitId];
     const vehicle = next.units[a.vehicleId];
     if (!unit || !vehicle) return deny('no such unit');
+    if (unit.id === vehicle.id) return deny('a Unit cannot Load/Tow onto itself');
     if (unit.side !== next.currentSide || vehicle.side !== unit.side) return deny('not your turn');
     if (unit.carriedBy) return deny('already loaded');
     if (templateOf(next, vehicle).kind !== 'vehicle') return deny('not a Vehicle');
