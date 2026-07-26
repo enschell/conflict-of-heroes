@@ -33,9 +33,10 @@ describe('hit-marker effects (rulebook §7.5)', () => {
     expect(eff.canMove).toBe(false);
   });
 
-  it('cowering: range drops to 1, +2 AP to fire, +1 move cost', () => {
+  it('cowering: range drops to 1 (capped, not just a lower baseline), +2 AP to fire, +1 move cost', () => {
     const eff = withMarker(['cowering']);
     expect(eff.range).toBe(1);
+    expect(eff.rangeCapped).toBe(true);
     expect(eff.apToFire).toBe(4 + 2);
     expect(eff.move).toBe(1 + 1);
   });

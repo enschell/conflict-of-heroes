@@ -102,6 +102,7 @@ export function isValidSupporter(
   const band = rangeBand(
     distance(parseHexId(supporter.hexId), parseHexId(target.hexId)),
     eff.range,
+    eff.rangeCapped,
   );
   return band === 'short' || band === 'normal';
 }

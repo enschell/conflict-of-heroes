@@ -87,3 +87,45 @@ describe('stacked fire (rulebook §7.5.1)', () => {
     expect(res.rng).toEqual(r2.rng);
   });
 });
+
+describe('a hit marker\'s rangeOverride is a hard cap, not a new long-range baseline (§7.7)', () => {
+  // A REAL BUG, since fixed: rangeBand() always extended whatever Range it
+  // was given out to 2x for a "long range" shot — including a hit marker's
+  // rangeOverride (Cowering/Berserk, "Range: Drops to 1"). A Cowering Unit
+  // with Range overridden to 1 could therefore still take a "long range"
+  // shot at distance 2 (-2AR penalty) exactly as a normal Unit with a real
+  // Range stat of 1 would. Caught live: a Cowering 45mm AT Gun fired on a
+  // Panzer 38(t) 2 Hexes away. `EffectiveStats.rangeCapped` now tells
+  // rangeBand() to skip the ×2 extension when the Range came from a marker.
+  function scene(marker: 'cowering' | undefined) {
+    const s = baseState();
+    addTemplate(s, rifleTemplate({ fp: { red: 2, blue: 8 }, range: 12 }));
+    for (let q = 0; q <= 2; q++) addHex(s, q, 0);
+    addUnit(s, 'A1', 'A', 0, 0, 0, 'rifle', marker ? ['cowering'] : []);
+    const t = addUnit(s, 'T1', 'B', 2, 0, 3, 'rifle'); // distance 2, faces attacker
+    return { s, a: s.units['A1']!, t };
+  }
+
+  it('without Cowering, distance 2 is a legal long-range shot (Range 12, well within 2x)', () => {
+    const { s, a, t } = scene(undefined);
+    const ctx = attackContext(s, a, t);
+    expect(ctx.legal).toBe(true);
+  });
+
+  it('with Cowering (Range capped to 1), the same distance-2 shot is illegal — not "long range"', () => {
+    const { s, a, t } = scene('cowering');
+    const ctx = attackContext(s, a, t);
+    expect(ctx.legal).toBe(false);
+  });
+
+  it('Cowering still permits a short-range (adjacent) shot', () => {
+    const s = baseState();
+    addTemplate(s, rifleTemplate({ fp: { red: 2, blue: 8 }, range: 12 }));
+    addHex(s, 0, 0);
+    addHex(s, 1, 0);
+    const a = addUnit(s, 'A1', 'A', 0, 0, 0, 'rifle', ['cowering']);
+    const t = addUnit(s, 'T1', 'B', 1, 0, 3, 'rifle');
+    const ctx = attackContext(s, a, t);
+    expect(ctx.legal).toBe(true);
+  });
+});

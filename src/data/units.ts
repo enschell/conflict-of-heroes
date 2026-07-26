@@ -517,6 +517,11 @@ export const GERMAN_UNITS: UnitTemplate[] = [
     propulsion: 'tracked',
     bonusMoves: 1,
     turreted: true,
+    // §14.1: this Mission's own missionInstructions.A calls out "the PzIVe
+    // Tank, like the Pioneers, may fire Smoke" — the template was missing
+    // the flag that actually grants it (kind-agnostic in actions.ts, so no
+    // other change is needed for a Vehicle to use it at its normal Range).
+    canFireSmoke: true,
     counterImage: '/assets/units/ger-pz4e.png',
   },
   {

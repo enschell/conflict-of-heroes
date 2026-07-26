@@ -137,7 +137,9 @@ export function attackContext(
   const dist = distance(parseHexId(attacker.hexId), parseHexId(target.hexId));
   // §18.0: a Flamethrower's Max Range is a fixed 1 Hex, overriding the Unit's
   // own Range stat entirely (a Pioneer's normal 3-Hex range doesn't apply here).
-  const band: RangeBand = useFlamethrower ? (dist <= 1 ? 'short' : 'out') : rangeBand(dist, aEff.range);
+  const band: RangeBand = useFlamethrower
+    ? (dist <= 1 ? 'short' : 'out')
+    : rangeBand(dist, aEff.range, aEff.rangeCapped);
   // §13.0/§13.9: Mortars fire High Explosive — always vs the target's Flank
   // Defense (both Direct and Indirect Attacks), with the Air Burst exception
   // above; they also may not fire closer than their Minimum Range (§13.1).

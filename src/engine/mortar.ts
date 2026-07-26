@@ -64,7 +64,8 @@ export function directFireZone(
     return { legal: false, reason: 'target out of arc', band: 'out' };
   if (!hasLOS(state, attacker.hexId, targetHexId))
     return { legal: false, reason: 'no line of sight', band: 'out' };
-  const band = rangeBand(dist, effectiveStats(state, attacker).range);
+  const aEff = effectiveStats(state, attacker);
+  const band = rangeBand(dist, aEff.range, aEff.rangeCapped);
   if (band === 'out') return { legal: false, reason: 'out of range', band };
   return { legal: true, band };
 }
@@ -94,7 +95,8 @@ export function indirectFireZone(
     return { legal: false, reason: 'target out of arc', band: 'out' };
   if (!hasLOS(state, spotterHexId, targetHexId))
     return { legal: false, reason: 'no line of sight from Spotter Hex', band: 'out' };
-  const band = rangeBand(dist, effectiveStats(state, attacker).range);
+  const aEff = effectiveStats(state, attacker);
+  const band = rangeBand(dist, aEff.range, aEff.rangeCapped);
   if (band === 'out') return { legal: false, reason: 'out of range', band };
   return { legal: true, band };
 }
@@ -164,7 +166,7 @@ export function rollIndirectFire(
 ): IndirectFireResult {
   const aEff = effectiveStats(state, attacker);
   const dist = distance(parseHexId(attacker.hexId), parseHexId(targetHexId));
-  const band = rangeBand(dist, aEff.range);
+  const band = rangeBand(dist, aEff.range, aEff.rangeCapped);
   // §11: a Hidden enemy Unit is never a valid Indirect Fire target — only
   // the KNOWN (non-Hidden) enemies stacked at the target Hex are hit.
   const targets = Object.values(state.units)

@@ -21,6 +21,21 @@ export interface EffectiveStats {
   dr: { front: number; flank: number; color: DRColor };
   move: number;
   range: number;
+  /**
+   * True when `range` came from a hit marker's `rangeOverride` (Cowering/
+   * Berserk, §7.7) rather than the Unit's own template stat — a hard cap,
+   * not just a lower baseline. `rangeBand()` must not extend a capped range
+   * to 2x for a "long range" shot the way it does for a normal Range stat
+   * (a Cowering crew too rattled to aim past point-blank isn't now ALSO
+   * newly capable of a longer-ranged shot than it could take a moment
+   * earlier — the marker's own text is "Range: Drops to 1," a ceiling, not
+   * a new baseline). A real bug, since fixed: before this flag existed,
+   * `rangeBand` always doubled whatever `range` it was given, so a Cowering
+   * Unit with Range overridden to 1 could still take a "long range" shot at
+   * distance 2 (at the normal -2AR penalty) — caught live when a Cowering
+   * 45mm AT Gun fired on a Panzer 38(t) 2 Hexes away.
+   */
+  rangeCapped: boolean;
   apToFire: number;
   canMove: boolean;
   canPivot: boolean;
@@ -43,6 +58,7 @@ export function effectiveStats(state: GameState, unit: Unit): EffectiveStats {
     dr: { front: t.dr.front, flank: t.dr.flank, color: t.dr.color },
     move: t.move,
     range: t.range,
+    rangeCapped: false,
     apToFire: t.apToFire,
     canMove: true,
     canPivot: true,
@@ -58,7 +74,10 @@ export function effectiveStats(state: GameState, unit: Unit): EffectiveStats {
     eff.dr.flank += def.flankDrDelta ?? 0;
     eff.move += def.moveCostDelta ?? 0;
     eff.apToFire += def.apToFireDelta ?? 0;
-    if (def.rangeOverride !== undefined) eff.range = def.rangeOverride;
+    if (def.rangeOverride !== undefined) {
+      eff.range = def.rangeOverride;
+      eff.rangeCapped = true;
+    }
     if (def.cannotMove) eff.canMove = false;
     if (def.cannotPivot) eff.canPivot = false;
     if (def.cannotFire) eff.canFire = false;

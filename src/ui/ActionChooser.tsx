@@ -45,8 +45,23 @@ export function ActionChooser() {
   const enemy = Object.values(game.units).find(
     (u) => u.hexId === hexId && u.side !== game.currentSide,
   );
+  // §15.7: the friendly Vehicle in this Hex this Unit may Load onto — matched
+  // against the engine's own LOAD enumeration (same lookup store.ts's hexClick
+  // uses for its `canLoad`), never the selected Unit itself.
+  //
+  // This previously took "the first friendly Unit in the Hex" with no Vehicle
+  // check and no self-exclusion: when the loading Unit itself sorted first
+  // (e.g. a Gun stacked with its tow Truck), `vehicleHere` was that Unit, so
+  // `loadAct`'s `vehicleId` match always failed and the Load button silently
+  // vanished — while store.ts still counted the Load, so the chooser opened
+  // WITHOUT it. Caught live: a FlaK 88 stacked with its Opel could never be
+  // limbered, and the misclick spent the Truck on a Hidden Move instead.
   const vehicleHere = Object.values(game.units).find(
-    (u) => u.hexId === hexId && u.side === unit.side,
+    (u) =>
+      u.hexId === hexId &&
+      u.side === unit.side &&
+      u.id !== unit.id &&
+      acts.some((a) => a.type === 'LOAD' && a.vehicleId === u.id),
   );
 
   // Rules-legal (NOT CAP-gated) for Move/Fire/Close Combat — see the matching

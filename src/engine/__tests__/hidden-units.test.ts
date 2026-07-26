@@ -164,7 +164,16 @@ describe('Worked example: Attacking a Hidden Unit / Recon by Fire (§11.7)', () 
 });
 
 describe('Hidden Units and legalActionsForUnit', () => {
-  it('a Hidden Unit is offered ONLY Rally/Stall/Hidden Move, never Move/Fire/Pivot/etc.', () => {
+  it('a Hidden Unit is offered the full normal action set too (§11.1) — each one reveals it, per REVEAL_EXEMPT', () => {
+    // A REAL BUG, since fixed: legalActionsForUnit's Hidden branch used to
+    // `return` early with ONLY Rally/Stall/Hidden-Move, silently hiding every
+    // other legal option (a Fire shot, Recon by Fire, Hasty Defense, a plain
+    // revealing Move into an enemy Hex to set up Close Combat, ...) from the
+    // UI — even though reduce() itself already accepted those Actions from a
+    // Hidden Unit (correctly revealing it first) when dispatched directly.
+    // This test used to assert the BUG (a hardcoded 3-type allowlist); it
+    // now asserts the real rule: §11.1 says a Hidden Unit may take any
+    // Action, and it simply reveals as a consequence.
     const s = baseState();
     addTemplate(s, rifleTemplate());
     addHex(s, 0, 0);
@@ -173,8 +182,16 @@ describe('Hidden Units and legalActionsForUnit', () => {
     u.hidden = true;
     const acts = legalActionsForUnit(s, 'RIF');
     const types = new Set(acts.map((a) => a.type));
-    expect(types.size).toBeGreaterThan(0);
-    for (const t of types) expect(['RALLY', 'STALL', 'HIDDEN_MOVE']).toContain(t);
+    // Pinned (§7.5) blocks Move/Pivot, so no MOVE/HIDDEN_MOVE here — but
+    // Recon by Fire, Rally, Hasty Defense, and Stall are all still legal,
+    // and none of them were ever offered before this fix.
+    expect(types).toEqual(new Set(['RECON_BY_FIRE', 'RALLY', 'HASTY_DEFENSE', 'STALL']));
+
+    // Taking one of the newly-offered, non-exempt options actually reveals
+    // the Unit (the reducer's own REVEAL_EXEMPT set is the real authority —
+    // this just confirms the two layers agree).
+    const res = reduce(s, { type: 'HASTY_DEFENSE', unitId: 'RIF' });
+    expect(res.state.units['RIF']!.hidden).toBeUndefined();
   });
 
   it('a non-Hidden Unit is offered Hidden Move candidates too (becoming Hidden)', () => {

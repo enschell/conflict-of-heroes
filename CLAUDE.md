@@ -715,6 +715,31 @@ This repo is self-describing: a fresh session needs only the code + these docs.
   itself as its own `vehicleId` (`unit.carriedBy = unit.id`). Never exercised before a self-play
   round finally used LOAD/UNLOAD at scale. Fixed with a one-line self-exclusion in both
   `actions.ts`'s enumeration and `reducer.ts`'s own `doLoad` guard.
+- **Live hotseat game vs. the user, in progress** (`game-testing` branch, started 2026-07-25): the
+  user plays Side A (Germans) by clicking directly in the browser; Claude plays Side B (Soviets),
+  on the AtB Firefight 9 - KV2 mission. **Full resume state (exact save name, positions, VP/CAP,
+  metrics tallies, turn log) lives in memory `conflict-of-heroes-live-game-vs-user` — read that
+  first in any new session before touching this game.** A file-based fallback of the current save
+  is committed at `docs/live-game-saves/handoff-round3-actionchooser-fix.json` in case localStorage
+  saves aren't available in a fresh browser profile. Three real, live-caught bugs found and fixed
+  during this game (all on top of the two self-play bugs above, all still uncommitted on
+  `game-testing` pending explicit user request to commit):
+  (1) `ger-pz4e` (Panzer IVe) was missing `canFireSmoke: true` in `data/units.ts` despite this
+  Mission's own `missionInstructions.A` text explicitly granting it — a data gap, not a rules bug.
+  (2) `modifiedActionCost`'s `MOVE` case (`engine/actions.ts`, the UI's CAP-confirm preview) used
+  single-hex `moveCost()` even for a Vehicle's multi-hex Bonus-Move `path`, so a Spent Vehicle's
+  CAP-paid 0AP multi-hex move never reached the confirm dialog — `capGate` saw a null cost and
+  dispatched straight through, which the reducer then correctly denied, reading as a silent "the
+  engine won't let me." Fixed by branching to `planVehicleMove` for vehicles, mirroring the
+  reducer's own `doMove`. (3) `ActionChooser.tsx`'s `vehicleHere` lookup for the Load (§15.7)
+  option matched "the first friendly Unit in the clicked Hex," with no check that it was a Vehicle
+  and no self-exclusion — when a Gun (FlaK 88) was stacked with its own tow Truck and the Gun
+  itself sorted first, the Load button silently vanished from the chooser (while `store.ts` still
+  counted it as a legal option, so the chooser opened anyway, just missing that one entry).
+  Root-caused by replaying the user's own save through `legalActionsForUnit` directly before
+  touching any UI code, confirming the engine already offered the Load for free — a pure rendering
+  bug. Fixed by deriving `vehicleHere` FROM the engine's own LOAD enumeration instead of guessing
+  and then matching against it. All three: typecheck clean, full Vitest suite green throughout.
 
 ---
 

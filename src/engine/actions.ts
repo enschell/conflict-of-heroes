@@ -38,6 +38,18 @@ export function modifiedActionCost(state: GameState, action: Action): number | n
     case 'MOVE': {
       const u = state.units[action.unitId];
       if (!u) return null;
+      // §15.2: a Vehicle's own multi-hex Bonus-Move `path` must be costed via
+      // planVehicleMove, exactly like doMove itself (reducer.ts) — mirroring
+      // that function's own branching here, not just re-deriving a single-hex
+      // moveCost, or a Spent Vehicle mid-Bonus-Move never even reaches the
+      // CAP-confirm dialog (modifiedActionCost silently returns null for a
+      // toHexId that isn't directly adjacent, so capGate skips straight to
+      // dispatch with no capCostReduce, and doMove denies it for real).
+      if (templateOf(state, u).kind === 'vehicle') {
+        const path = action.path && action.path.length ? action.path : [action.toHexId];
+        const plan = planVehicleMove(state, u, path);
+        return plan.ap == null ? null : plan.ap + stress(u);
+      }
       const mc = moveCost(state, u, action.toHexId);
       return mc.ap == null ? null : mc.ap + stress(u);
     }
@@ -141,38 +153,35 @@ export function legalActionsForUnit(state: GameState, unitId: UnitId): Action[] 
   // Pivot, or Attack on its own, but may still Rally, Stall, or Unload (§15.8).
   const carried = !!unit.carriedBy;
 
-  // §11.1: a Hidden Unit's ONLY legal Actions are Rally, Stall, and Hidden
-  // Move (§11.3) — everything else would reveal it (`reduce()`'s own top-of-
-  // function check enforces this too; this is what keeps the UI from ever
-  // offering a Hidden Unit a Move/Fire/etc. button in the first place).
-  // Deliberately duplicates the RALLY/STALL blocks below rather than sharing
-  // code — a Hidden Unit's action list is a small, closed set, not "the
-  // normal list minus a few items."
-  if (unit.hidden) {
-    // §7.7/§15.13: some hit markers (e.g. the Armored deck's Immobilized,
-    // Light Damage, Gun Damaged) have no Rally Number at all — offering
-    // RALLY for one lets a Unit spend a whole Action on a roll that can
-    // never succeed (bug found via self-play against a Mission with Vehicles,
-    // the first one in this project with an un-rallyable Armored marker).
-    if (unit.hitMarkers.length > 0 && HIT_MARKERS[unit.hitMarkers[0]!].rally > 0 && actionable(RALLY_AP_COST)) {
-      const enemyHere = Object.values(state.units).some((u) => u.side !== unit.side && u.hexId === unit.hexId);
-      if (!enemyHere) actions.push({ type: 'RALLY', unitId, ...cr(RALLY_AP_COST) });
-    }
-    if (actionable(1)) actions.push({ type: 'STALL', unitId, ...cr(1) });
-    if (!carried && eff.canMove) {
-      const hiddenBase = hiddenMoveBase(state, unit);
-      if (actionable(hiddenBase)) {
-        for (const toHexId of neighbors(parseHexId(unit.hexId)).map(idOf)) {
-          if (!state.hexes[toHexId]) continue;
-          const legal =
-            tmpl.kind === 'vehicle'
-              ? planVehicleMove(state, unit, [toHexId]).ap != null
-              : moveCost(state, unit, toHexId).ap != null;
-          if (legal) actions.push({ type: 'HIDDEN_MOVE', unitId, toHexId, ...cr(hiddenBase) });
-        }
+  // §11.1: a Hidden Unit may take ANY Action — doing so simply reveals it as
+  // a side effect (already enforced generically by reduce()'s own top-of-
+  // function reveal sweep in reducer.ts, via its REVEAL_EXEMPT set). This
+  // block adds only the one Hidden-EXCLUSIVE option, Move While Hidden
+  // (§11.5, walking to any adjacent passable Hex while staying concealed —
+  // reveal, if any, resolves mid-move) — everything else (a revealing plain
+  // Move, Fire, Close Combat, Recon by Fire, ...) is added by the normal
+  // enumeration later in this same function, which now always runs.
+  //
+  // A REAL BUG, since fixed: this used to `return` here with ONLY Rally/
+  // Stall/Hidden-Move, silently hiding every other legal option from the UI
+  // — even though reduce() already accepted them (correctly revealing the
+  // Unit first) when dispatched directly. Caught live: a Hidden 45mm AT Gun
+  // and a Hidden Rifle Squad both had real Fire/Move-to-Close-Combat
+  // opportunities across an entire hotseat game that neither the UI nor this
+  // function's own callers could ever see, because this early return made
+  // them mechanically inaccessible, not just non-obvious.
+  if (unit.hidden && !carried && eff.canMove) {
+    const hiddenBase = hiddenMoveBase(state, unit);
+    if (actionable(hiddenBase)) {
+      for (const toHexId of neighbors(parseHexId(unit.hexId)).map(idOf)) {
+        if (!state.hexes[toHexId]) continue;
+        const legal =
+          tmpl.kind === 'vehicle'
+            ? planVehicleMove(state, unit, [toHexId]).ap != null
+            : moveCost(state, unit, toHexId).ap != null;
+        if (legal) actions.push({ type: 'HIDDEN_MOVE', unitId, toHexId, ...cr(hiddenBase) });
       }
     }
-    return actions;
   }
 
   // §17.2: may this Unit occupy a live Fortification on `hexId`? Mirrors
@@ -217,10 +226,16 @@ export function legalActionsForUnit(state: GameState, unitId: UnitId): Action[] 
     // already filters to Hexes out of all non-Hidden enemy LOS AND
     // genuinely passable (not just cheap) — the same helper `doHiddenMove`
     // validates against, so there's one source of truth for legality here.
-    const hiddenBase = hiddenMoveBase(state, unit);
-    if (actionable(hiddenBase)) {
-      for (const toHexId of becomingHiddenCandidates(state, unit)) {
-        actions.push({ type: 'HIDDEN_MOVE', unitId, toHexId, ...cr(hiddenBase) });
+    // Only for a currently-REVEALED Unit — an already-Hidden Unit's Hidden
+    // Move is §11.5 (move WHILE staying hidden, any adjacent passable Hex,
+    // reveal resolves mid-move if any), a different candidate set, already
+    // added above near the top of this function.
+    if (!unit.hidden) {
+      const hiddenBase = hiddenMoveBase(state, unit);
+      if (actionable(hiddenBase)) {
+        for (const toHexId of becomingHiddenCandidates(state, unit)) {
+          actions.push({ type: 'HIDDEN_MOVE', unitId, toHexId, ...cr(hiddenBase) });
+        }
       }
     }
   }
