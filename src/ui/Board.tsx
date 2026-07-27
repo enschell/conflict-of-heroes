@@ -216,11 +216,14 @@ export function Board() {
   // Load (§15.7) / Unload (§15.9) hexes — highlighted alongside Move so a
   // player can see where clicking will load onto or unload from a Vehicle.
   const transportTargets = new Set<string>();
-  // Hidden Move (§11.3-11.6) destinations, and Recon by Fire (§11.7) target
-  // Hexes — both hex-targeted like Move/Fire Smoke, so they get the same
-  // highlight-set treatment rather than an Inspector button list.
+  // Hidden Move (§11.3-11.6) destinations — hex-targeted like Move/Fire
+  // Smoke, so it gets the same highlight-set treatment rather than an
+  // Inspector button list. Recon by Fire (§11.7) deliberately gets NO board
+  // highlight (user request) — it's Ctrl+click-only now (store.ts's
+  // hexClick), and any highlight resembling an attack indicator for a merely
+  // SUSPECTED Hex read as misleadingly close to the real fireTargets red
+  // outline below. The chooser itself is the only affordance for it.
   const hiddenMoveTargets = new Set<string>();
-  const reconByFireTargets = new Set<string>();
   if (!losActive && selectedUnitId && game.units[selectedUnitId]) {
     for (const a of legalActionsForUnit(game, selectedUnitId)) {
       if (a.type === 'MOVE') moveTargets.add(a.toHexId);
@@ -231,7 +234,6 @@ export function Board() {
       if (a.type === 'INDIRECT_FIRE') indirectFireTargets.add(a.targetHexId);
       if (a.type === 'FIRE_SMOKE') smokeTargets.add(a.targetHexId);
       if (a.type === 'HIDDEN_MOVE') hiddenMoveTargets.add(a.toHexId);
-      if (a.type === 'RECON_BY_FIRE') reconByFireTargets.add(a.targetHexId);
       if (a.type === 'LOAD') {
         const v = game.units[a.vehicleId];
         if (v) transportTargets.add(v.hexId);
@@ -706,8 +708,6 @@ export function Board() {
                 {entryTargets.has(id) && <polygon points={pts} fill="#c77dff" opacity={0.3} stroke="#c77dff" strokeWidth={2} strokeDasharray="4 3" />}
                 {/* §11.3-11.6 Hidden Move destinations — violet, matching UnitCounter's own "HIDDEN" badge color. */}
                 {hiddenMoveTargets.has(id) && <polygon points={pts} fill="#8b5cf6" opacity={0.28} stroke="#8b5cf6" strokeWidth={2} strokeDasharray="6 2" />}
-                {/* §11.7 Recon by Fire target Hexes — a distinct dotted burnt-orange, attack-shaped but visually separate from fireTargets' solid red (a suspected Hex, not a confirmed one) and transportTargets' amber. */}
-                {reconByFireTargets.has(id) && <polygon points={pts} fill="none" stroke="#c2410c" strokeWidth={3} strokeDasharray="2 4" />}
                 {pathSet.has(id) && (
                   <>
                     <polygon points={pts} fill="#4aa3ff" opacity={0.32} stroke="#4aa3ff" strokeWidth={2} />

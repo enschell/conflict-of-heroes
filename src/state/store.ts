@@ -211,8 +211,12 @@ interface Store {
   pivotPicker: boolean;
   hover: Hover | null;
   picker: Picker | null;
-  /** When a clicked hex affords several actions (move-in vs attack), pick one. */
-  chooser: { hexId: HexId; x: number; y: number } | null;
+  /** When a clicked hex affords several actions (move-in vs attack), pick one.
+   *  `ctrl` records whether the click that opened it was a Ctrl+click — the
+   *  Hidden Move/Recon by Fire/Fire Smoke options are only ever legal to
+   *  OFFER (not just legal to the engine) when it was, so a plain click can't
+   *  accidentally reveal/attempt one of these deliberately-secondary actions. */
+  chooser: { hexId: HexId; x: number; y: number; ctrl: boolean } | null;
   pendingRoll: PendingRoll | null;
   pendingConfirm: PendingConfirm | null;
   pendingMines: PendingMines | null;
@@ -639,16 +643,23 @@ export const useGame = create<Store>((set, get) => {
     }
     const pending = res.state.pendingFacingChoices;
     const turnChangedTo = res.state.currentSide !== prevGame.currentSide ? res.state.currentSide : null;
-    const stressedForNewTurn = turnChangedTo
-      ? Object.values(res.state.units).find((u) => u.side === turnChangedTo && u.stressed)
-      : undefined;
-    const selectedUnitId = pending?.length
-      ? pending[pending.length - 1]!
-      : stressedForNewTurn
-        ? stressedForNewTurn.id
-        : get().selectedUnitId && res.state.units[get().selectedUnitId!]
-          ? get().selectedUnitId
-          : null;
+    // The free §4.5/§15.11 facing-correction window is turn-agnostic (it can
+    // be open for either side, almost always the side that just finished its
+    // own Turn), so it still wins selection priority. Otherwise (user
+    // request): deselect entirely once it becomes a new side's Turn, rather
+    // than auto-selecting that side's Stressed unit — the incoming player
+    // picks their own first unit. This has to be re-checked on every Action,
+    // not just the one where `currentSide` itself flips — a facing window
+    // that opens on the flipping Action stays selected on THAT dispatch (no
+    // new turnChangedTo yet), and would otherwise linger un-deselected once
+    // it closes a dispatch or two later, since by then the Turn had already
+    // changed on an earlier Action.
+    const stillOwnedByCurrentSide = (() => {
+      const cur = get().selectedUnitId;
+      const curUnit = cur ? res.state.units[cur] : null;
+      return curUnit && curUnit.side === res.state.currentSide ? cur : null;
+    })();
+    const selectedUnitId = pending?.length ? pending[pending.length - 1]! : stillOwnedByCurrentSide;
     const advancedRound = res.state.round > prevGame.round && res.state.phase === 'playing';
     if (opts.persist) saveAuto(res.state);
     set({
@@ -658,6 +669,11 @@ export const useGame = create<Store>((set, get) => {
         : {}),
       lastEvents: res.events,
       selectedUnitId,
+      // Group mode is per-Turn, not a standing preference — reset it (and any
+      // in-progress group selection/queue) the moment the Turn changes sides.
+      ...(turnChangedTo
+        ? { groupMode: false, groupSel: [], groupMoveQueue: [], groupMoveDone: [] }
+        : {}),
       turnBanner: advancedRound ? { round: res.state.round } : get().turnBanner,
     });
   };
@@ -690,10 +706,20 @@ export const useGame = create<Store>((set, get) => {
         const advancedRound = prevGame
           ? msg.state.round > prevGame.round && msg.state.phase === 'playing'
           : false;
+        const turnChangedTo = prevGame && msg.state.currentSide !== prevGame.currentSide ? msg.state.currentSide : null;
+        // Same "still owned by the currently-acting side" check as hotseat's
+        // applyReduceResult — re-checked on every STATE message, not just the
+        // one where currentSide itself flips (see that function's own
+        // comment for why a single turnChangedTo check isn't enough).
+        const cur = get().selectedUnitId;
+        const curUnit = cur ? msg.state.units[cur] : null;
         set({
           game: msg.state,
-          selectedUnitId:
-            get().selectedUnitId && msg.state.units[get().selectedUnitId!] ? get().selectedUnitId : null,
+          selectedUnitId: curUnit && curUnit.side === msg.state.currentSide ? cur : null,
+          // Same per-Turn Group-mode reset as hotseat's applyReduceResult.
+          ...(turnChangedTo
+            ? { groupMode: false, groupSel: [], groupMoveQueue: [], groupMoveDone: [] }
+            : {}),
           turnBanner: advancedRound ? { round: msg.state.round } : get().turnBanner,
         });
         break;
@@ -1410,7 +1436,7 @@ export const useGame = create<Store>((set, get) => {
           if (unloadAct) {
             const carrier = game.units[sel.carriedBy];
             if (carrier && hexId === carrier.hexId) {
-              set({ chooser: { hexId, x: opts.x, y: opts.y } });
+              set({ chooser: { hexId, x: opts.x, y: opts.y, ctrl: opts.ctrl } });
             } else {
               set({
                 pendingConfirm: {
@@ -1465,7 +1491,11 @@ export const useGame = create<Store>((set, get) => {
           !!enemy && acts.some((a) => a.type === 'INDIRECT_FIRE' && a.targetHexId === hexId);
         // Fire Smoke (§14.0) targets terrain, not a Unit — legal on ANY Hex a
         // Mortar can reach (occupied or not, e.g. to screen your own advance).
-        const canFireSmoke = acts.some((a) => a.type === 'FIRE_SMOKE' && a.targetHexId === hexId);
+        // Ctrl+click only — a deliberately-secondary action, not offered on a
+        // plain click (user request: keep the popup free of Recon by
+        // Fire/Become Hidden/Fire Smoke unless the click was Ctrl+held).
+        const canFireSmoke =
+          opts.ctrl && acts.some((a) => a.type === 'FIRE_SMOKE' && a.targetHexId === hexId);
         // Load (§15.7): clicking a hex with an eligible friendly Vehicle (same
         // hex or adjacent) may mean "just move/stack here" as well as "load onto
         // it" — offer both via the chooser when ambiguous (§5.4-style choice).
@@ -1474,11 +1504,15 @@ export const useGame = create<Store>((set, get) => {
         )?.id;
         const canLoad = !!loadVehicleId;
         // §11.3-11.6 Hidden Move — a Hex-targeted option like Move, offered
-        // whether becoming Hidden or already Hidden and moving.
-        const canHiddenMove = acts.some((a) => a.type === 'HIDDEN_MOVE' && a.toHexId === hexId);
+        // whether becoming Hidden or already Hidden and moving. Ctrl+click
+        // only, same reasoning as `canFireSmoke` above.
+        const canHiddenMove =
+          opts.ctrl && acts.some((a) => a.type === 'HIDDEN_MOVE' && a.toHexId === hexId);
         // §11.7 Recon by Fire — a Hex-targeted Attack, legal on any Hex in the
         // Fire Zone regardless of whether an enemy is known to be there.
-        const canReconByFire = acts.some((a) => a.type === 'RECON_BY_FIRE' && a.targetHexId === hexId);
+        // Ctrl+click only, same reasoning as `canFireSmoke` above.
+        const canReconByFire =
+          opts.ctrl && acts.some((a) => a.type === 'RECON_BY_FIRE' && a.targetHexId === hexId);
         const optionCount =
           Number(canMoveHere) +
           Number(canFire) +
@@ -1494,7 +1528,7 @@ export const useGame = create<Store>((set, get) => {
         // Several things are possible here (e.g. move INTO an enemy hex vs attack
         // it) → let the player choose (§5.4). Otherwise do the single option.
         if (optionCount > 1) {
-          set({ chooser: { hexId, x: opts.x, y: opts.y } });
+          set({ chooser: { hexId, x: opts.x, y: opts.y, ctrl: opts.ctrl } });
           return;
         }
         if (canMoveHere) {
@@ -1555,6 +1589,15 @@ export const useGame = create<Store>((set, get) => {
         set({ selectedUnitId: unspent[0]!.id });
       } else if (unspent.length > 1) {
         get().openPicker(hexId, unspent.map((u) => u.id), opts.x, opts.y);
+      } else if (own.length > 1) {
+        // All Spent, but more than one own Unit here (e.g. a Vehicle towing a
+        // Spent passenger) — still needs a picker, or the second Unit can
+        // never be reached by a plain click (only via the undiscoverable
+        // Ctrl+click picker above). Caught live: a Spent Truck carrying a
+        // Spent Maxim always silently selected the Maxim (`own[0]`), so the
+        // Truck itself — the only one with a real CAP-affordable Move —
+        // could never be selected to actually move it.
+        get().openPicker(hexId, own.map((u) => u.id), opts.x, opts.y);
       } else {
         set({ selectedUnitId: own[0]!.id }); // all spent — select for inspection
       }

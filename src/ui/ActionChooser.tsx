@@ -83,9 +83,17 @@ export function ActionChooser() {
   const ccCtx = enemy && !unit.carriedBy ? closeCombatContext(game, unit, enemy) : null;
   const canCC = !!ccCtx?.legal && !isHopelessShot(ccCtx.hitNumber);
   const indirectAct = acts.find((a) => a.type === 'INDIRECT_FIRE' && a.targetHexId === hexId);
-  const smokeAct = acts.find((a) => a.type === 'FIRE_SMOKE' && a.targetHexId === hexId);
-  const hiddenMoveAct = acts.find((a) => a.type === 'HIDDEN_MOVE' && a.toHexId === hexId);
-  const reconByFireAct = acts.find((a) => a.type === 'RECON_BY_FIRE' && a.targetHexId === hexId);
+  // Fire Smoke/Hidden Move/Recon by Fire are deliberately secondary — only
+  // offered when the click that opened this chooser was Ctrl+held (mirrors
+  // store.ts's hexClick gating for these same three Action types), so a plain
+  // click's popup never shows them even when the engine considers them legal.
+  const smokeAct = chooser.ctrl ? acts.find((a) => a.type === 'FIRE_SMOKE' && a.targetHexId === hexId) : undefined;
+  const hiddenMoveAct = chooser.ctrl
+    ? acts.find((a) => a.type === 'HIDDEN_MOVE' && a.toHexId === hexId)
+    : undefined;
+  const reconByFireAct = chooser.ctrl
+    ? acts.find((a) => a.type === 'RECON_BY_FIRE' && a.targetHexId === hexId)
+    : undefined;
   const loadAct =
     vehicleHere && acts.find((a) => a.type === 'LOAD' && a.vehicleId === vehicleHere.id);
   // §15.9: clicking a carried Unit's own (its Vehicle's) Hex is ambiguous

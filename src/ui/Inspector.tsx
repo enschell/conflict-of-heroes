@@ -265,7 +265,7 @@ export function Inspector() {
             </p>
           )}
           {hasReconByFire && (
-            <p className="dim">Recon by Fire: click a highlighted orange hex to attack a suspected Hidden Unit (§11.7).</p>
+            <p className="dim">Recon by Fire: Ctrl+click a hex to attack a suspected Hidden Unit (§11.7).</p>
           )}
           {hasMove && isVehicle && movePath.length === 0 && (
             <p className="dim">
