@@ -239,6 +239,66 @@ button.link {
   }
 }
 
+/* A Unit's counter + "destroyed by X at Y" caption, pinned to the top-left
+   (a Side A loss) or top-right (a Side B loss) of the board area — the
+   destroyed Unit's OWN side, so casualties land on "your" side of the screen
+   (KillBanner.tsx). Same non-blocking overlay treatment as .turn-flash. */
+.kill-banner {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: flex-start;
+  padding: 0.8rem;
+  pointer-events: none;
+  z-index: 6;
+}
+.kill-banner--left {
+  justify-content: flex-start;
+}
+.kill-banner--right {
+  justify-content: flex-end;
+}
+.kill-banner__card {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.5rem 0.8rem;
+  border-radius: 12px;
+  border: 2px solid var(--line);
+  background: rgba(10, 13, 8, 0.78);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.45);
+  animation: kill-banner-fade 3.2s ease-in-out forwards;
+}
+.kill-banner__counter {
+  width: 3rem;
+  height: 3rem;
+  flex: none;
+}
+.kill-banner__name {
+  font-weight: 700;
+  color: #ffc9c9;
+}
+.kill-banner__detail {
+  font-size: 0.85rem;
+  color: var(--dim);
+}
+@keyframes kill-banner-fade {
+  0% {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+  8% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  82% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
 /* ---- panels ---- */
 .panel {
   background: var(--panel);

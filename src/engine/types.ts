@@ -338,6 +338,57 @@ export interface HitMarkerDef {
 export type HitPile = Record<HitType, number>;
 
 // ---------------------------------------------------------------------------
+// Per-Unit combat statistics (cumulative for the whole game, not per-Round)
+// ---------------------------------------------------------------------------
+
+/** The kind of Hit a Unit inflicted, for `UnitStatEntry.hitsGiven` — a real
+ *  `HitType` when a marker was drawn/applied, or `'destroyed'` for a kill
+ *  resolved as `destroyed-immediate` (a critical, or the target already
+ *  carried a marker), which never draws a marker of its own (see
+ *  `hits.ts`'s `resolveHit`). */
+export type HitKindGiven = HitType | 'destroyed';
+
+/** One kill on `UnitStatEntry.kills` — "what unit it destroyed and in what
+ *  map and hex" (the user's own phrasing). */
+export interface UnitKillRecord {
+  targetId: UnitId;
+  targetTemplateId: string;
+  targetSide: SideId;
+  hexId: HexId;
+  mapNumber?: number;
+  round: number;
+}
+
+/**
+ * Cumulative combat stats for one Unit across the whole game. Only real
+ * Unit-vs-Unit combat updates these — ranged Fire, Close Combat, Indirect
+ * Fire, Recon by Fire's follow-up Attack, and their Group Action equivalents
+ * (credited to the Group's Leader only, matching how the Action's own Spent
+ * Check/AR bonus already centers on the Leader — supporters aren't
+ * separately credited). Deliberately excluded, as a scope decision: Mines
+ * Attacks (a Hex hazard, no attacking Unit) and OBA Strikes (attributed to a
+ * played Card, not an on-board Unit) — see `reducer.ts`'s `applyHit`/
+ * `destroyUnit` call sites and `cards.ts`'s `applyResolvedObaStrike`. Those
+ * still populate a 'destroyed' `GameEvent`'s presentation fields for the kill
+ * banner (`killerLabel` instead of `killerUnitId`), just not `unitStats`.
+ */
+export interface UnitStatEntry {
+  /** Fire/Close Combat/Indirect Fire/Recon-by-Fire-follow-up/Group-Attack
+   *  Actions taken by this Unit — once per Action, not per stacked target. */
+  timesFired: number;
+  /** Successful Hits this Unit scored on an enemy — once per resolved target
+   *  (a single stacked-Fire Action hitting 2 enemies counts as 2 here). */
+  hits: number;
+  hitsGiven: Partial<Record<HitKindGiven, number>>;
+  kills: UnitKillRecord[];
+  /** Times an enemy Attack resolved a roll against this Unit specifically
+   *  (once per stacked target, same granularity as `hits` above) — hit or miss. */
+  timesFiredUpon: number;
+  /** Times this Unit was actually hit by an enemy Attack. */
+  timesHit: number;
+}
+
+// ---------------------------------------------------------------------------
 // Obstacles (§17.7-§17.10: Barbed Wire, Mines, Road Block)
 // ---------------------------------------------------------------------------
 
@@ -589,6 +640,24 @@ export interface GameEvent {
    *  Strike-landed summary line, carrying its blast radius) — presentation
    *  hint for the UI (e.g. an explosion animation), never read by `reduce`. */
   hexIds?: HexId[];
+  /**
+   * 'destroyed' events only — presentation hints for the kill banner
+   * (`ui/KillBanner.tsx`), never read by `reduce`. Self-contained (the killed
+   * Unit is already deleted from `state.units` by the time this event is
+   * pushed, so its own id/template/side/hex are embedded directly rather than
+   * requiring a later lookup). `killerUnitId`/`killerTemplateId`/`killerSide`
+   * are absent for a kill with no attributable attacking Unit (Mines, OBA) —
+   * `killerLabel` names the cause instead in that case.
+   */
+  killedUnitId?: UnitId;
+  killedTemplateId?: string;
+  killedSide?: SideId;
+  killedHexId?: HexId;
+  killedMapNumber?: number;
+  killerUnitId?: UnitId;
+  killerTemplateId?: string;
+  killerSide?: SideId;
+  killerLabel?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -893,6 +962,14 @@ export interface GameState {
   obaAllowedRounds?: number[];
   /** See `MissionDef.cardConfig.drawPerRound` — carried through unchanged by `initGame`. */
   drawPerRound?: Partial<Record<SideId, { round1: number; eachRoundAfter: number }>>;
+  /** Cumulative per-Unit combat stats for the whole game — see `UnitStatEntry`
+   *  for exactly what updates it and what's deliberately excluded (Mines/OBA).
+   *  Optional (not `{}`-defaulted) so a save from before this field existed
+   *  still loads (a plain `JSON.parse` cast, `persistence.ts` — no migration
+   *  step for any optional `GameState` field); `initGame` sets it to `{}` for
+   *  every NEW game, and `reducer.ts`'s `ensureStats` lazily creates both the
+   *  record and a Unit's own entry on its first tracked Action either way. */
+  unitStats?: Record<UnitId, UnitStatEntry>;
 }
 
 /** Result of reducing an action: the next state plus emitted events. */

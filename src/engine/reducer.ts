@@ -120,8 +120,8 @@ export function reduce(state: GameState, action: Action): ReduceResult {
     next.pendingFacingChoices = [...(next.pendingFacingChoices ?? []), unitId];
   };
 
-  const log = (type: string, text: string, side?: SideId) => {
-    const e: GameEvent = { type, round: next.round, side, text };
+  const log = (type: string, text: string, side?: SideId, extra?: Partial<GameEvent>) => {
+    const e: GameEvent = { type, round: next.round, side, text, ...extra };
     events.push(e);
     next.log.push(e);
   };
@@ -258,7 +258,31 @@ export function reduce(state: GameState, action: Action): ReduceResult {
     else next.hitPiles.foot = returnHitToPile(next.hitPiles.foot, type);
   };
 
-  const destroyUnit = (unit: Unit) => {
+  // -- per-Unit combat stats (see types.ts's UnitStatEntry for full scope) --
+
+  const ensureStats = (unitId: string) => {
+    if (!next.unitStats) next.unitStats = {};
+    return (next.unitStats[unitId] ??= {
+      timesFired: 0,
+      hits: 0,
+      hitsGiven: {},
+      kills: [],
+      timesFiredUpon: 0,
+      timesHit: 0,
+    });
+  };
+  /** Once per Fire/Close Combat/Indirect Fire/Recon-follow-up/Group-Attack
+   *  Action attempt (hit or miss) — NOT per stacked target, see `recordTargeted`. */
+  const recordFired = (attackerId: string) => {
+    ensureStats(attackerId).timesFired += 1;
+  };
+  /** Once per individual enemy a resolved roll actually targeted (each target
+   *  in a stacked Fire, or the sole target of a single-target roll) — hit or miss. */
+  const recordTargeted = (targetId: string) => {
+    ensureStats(targetId).timesFiredUpon += 1;
+  };
+
+  const destroyUnit = (unit: Unit, attackerId?: string, causeLabel?: string) => {
     for (const hm of unit.hitMarkers) returnMarker(hm);
     // §15.11: a destroyed transport immediately unloads its passenger into the
     // hex (free, any facing) rather than dragging it down.
@@ -279,18 +303,59 @@ export function reduce(state: GameState, action: Action): ReduceResult {
     gainVp(next, opp, killVp);
     // §16.1: destroyed Trucks/Wagons do not adjust the CAPs Track (still count for VP above).
     if (!tmpl.noCapLossOnDestroy) applyUnitLoss(next.players[unit.side]);
+
+    const killer = attackerId ? next.units[attackerId] : undefined;
+    if (killer) {
+      ensureStats(killer.id).kills.push({
+        targetId: unit.id,
+        targetTemplateId: unit.templateId,
+        targetSide: unit.side,
+        hexId: unit.hexId,
+        mapNumber: next.hexes[unit.hexId]?.mapNumber,
+        round: next.round,
+      });
+    }
+
     delete next.units[unit.id];
-    log('destroyed', `${unit.id} destroyed (+${killVp} VP to ${opp})`, unit.side);
+    const killerText = killer ? killer.id : (causeLabel ?? 'unknown cause');
+    log('destroyed', `${unit.id} destroyed by ${killerText} at ${unit.hexId} (+${killVp} VP to ${opp})`, unit.side, {
+      killedUnitId: unit.id,
+      killedTemplateId: unit.templateId,
+      killedSide: unit.side,
+      killedHexId: unit.hexId,
+      killedMapNumber: next.hexes[unit.hexId]?.mapNumber,
+      killerUnitId: killer?.id,
+      killerTemplateId: killer?.templateId,
+      killerSide: killer?.side,
+      killerLabel: killer ? undefined : causeLabel,
+    });
   };
 
-  /** `fpColor` is the attack's resolved colour (§16.5 open-topped may override
+  /**
+   * `fpColor` is the attack's resolved colour (§16.5 open-topped may override
    * it to red), so the hit pile is routed by the ATTACK, not just the target's
-   * static template colour. */
-  const applyHit = (target: Unit, critical: boolean, fpColor: DRColor) => {
+   * static template colour. `attackerId`/`causeLabel`: see `UnitStatEntry`'s
+   * doc comment — pass the attacking Unit's id for real Unit-vs-Unit combat
+   * (updates `unitStats` on both sides + credits a kill), or omit it and pass
+   * a human-readable `causeLabel` instead for a hazard with no attacking Unit
+   * (Mines) — `unitStats` stays untouched either way for the target in that
+   * case, only the kill banner's `killerLabel` is populated.
+   */
+  const applyHit = (target: Unit, critical: boolean, fpColor: DRColor, attackerId?: string, causeLabel?: string) => {
     const res = resolveHit(next, target, critical, fpColor, next.rng);
     next.rng = res.rng;
+
+    if (attackerId) {
+      ensureStats(target.id).timesHit += 1;
+      const s = ensureStats(attackerId);
+      s.hits += 1;
+      const kind =
+        res.outcome.kind === 'destroyed-immediate' ? 'destroyed' : res.outcome.hitType;
+      s.hitsGiven[kind] = (s.hitsGiven[kind] ?? 0) + 1;
+    }
+
     if (res.outcome.kind === 'destroyed-immediate') {
-      destroyUnit(target);
+      destroyUnit(target, attackerId, causeLabel);
       return;
     }
     if (res.pile) {
@@ -299,7 +364,7 @@ export function reduce(state: GameState, action: Action): ReduceResult {
     }
     if (res.outcome.kind === 'destroyed-drawn') {
       returnMarker(res.outcome.hitType);
-      destroyUnit(target);
+      destroyUnit(target, attackerId, causeLabel);
     } else {
       target.hitMarkers = [res.outcome.hitType];
       log('hit', `${target.id} takes a hit: ${res.outcome.hitType}`, target.side);
@@ -343,7 +408,7 @@ export function reduce(state: GameState, action: Action): ReduceResult {
           `vs Hit# ${roll.hitNumber} -> ${roll.critical ? 'CRITICAL' : roll.hit ? 'hit' : 'miss'}`,
         target.side,
       );
-      if (roll.hit) applyHit(target, roll.critical, roll.fpColor);
+      if (roll.hit) applyHit(target, roll.critical, roll.fpColor, undefined, 'Mines');
     }
   };
 
@@ -632,7 +697,9 @@ export function reduce(state: GameState, action: Action): ReduceResult {
     // with its own roll, for the single fire cost already paid above.
     const stack = rollStackFire(next, attacker, target.hexId, diceMod, 0, useFlamethrower);
     next.rng = stack.rng;
+    recordFired(attacker.id);
     for (const { targetId, roll } of stack.rolls) {
+      recordTargeted(targetId);
       log(
         'fire',
         `${attacker.id} fires${useFlamethrower ? ' (Flamethrower, §18.0)' : ''} at ${targetId}: rolled ` +
@@ -643,7 +710,7 @@ export function reduce(state: GameState, action: Action): ReduceResult {
       );
       if (roll.hit) {
         const t = next.units[targetId];
-        if (t) applyHit(t, roll.critical, roll.fpColor);
+        if (t) applyHit(t, roll.critical, roll.fpColor, attacker.id);
       }
     }
     // §17.11: ranged Fire also resolves a second roll against the target Hex's
@@ -728,6 +795,8 @@ export function reduce(state: GameState, action: Action): ReduceResult {
 
     const attackRoll = rollAttack(next, attacker, target, hitMod);
     next.rng = attackRoll.rng;
+    recordFired(attacker.id);
+    recordTargeted(target.id);
     log(
       'fire',
       `${attacker.id} fires on the just-revealed ${target.id}: rolled ${attackRoll.dice[0]}+${attackRoll.dice[1]}=` +
@@ -735,7 +804,7 @@ export function reduce(state: GameState, action: Action): ReduceResult {
         `${attackRoll.isFlank ? ' (flank)' : ''} -> ${attackRoll.critical ? 'CRITICAL' : attackRoll.hit ? 'hit' : 'miss'}`,
       attacker.side,
     );
-    if (attackRoll.hit) applyHit(target, attackRoll.critical, attackRoll.fpColor);
+    if (attackRoll.hit) applyHit(target, attackRoll.critical, attackRoll.fpColor, attacker.id);
 
     afterAction(attacker, cost);
     return finish();
@@ -800,6 +869,8 @@ export function reduce(state: GameState, action: Action): ReduceResult {
 
     const roll = rollCloseCombat(next, attacker, target, diceMod, 0, useFlamethrower);
     next.rng = roll.rng;
+    recordFired(attacker.id);
+    recordTargeted(target.id);
     log(
       'cc',
       `${attacker.id} close-combats${useFlamethrower ? ' (Flamethrower, §18.0)' : ''} ${target.id}: rolled ` +
@@ -807,7 +878,7 @@ export function reduce(state: GameState, action: Action): ReduceResult {
         `${roll.critical ? 'CRITICAL' : roll.hit ? 'hit' : 'miss'}`,
       attacker.side,
     );
-    if (roll.hit) applyHit(target, roll.critical, roll.fpColor);
+    if (roll.hit) applyHit(target, roll.critical, roll.fpColor, attacker.id);
     // §17.10: Mines attack the Unit initiating Close Combat here — NOT the
     // Unit defending it (explicitly excluded, since it isn't "initiating").
     resolveMines(attacker.hexId, [attacker.id], a.minesCapMods);
@@ -837,7 +908,9 @@ export function reduce(state: GameState, action: Action): ReduceResult {
 
     const result = rollIndirectFire(next, attacker, a.targetHexId, a.spotterHexId, diceMod);
     next.rng = result.rng;
+    recordFired(attacker.id);
     for (const roll of result.rolls) {
+      recordTargeted(roll.targetId);
       log(
         'indirectFire',
         `${attacker.id} fires indirectly (spotter ${a.spotterHexId}) at ${roll.targetId}: rolled ` +
@@ -847,7 +920,7 @@ export function reduce(state: GameState, action: Action): ReduceResult {
       );
       if (roll.hit) {
         const t = next.units[roll.targetId];
-        if (t) applyHit(t, roll.critical, roll.fpColor);
+        if (t) applyHit(t, roll.critical, roll.fpColor, attacker.id);
       }
     }
     afterAction(attacker, cost);
@@ -1082,11 +1155,16 @@ export function reduce(state: GameState, action: Action): ReduceResult {
     if (player.capCurrent < capNeeded) return deny('not enough CAP');
     player.capCurrent -= capNeeded;
 
+    // Stats credited to the Leader only, not supporters — matches how the
+    // Action's own Spent Check/AR bonus already center on the Leader (§10.7/
+    // §10.8); see `UnitStatEntry`'s doc comment.
     if (isCloseCombat) {
       // §7.7.3/§10.6: Close Combat resolves against ONE chosen target, not the
       // whole hex — the leader's AR carries the +1AR-per-supporter bonus.
       const roll = rollCloseCombat(next, leader, target, capMod, arBonus);
       next.rng = roll.rng;
+      recordFired(leader.id);
+      recordTargeted(target.id);
       log(
         'groupCc',
         `Group [${members.map((m) => m.id).join('+')}] close-combats ${target.id}: rolled ` +
@@ -1094,12 +1172,14 @@ export function reduce(state: GameState, action: Action): ReduceResult {
           `(AR ${roll.ar} / DR ${roll.dr}) -> ${roll.critical ? 'CRITICAL' : roll.hit ? 'hit' : 'miss'}`,
         leader.side,
       );
-      if (roll.hit) applyHit(target, roll.critical, roll.fpColor);
+      if (roll.hit) applyHit(target, roll.critical, roll.fpColor, leader.id);
     } else {
       // §7.5.1: one shot at the hex resolves against every stacked enemy.
       const stack = rollStackFire(next, leader, target.hexId, capMod, arBonus);
       next.rng = stack.rng;
+      recordFired(leader.id);
       for (const { targetId, roll } of stack.rolls) {
+        recordTargeted(targetId);
         log(
           'groupFire',
           `Group [${members.map((m) => m.id).join('+')}] fires at ${targetId}: rolled ${roll.dice[0]}+${roll.dice[1]}=` +
@@ -1109,7 +1189,7 @@ export function reduce(state: GameState, action: Action): ReduceResult {
         );
         if (roll.hit) {
           const t = next.units[targetId];
-          if (t) applyHit(t, roll.critical, roll.fpColor);
+          if (t) applyHit(t, roll.critical, roll.fpColor, leader.id);
         }
       }
     }

@@ -183,6 +183,7 @@ export function initGame(def: FirefightDef): GameState {
     drawPerRound: def.cardConfig?.drawPerRound,
     obaAllowedRounds: def.cardConfig?.obaAllowedRounds,
     missionCardText: def.missionCardText,
+    unitStats: {},
   };
 
   // Set victory-hex control: the Mission-authored starting owner is the

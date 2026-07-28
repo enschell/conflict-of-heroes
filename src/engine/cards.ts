@@ -336,11 +336,22 @@ function destroyUnitFromOba(state: GameState, unit: Unit): void {
   gainVp(state, opp, killVp);
   if (!tmpl.noCapLossOnDestroy) applyUnitLoss(state.players[unit.side]);
   delete state.units[unit.id];
+  // Kill-banner presentation fields (see reducer.ts's destroyUnit and
+  // types.ts's GameEvent) — no killerUnitId/killerTemplateId/killerSide, same
+  // "no attributable attacking Unit" scope decision Mines gets: an OBA Strike
+  // is attributed to a played Card, not an on-board Unit (also why this kill
+  // never touches `state.unitStats`, unlike reducer.ts's own destroyUnit).
   state.log.push({
     type: 'destroyed',
     round: state.round,
     side: unit.side,
-    text: `${unit.id} destroyed by OBA (+${killVp} VP to ${opp})`,
+    text: `${unit.id} destroyed by OBA Strike at ${unit.hexId} (+${killVp} VP to ${opp})`,
+    killedUnitId: unit.id,
+    killedTemplateId: unit.templateId,
+    killedSide: unit.side,
+    killedHexId: unit.hexId,
+    killedMapNumber: state.hexes[unit.hexId]?.mapNumber,
+    killerLabel: 'Off-Board Artillery Strike',
   });
 }
 

@@ -17,6 +17,7 @@ import { GroupPanel } from './ui/GroupPanel';
 import { HandPanel } from './ui/HandPanel';
 import { HoverPanel } from './ui/HoverPanel';
 import { Inspector } from './ui/Inspector';
+import { KillBanner } from './ui/KillBanner';
 import { Log } from './ui/Log';
 import { MinesConfirm } from './ui/MinesConfirm';
 import { MissionEditor } from './ui/editor/MissionEditor';
@@ -187,6 +188,7 @@ export function App() {
         <div className="board-frame">
           <Board />
           <TurnFlash />
+          <KillBanner />
         </div>
         <ActionChooser />
         <DiceRoller />
